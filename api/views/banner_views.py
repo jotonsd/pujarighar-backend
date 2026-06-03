@@ -50,6 +50,13 @@ def update_banner(request, pk):
         banner = Banner.objects.get(id=pk)
     except Banner.DoesNotExist:
         return ApiResponse(message="Not found", errors="Not found", status_code=404)
+
+    if request.data.get('clear_image') == '1' and not request.FILES.get('image'):
+        if banner.image:
+            banner.image.delete(save=False)
+        banner.image = None
+        banner.save(update_fields=['image'])
+
     serializer = BannerSerializer(banner, data=request.data, partial=True, context={'request': request})
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)

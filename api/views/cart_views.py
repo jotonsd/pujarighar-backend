@@ -20,7 +20,7 @@ _checkout_svc = CheckoutService()
 @permission_classes([IsAuthenticated, IsCustomer])
 def get_cart(request):
     cart = _cart_svc.get_or_create_cart(request.user)
-    return ApiResponse(message="Cart retrieved", data=CartSerializer(cart).data)
+    return ApiResponse(message="Cart retrieved", data=CartSerializer(cart, context={'request': request}).data)
 
 
 @api_view(['POST'])

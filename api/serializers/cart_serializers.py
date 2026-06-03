@@ -11,13 +11,21 @@ class CartItemSerializer(serializers.ModelSerializer):
     line_total      = serializers.SerializerMethodField()
     is_package      = serializers.BooleanField(source='product.is_package', read_only=True)
     package_items   = serializers.SerializerMethodField()
+    product_image   = serializers.SerializerMethodField()
 
     class Meta:
         model  = CartItem
         fields = ['id', 'product', 'product_name_bn', 'product_name_en',
                   'unit_price', 'quantity', 'line_total', 'stock_on_hand',
-                  'is_package', 'package_items']
+                  'is_package', 'package_items', 'product_image']
         read_only_fields = ['id']
+
+    def get_product_image(self, obj):
+        img = obj.product.images.order_by('order').first()
+        if not img:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(img.image.url) if request else img.image.url
 
     def get_stock_on_hand(self, obj):
         return str(obj.product.stock_on_hand)

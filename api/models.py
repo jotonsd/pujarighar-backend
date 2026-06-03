@@ -242,6 +242,7 @@ class CartItem(BaseModel):
 
     class Meta:
         unique_together = [['cart', 'product']]
+        ordering        = ['created_at']
 
     def __str__(self):
         return f'{self.product.name_bn} × {self.quantity}'
