@@ -1,0 +1,67 @@
+from django.contrib.auth.password_validation import validate_password
+from rest_framework import serializers
+from rest_framework_simplejwt.tokens import RefreshToken
+from api.models import User
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    password     = serializers.CharField(write_only=True, validators=[validate_password])
+    full_name_bn = serializers.CharField(required=False, allow_blank=True)
+    full_name_en = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model  = User
+        fields = ['email', 'phone', 'password', 'preferred_language', 'full_name_bn', 'full_name_en']
+
+    def create(self, validated_data):
+        full_name_bn = validated_data.pop('full_name_bn', '')
+        full_name_en = validated_data.pop('full_name_en', '')
+        user = User.objects.create_user(**validated_data)
+        user.profile.full_name_bn = full_name_bn
+        user.profile.full_name_en = full_name_en
+        user.profile.save()
+        return user
+
+    def to_representation(self, instance):
+        from api.serializers.user_serializers import UserSerializer
+        refresh = RefreshToken.for_user(instance)
+        return {
+            'user':    UserSerializer(instance).data,
+            'access':  str(refresh.access_token),
+            'refresh': str(refresh),
+        }
+
+
+class LoginSerializer(serializers.Serializer):
+    email    = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        from django.contrib.auth import authenticate
+        user = authenticate(email=data['email'], password=data['password'])
+        if not user:
+            raise serializers.ValidationError({
+                'message_bn': 'ইমেইল বা পাসওয়ার্ড ভুল',
+                'message_en': 'Invalid email or password',
+            })
+        if not user.is_active:
+            raise serializers.ValidationError({
+                'message_bn': 'অ্যাকাউন্ট নিষ্ক্রিয়',
+                'message_en': 'Account is inactive',
+            })
+        data['user'] = user
+        return data
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, validators=[validate_password])
+
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError({
+                'message_bn': 'বর্তমান পাসওয়ার্ড ভুল',
+                'message_en': 'Current password is incorrect',
+            })
+        return value
