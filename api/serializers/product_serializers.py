@@ -20,10 +20,11 @@ class PackageItemReadSerializer(serializers.ModelSerializer):
     component_name_bn = serializers.CharField(source='component.name_bn', read_only=True)
     component_name_en = serializers.CharField(source='component.name_en', read_only=True)
     component_sku     = serializers.CharField(source='component.sku', read_only=True)
+    unit_price        = serializers.DecimalField(source='component.unit_price', max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model  = ProductPackageItem
-        fields = ['id', 'component_id', 'component_name_bn', 'component_name_en', 'component_sku', 'quantity']
+        fields = ['id', 'component_id', 'component_name_bn', 'component_name_en', 'component_sku', 'quantity', 'unit_price']
 
 
 class PackageItemWriteSerializer(serializers.Serializer):
