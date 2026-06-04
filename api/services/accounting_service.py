@@ -123,6 +123,49 @@ class AccountingService:
         from django.utils import timezone
 
         today = timezone.now().date()
+
+        # Build full 12-month spine for current year
+        from datetime import date
+        from api.models import JournalLine
+        current_year = today.year
+        all_months = [date(current_year, m, 1) for m in range(1, 13)]
+
+        # Monthly revenue from delivered orders (current year)
+        revenue_qs = (
+            SalesOrder.objects
+            .filter(status='DELIVERED', created_at__year=current_year)
+            .annotate(month=TruncMonth('created_at'))
+            .values('month')
+            .annotate(revenue=Sum('grand_total'))
+        )
+        revenue_map = {row['month'].date().replace(day=1): row['revenue'] or Decimal('0') for row in revenue_qs}
+
+        # Monthly expense from journal lines (current year)
+        expense_qs = (
+            JournalLine.objects
+            .filter(account__account_type='EXPENSE', journal_entry__created_at__year=current_year)
+            .annotate(month=TruncMonth('journal_entry__created_at'))
+            .values('month')
+            .annotate(expense=Sum('debit'))
+        )
+        expense_map = {row['month'].date().replace(day=1): row['expense'] or Decimal('0') for row in expense_qs}
+
+        monthly_chart = [
+            {
+                'month':   str(m),
+                'revenue': str(revenue_map.get(m, Decimal('0'))),
+                'expense': str(expense_map.get(m, Decimal('0'))),
+            }
+            for m in all_months
+        ]
+
+        # Order status breakdown
+        statuses = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'ON_THE_WAY', 'DELIVERED', 'RETURNED', 'CANCELLED']
+        status_breakdown = [
+            {'status': s, 'count': SalesOrder.objects.filter(status=s).count()}
+            for s in statuses
+        ]
+
         return {
             'today_orders':          SalesOrder.objects.filter(created_at__date=today).count(),
             'today_revenue':         str(SalesOrder.objects.filter(created_at__date=today, status='DELIVERED').aggregate(t=Sum('grand_total'))['t'] or Decimal('0')),
@@ -130,11 +173,6 @@ class AccountingService:
             'low_stock_count':       sum(1 for p in Product.objects.filter(is_active=True) if p.stock_on_hand <= 5),
             'total_customers':       User.objects.filter(role='CUSTOMER', is_active=True).count(),
             'total_products':        Product.objects.filter(is_active=True).count(),
-            'monthly_revenue_chart': list(
-                SalesOrder.objects.filter(status='DELIVERED')
-                .annotate(month=TruncMonth('created_at'))
-                .values('month')
-                .annotate(revenue=Sum('grand_total'))
-                .order_by('month')[:12]
-            ),
+            'monthly_revenue_chart': monthly_chart,
+            'status_breakdown':      status_breakdown,
         }
