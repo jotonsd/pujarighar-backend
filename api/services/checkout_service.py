@@ -154,14 +154,17 @@ class CheckoutService:
 
     def _notify_admins(self, order: SalesOrder) -> None:
         from api.models import Notification, User
-        admins = User.objects.filter(role='ADMIN', is_active=True)
+        admins  = User.objects.filter(role='ADMIN', is_active=True)
+        amount  = f'৳{int(order.grand_total):,}'
+        name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
+        name_en = order.shipping_name_en or order.shipping_name_bn or '—'
         notifications = [
             Notification(
                 user=admin,
                 title_bn=f'নতুন অর্ডার — {order.order_number}',
                 title_en=f'New Order — {order.order_number}',
-                body_bn=f'{order.shipping_name_bn} থেকে ৳{order.grand_total} মূল্যের অর্ডার।',
-                body_en=f'Order of ৳{order.grand_total} from {order.shipping_name_en or order.shipping_name_bn}.',
+                body_bn=f'{name_bn} থেকে **{amount}** মূল্যের অর্ডার।',
+                body_en=f'Order of **{amount}** from {name_en}.',
                 reference_type='ORDER_CREATED',
                 reference_id=order.id,
             )
