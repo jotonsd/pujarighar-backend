@@ -73,6 +73,7 @@ class GuestCheckoutService:
         )
 
         self._create_sale_journal(order)
+        self._notify_admins(order)
         logger.info(f"Guest order created: {order.order_number} phone={order.shipping_phone}")
         return order
 
@@ -151,3 +152,20 @@ class GuestCheckoutService:
                 JournalLine.objects.create(
                     journal_entry=entry, account=acct, debit=debit, credit=credit,
                 )
+
+    def _notify_admins(self, order: SalesOrder) -> None:
+        from api.models import Notification, User
+        admins = User.objects.filter(role='ADMIN', is_active=True)
+        notifications = [
+            Notification(
+                user=admin,
+                title_bn=f'নতুন অর্ডার (গেস্ট) — {order.order_number}',
+                title_en=f'New Guest Order — {order.order_number}',
+                body_bn=f'{order.shipping_name_bn} থেকে ৳{order.grand_total} মূল্যের অর্ডার।',
+                body_en=f'Order of ৳{order.grand_total} from {order.shipping_name_bn}.',
+                reference_type='ORDER_CREATED',
+                reference_id=order.id,
+            )
+            for admin in admins
+        ]
+        Notification.objects.bulk_create(notifications)
