@@ -107,4 +107,9 @@ urlpatterns = [
     path('hero-slides/create/',           views.create_hero_slide,    name='hero-slide-create'),
     path('hero-slides/<uuid:pk>/update/', views.update_hero_slide,    name='hero-slide-update'),
     path('hero-slides/<uuid:pk>/delete/', views.delete_hero_slide,    name='hero-slide-delete'),
+
+    # ─── Notifications ────────────────────────────────────────────────────────
+    path('notifications/',                      views.list_notifications, name='notification-list'),
+    path('notifications/mark-all-read/',        views.mark_all_read,      name='notification-mark-all'),
+    path('notifications/<uuid:pk>/mark-read/',  views.mark_one_read,      name='notification-mark-one'),
 ]

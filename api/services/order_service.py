@@ -110,6 +110,7 @@ class OrderService:
             order=order, from_status=prev, to_status=to_status,
             changed_by=user, note_bn=note_bn, note_en=note_en,
         )
+        self._notify_customer(order, to_status)
         logger.info(f"Order {order.order_number}: {prev} → {to_status}")
         return order
 
@@ -187,3 +188,29 @@ class OrderService:
             acct = self._acct(code)
             if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _notify_customer(self, order: SalesOrder, to_status: str) -> None:
+        if order.is_guest or not order.customer_id:
+            return
+        from api.models import Notification
+        STATUS_LABELS = {
+            'CONFIRMED':  {'bn': 'নিশ্চিত হয়েছে',        'en': 'Confirmed'},
+            'PACKED':     {'bn': 'প্যাক হয়েছে',           'en': 'Packed'},
+            'ASSIGNED':   {'bn': 'ডেলিভারি বরাদ্দ হয়েছে', 'en': 'Delivery Assigned'},
+            'ON_THE_WAY': {'bn': 'পথে আছে',               'en': 'Out for Delivery'},
+            'DELIVERED':  {'bn': 'ডেলিভারি হয়েছে',        'en': 'Delivered'},
+            'RETURNED':   {'bn': 'ফেরত হয়েছে',            'en': 'Returned'},
+            'CANCELLED':  {'bn': 'বাতিল হয়েছে',           'en': 'Cancelled'},
+        }
+        label = STATUS_LABELS.get(to_status)
+        if not label:
+            return
+        Notification.objects.create(
+            user_id=order.customer_id,
+            title_bn=f'অর্ডার {label["bn"]} — {order.order_number}',
+            title_en=f'Order {label["en"]} — {order.order_number}',
+            body_bn=f'আপনার অর্ডার #{order.order_number} এখন {label["bn"]}।',
+            body_en=f'Your order #{order.order_number} is now {label["en"]}.',
+            reference_type='STATUS_CHANGED',
+            reference_id=order.id,
+        )

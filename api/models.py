@@ -472,3 +472,24 @@ class HeroSlide(BaseModel):
 
     def __str__(self):
         return self.title_en or self.title_bn or f'Slide {self.order}'
+
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+
+class Notification(models.Model):
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user           = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    title_bn       = models.CharField(max_length=200)
+    title_en       = models.CharField(max_length=200)
+    body_bn        = models.TextField(blank=True)
+    body_en        = models.TextField(blank=True)
+    is_read        = models.BooleanField(default=False)
+    reference_type = models.CharField(max_length=30, blank=True)   # ORDER_CREATED, STATUS_CHANGED
+    reference_id   = models.UUIDField(null=True, blank=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.title_en} → {self.user.email}'
