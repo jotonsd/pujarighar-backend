@@ -265,6 +265,7 @@ class Command(BaseCommand):
                 StockMovement.objects.create(
                     product=p, movement_type='PURCHASE',
                     quantity=Decimal(stock),
+                    unit_cost=Decimal(cost),
                     created_by=admin,
                     note_bn='প্রাথমিক স্টক', note_en='Initial stock',
                 )
