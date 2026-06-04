@@ -105,7 +105,7 @@ class Product(BaseModel):
     description_en = models.TextField(blank=True)
     sku            = models.CharField(max_length=100, unique=True)
     category       = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='products')
-    unit_price     = models.DecimalField(max_digits=12, decimal_places=2)
+    unit_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     cost_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     unit_bn        = models.CharField(max_length=50, default='পিস')
     unit_en        = models.CharField(max_length=50, default='piece')
@@ -181,6 +181,7 @@ class StockMovement(models.Model):
     product       = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='stock_movements')
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
     quantity      = models.DecimalField(max_digits=12, decimal_places=3)
+    unit_cost     = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # buying price per unit at time of purchase
     reference_id  = models.UUIDField(null=True, blank=True)
     note_bn       = models.TextField(blank=True)
     note_en       = models.TextField(blank=True)
@@ -407,8 +408,8 @@ class JournalEntry(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     entry_number   = models.CharField(max_length=30, unique=True)
     reference_type = models.CharField(max_length=20, choices=[
-        ('SALE', 'বিক্রয়'), ('PAYMENT', 'পেমেন্ট'),
-        ('RETURN', 'ফেরত'), ('ADJUSTMENT', 'সমন্বয়'),
+        ('PURCHASE', 'ক্রয়'), ('SALE', 'বিক্রয়'),
+        ('PAYMENT', 'পেমেন্ট'), ('RETURN', 'ফেরত'), ('ADJUSTMENT', 'সমন্বয়'),
     ])
     reference_id   = models.UUIDField(null=True, blank=True)
     description_bn = models.TextField(blank=True)

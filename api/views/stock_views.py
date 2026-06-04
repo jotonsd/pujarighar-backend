@@ -46,6 +46,8 @@ def adjust_stock(request, pk):
         movement = _svc.adjust_stock(
             product, d['movement_type'], d['quantity'],
             d.get('note_bn', ''), d.get('note_en', ''), request.user,
+            unit_cost=d.get('unit_cost', 0),
+            unit_price=d.get('unit_price'),
         )
         return ApiResponse(
             message="Stock adjusted",

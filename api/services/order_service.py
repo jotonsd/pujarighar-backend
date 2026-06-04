@@ -26,6 +26,14 @@ class OrderService:
 
         if params.get('status'):
             qs = qs.filter(status=params['status'])
+        if params.get('payment_status'):
+            qs = qs.filter(payment_status=params['payment_status'])
+        if params.get('order_number'):
+            qs = qs.filter(order_number__icontains=params['order_number'])
+        if params.get('phone'):
+            qs = qs.filter(shipping_phone__icontains=params['phone'])
+        if params.get('name'):
+            qs = qs.filter(shipping_name_bn__icontains=params['name'])
         if params.get('customer') and role == 'ADMIN':
             qs = qs.filter(customer_id=params['customer'])
         if params.get('from'):

@@ -1,7 +1,9 @@
 import logging
 from decimal import Decimal
+from django.db import transaction
 from django.db.models import Q
-from api.models import Category, Product, ProductPackageItem, StockMovement
+from django.utils import timezone
+from api.models import Account, Category, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +83,60 @@ class StockService:
         }
 
     def adjust_stock(self, product: Product, movement_type: str, quantity: Decimal,
-                     note_bn: str, note_en: str, user) -> StockMovement:
+                     note_bn: str, note_en: str, user,
+                     unit_cost: Decimal = Decimal('0'),
+                     unit_price: Decimal = None) -> StockMovement:
         movement = StockMovement(
             product=product, movement_type=movement_type,
-            quantity=quantity, note_bn=note_bn, note_en=note_en, created_by=user,
+            quantity=quantity, unit_cost=unit_cost,
+            note_bn=note_bn, note_en=note_en, created_by=user,
         )
         movement.clean()
         movement.save()
+
+        if movement_type == 'PURCHASE' and unit_cost > 0:
+            product.cost_price = unit_cost
+            if unit_price is not None and unit_price > 0:
+                product.unit_price = unit_price
+                product.save(update_fields=['cost_price', 'unit_price'])
+            else:
+                product.save(update_fields=['cost_price'])
+            self._create_purchase_journal(product, quantity, unit_cost, movement, user)
+
         logger.info(f"Stock adjusted: {product.sku} {movement_type} {quantity}")
         return movement
+
+    def _create_purchase_journal(self, product: Product, quantity: Decimal,
+                                  unit_cost: Decimal, movement: StockMovement, user) -> None:
+        today        = timezone.now().date()
+        prefix       = f'JE-{today:%Y%m%d}-'
+        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
+        entry_number = f'{prefix}{last + 1:04d}'
+        total_cost   = unit_cost * quantity
+
+        entry = JournalEntry.objects.create(
+            entry_number=entry_number, reference_type='PURCHASE',
+            reference_id=movement.id,
+            description_bn=f'স্টক ক্রয় — {product.name_bn}',
+            description_en=f'Stock Purchase — {product.name_en}',
+            created_by=user, is_posted=True,
+        )
+
+        def _acct(code):
+            try:
+                return Account.objects.get(code=code)
+            except Account.DoesNotExist:
+                return None
+
+        for code, debit, credit in [
+            ('1300', total_cost,        Decimal('0')),   # DR Inventory
+            ('1000', Decimal('0'),      total_cost),     # CR Cash
+        ]:
+            acct = _acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(
+                    journal_entry=entry, account=acct, debit=debit, credit=credit,
+                )
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')
