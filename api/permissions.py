@@ -26,6 +26,11 @@ class IsAdminOrWarehouse(BasePermission):
         return request.user.is_authenticated and request.user.role in ('ADMIN', 'WAREHOUSE')
 
 
+class IsAdminOrDelivery(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role in ('ADMIN', 'DELIVERY')
+
+
 class IsAdminOrReadOnly(BasePermission):
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:

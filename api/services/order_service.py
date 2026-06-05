@@ -72,6 +72,26 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def mark_cod_paid(self, order: SalesOrder, user: User) -> SalesOrder:
+        if order.payment_method != 'COD':
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র ক্যাশ অন ডেলিভারি অর্ডারের জন্য প্রযোজ্য',
+                'message_en': 'Only applicable for Cash on Delivery orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'এই অর্ডার ইতিমধ্যে পরিশোধিত',
+                'message_en': 'Order is already paid',
+            })
+        order.payment_status = 'PAID'
+        order.save(update_fields=['payment_status'])
+        # Create payment journal only if one doesn't exist yet for this order
+        if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+            self._create_payment_journal(order, user)
+        logger.info(f'COD payment marked for order {order.order_number} by {user.email}')
+        return order
+
+    @transaction.atomic
     def return_order(self, order: SalesOrder, user: User, note_bn: str = '', note_en: str = '') -> SalesOrder:
         order = self._transition(order, 'RETURNED', user, note_bn, note_en)
         for item in order.items.select_related('product'):

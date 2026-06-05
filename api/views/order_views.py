@@ -12,7 +12,7 @@ from api.serializers.order_serializers import (
 from api.services.order_service import OrderService
 from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin, IsAdminOrWarehouse, IsDelivery
+from api.permissions import IsAdmin, IsAdminOrWarehouse, IsAdminOrDelivery, IsDelivery
 
 logger = logging.getLogger(__name__)
 _svc = OrderService()
@@ -210,6 +210,21 @@ def return_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
+def mark_cod_paid(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+    try:
+        updated = _svc.mark_cod_paid(order, request.user)
+        return ApiResponse(message='Payment recorded', data=SalesOrderSerializer(updated).data)
+    except Exception as e:
+        logger.error(f'Mark COD paid error: {e}', exc_info=True)
         return api_error(e)
 
 

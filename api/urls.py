@@ -81,6 +81,8 @@ urlpatterns = [
     path('orders/<uuid:pk>/deliver/',            views.deliver_order,      name='order-deliver'),
     path('orders/<uuid:pk>/return/',             views.return_order,       name='order-return'),
     path('orders/<uuid:pk>/cancel/',             views.cancel_order,       name='order-cancel'),
+    path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),
+    path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
 
     # ─── Accounting ───────────────────────────────────────────────────────────
     path('accounting/accounts/',                      views.list_accounts,       name='account-list'),

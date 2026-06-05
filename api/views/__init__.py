@@ -32,6 +32,7 @@ from .order_views import (
     track_by_order_number,
     confirm_order, pack_order, assign_delivery, dispatch_order,
     deliver_order, return_order, cancel_order, pos_create_order,
+    mark_cod_paid,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
@@ -44,3 +45,4 @@ from .accounting_views import (
 )
 from .notification_views import list_notifications, mark_all_read, mark_one_read
 from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount
+from .invoice_views import download_invoice
