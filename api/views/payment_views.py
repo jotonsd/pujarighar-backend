@@ -4,6 +4,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from api.models import PaymentTransaction
 from api.services.sslcommerz_service import SSLCommerzService
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,6 @@ def payment_fail(request):
     tran_id = post.get('tran_id', '')
     logger.warning(f'Payment failed for tran_id={tran_id}')
 
-    from api.models import PaymentTransaction
     try:
         txn = PaymentTransaction.objects.get(tran_id=tran_id)
         if txn.status == 'INITIATED':
@@ -83,7 +83,6 @@ def payment_cancel(request):
     tran_id = post.get('tran_id', '')
     logger.info(f'Payment cancelled for tran_id={tran_id}')
 
-    from api.models import PaymentTransaction
     try:
         txn = PaymentTransaction.objects.get(tran_id=tran_id)
         if txn.status == 'INITIATED':

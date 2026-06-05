@@ -6,7 +6,7 @@ from api.models import Cart, CartItem, Product
 class CartItemSerializer(serializers.ModelSerializer):
     product_name_bn = serializers.CharField(source='product.name_bn', read_only=True)
     product_name_en = serializers.CharField(source='product.name_en', read_only=True)
-    unit_price      = serializers.DecimalField(source='product.unit_price', max_digits=12, decimal_places=2, read_only=True)
+    unit_price      = serializers.SerializerMethodField()
     stock_on_hand   = serializers.SerializerMethodField()
     line_total      = serializers.SerializerMethodField()
     is_package      = serializers.BooleanField(source='product.is_package', read_only=True)
@@ -30,8 +30,11 @@ class CartItemSerializer(serializers.ModelSerializer):
     def get_stock_on_hand(self, obj):
         return str(obj.product.stock_on_hand)
 
+    def get_unit_price(self, obj):
+        return str(obj.product.effective_price)
+
     def get_line_total(self, obj):
-        return str(obj.product.unit_price * obj.quantity)
+        return str(obj.product.effective_price * obj.quantity)
 
     def get_package_items(self, obj):
         if not obj.product.is_package:
@@ -56,7 +59,7 @@ class CartSerializer(serializers.ModelSerializer):
         fields = ['id', 'items', 'subtotal', 'item_count']
 
     def get_subtotal(self, obj):
-        return str(sum(item.product.unit_price * item.quantity for item in obj.items.all()))
+        return str(sum(item.product.effective_price * item.quantity for item in obj.items.all()))
 
     def get_item_count(self, obj):
         return obj.items.count()

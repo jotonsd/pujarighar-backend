@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment
+from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User
 
 
 class SalesOrderItemSerializer(serializers.ModelSerializer):
@@ -161,7 +161,6 @@ class AssignDeliverySerializer(serializers.Serializer):
     delivery_person_id = serializers.UUIDField()
 
     def validate_delivery_person_id(self, value):
-        from api.models import User
         if not User.objects.filter(id=value, role='DELIVERY', is_active=True).exists():
             raise serializers.ValidationError({
                 'message_bn': 'ডেলিভারিম্যান পাওয়া যায়নি',

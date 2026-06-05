@@ -1,7 +1,10 @@
 import logging
+from datetime import date
 from decimal import Decimal
 from django.db.models import Sum
-from api.models import Account, JournalEntry, JournalLine
+from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
+from django.utils import timezone
+from api.models import Account, JournalEntry, JournalLine, JournalLine as JL, SalesOrder, User, Product
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +103,6 @@ class AccountingService:
         return {'revenue': str(revenue), 'expense': str(expense), 'net_profit': str(revenue - expense)}
 
     def get_sales_summary(self, from_date: str, to_date: str, group_by: str) -> list:
-        from api.models import SalesOrder
-        from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
-
         qs = SalesOrder.objects.filter(status='DELIVERED')
         if from_date:
             qs = qs.filter(created_at__date__gte=from_date)
@@ -118,15 +118,9 @@ class AccountingService:
         )
 
     def get_dashboard_summary(self) -> dict:
-        from api.models import SalesOrder, User, Product
-        from django.db.models.functions import TruncMonth
-        from django.utils import timezone
-
         today = timezone.now().date()
 
         # Build full 12-month spine for current year
-        from datetime import date
-        from api.models import JournalLine
         current_year = today.year
         all_months = [date(current_year, m, 1) for m in range(1, 13)]
 

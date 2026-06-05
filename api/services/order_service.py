@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     SalesOrder, OrderStatusLog, DeliveryAssignment, User,
-    StockMovement, Account, JournalEntry, JournalLine,
+    StockMovement, Account, JournalEntry, JournalLine, Notification,
 )
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,6 @@ class OrderService:
     def _notify_customer(self, order: SalesOrder, to_status: str) -> None:
         if order.is_guest or not order.customer_id:
             return
-        from api.models import Notification
         STATUS_LABELS = {
             'CONFIRMED':  {'bn': 'নিশ্চিত হয়েছে',        'en': 'Confirmed'},
             'PACKED':     {'bn': 'প্যাক হয়েছে',           'en': 'Packed'},

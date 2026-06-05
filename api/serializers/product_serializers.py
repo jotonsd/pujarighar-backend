@@ -42,11 +42,28 @@ class PackageItemWriteSerializer(serializers.Serializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    stock_on_hand = serializers.DecimalField(max_digits=12, decimal_places=3, read_only=True)
-    images        = ProductImageSerializer(many=True, read_only=True)
-    package_items = PackageItemReadSerializer(many=True, read_only=True)
-    category_name_bn = serializers.CharField(source='category.name_bn', read_only=True)
-    category_name_en = serializers.CharField(source='category.name_en', read_only=True)
+    stock_on_hand        = serializers.DecimalField(max_digits=12, decimal_places=3, read_only=True)
+    images               = ProductImageSerializer(many=True, read_only=True)
+    package_items        = PackageItemReadSerializer(many=True, read_only=True)
+    category_name_bn     = serializers.CharField(source='category.name_bn', read_only=True)
+    category_name_en     = serializers.CharField(source='category.name_en', read_only=True)
+    effective_price      = serializers.SerializerMethodField()
+    active_discount_type  = serializers.SerializerMethodField()
+    active_discount_value = serializers.SerializerMethodField()
+
+    def _active_discount(self, obj):
+        return obj.discounts.filter(is_active=True).order_by('-created_at').first()
+
+    def get_effective_price(self, obj):
+        return str(obj.effective_price)
+
+    def get_active_discount_type(self, obj):
+        d = self._active_discount(obj)
+        return d.discount_type if d else None
+
+    def get_active_discount_value(self, obj):
+        d = self._active_discount(obj)
+        return str(d.discount_value) if d else None
 
     class Meta:
         model  = Product
@@ -54,7 +71,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'name_bn', 'name_en',
             'description_bn', 'description_en',
             'sku', 'category', 'category_name_bn', 'category_name_en',
-            'unit_price', 'cost_price',
+            'unit_price', 'cost_price', 'effective_price',
+            'active_discount_type', 'active_discount_value',
             'unit_bn', 'unit_en',
             'is_package', 'discount_type', 'discount_value', 'is_active',
             'stock_on_hand', 'images', 'package_items',

@@ -1,7 +1,9 @@
+from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import User
+from api.serializers.user_serializers import UserSerializer
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -23,7 +25,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
     def to_representation(self, instance):
-        from api.serializers.user_serializers import UserSerializer
         refresh = RefreshToken.for_user(instance)
         return {
             'user':    UserSerializer(instance).data,
@@ -33,16 +34,26 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email    = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+    identifier = serializers.CharField()   # email or phone
+    password   = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        from django.contrib.auth import authenticate
-        user = authenticate(email=data['email'], password=data['password'])
+        identifier = data['identifier'].strip()
+        password   = data['password']
+
+        # Try to find user by phone first, then email
+        user = None
+        if identifier.startswith('01') and identifier.isdigit():
+            user = User.objects.filter(phone=identifier).first()
+            if user and not user.check_password(password):
+                user = None
+        if user is None:
+            user = authenticate(email=identifier, password=password)
+
         if not user:
             raise serializers.ValidationError({
-                'message_bn': 'ইমেইল বা পাসওয়ার্ড ভুল',
-                'message_en': 'Invalid email or password',
+                'message_bn': 'ইমেইল/ফোন বা পাসওয়ার্ড ভুল',
+                'message_en': 'Invalid email/phone or password',
             })
         if not user.is_active:
             raise serializers.ValidationError({

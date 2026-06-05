@@ -7,6 +7,8 @@ from api.models import CartItem
 from api.serializers.cart_serializers import CartSerializer, AddToCartSerializer, UpdateCartItemSerializer
 from api.services.cart_service import CartService
 from api.services.checkout_service import CheckoutService
+from api.services.sslcommerz_service import SSLCommerzService
+from django.conf import settings as django_settings
 from api.serializers.order_serializers import SalesOrderSerializer
 from api.utils.response import ApiResponse
 from api.permissions import IsCustomer
@@ -90,8 +92,6 @@ def checkout(request):
         data  = SalesOrderSerializer(order).data
 
         if payment_method == 'ONLINE':
-            from api.services.sslcommerz_service import SSLCommerzService
-            from django.conf import settings as django_settings
             gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
             data = {**data, 'gateway_url': gateway_url}
             return ApiResponse(message="Proceed to payment", data=data, status_code=status.HTTP_201_CREATED)

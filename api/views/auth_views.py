@@ -4,6 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from api.models import SalesOrder
 from api.serializers.auth_serializers import RegisterSerializer, LoginSerializer
 from api.serializers.user_serializers import UserSerializer
 from api.services.auth_service import AuthService
@@ -26,6 +27,8 @@ def register(request):
     try:
         user   = serializer.save()
         tokens = _auth.register(user)
+        # Link any guest orders placed with this phone number
+        _link_guest_orders(user)
         return ApiResponse(
             message="Registration successful",
             data={'user': UserSerializer(user).data, **tokens},
@@ -34,6 +37,13 @@ def register(request):
     except Exception as e:
         logger.error(f"Register error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=status.HTTP_400_BAD_REQUEST)
+
+
+def _link_guest_orders(user) -> None:
+    linked = SalesOrder.objects.filter(is_guest=True, shipping_phone=user.phone, customer__isnull=True)
+    count  = linked.update(customer=user, is_guest=False)
+    if count:
+        logger.info(f"Linked {count} guest orders to user {user.email}")
 
 
 @api_view(['POST'])

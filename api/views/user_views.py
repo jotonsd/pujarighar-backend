@@ -4,6 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 from api.models import User
+from api.serializers.auth_serializers import ChangePasswordSerializer
 from api.serializers.user_serializers import (
     UserSerializer, ProfileSerializer,
     AdminCreateUserSerializer, AdminUpdateUserSerializer, ChangeRoleSerializer,
@@ -159,7 +160,6 @@ def update_me(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def change_password(request):
-    from api.serializers.auth_serializers import ChangePasswordSerializer
     serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
@@ -175,3 +175,16 @@ def change_password(request):
 def list_delivery_persons(request):
     persons = _svc.list_delivery_persons()
     return ApiResponse(message="Delivery persons retrieved", data=UserSerializer(persons, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def lookup_user_by_phone(request):
+    phone = request.query_params.get('phone', '').strip()
+    if not phone:
+        return ApiResponse(message="Phone required", errors="phone param required", status_code=400)
+    try:
+        user = User.objects.get(phone=phone)
+        return ApiResponse(message="User found", data=UserSerializer(user).data)
+    except User.DoesNotExist:
+        return ApiResponse(message="Not found", errors="No user with this phone", status_code=404)

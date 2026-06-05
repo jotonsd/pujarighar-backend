@@ -4,6 +4,8 @@ from rest_framework.permissions import AllowAny
 
 from api.serializers.guest_serializers import GuestCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
+from api.services.sslcommerz_service import SSLCommerzService
+from django.conf import settings as django_settings
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -30,8 +32,6 @@ def guest_checkout(request):
         }
 
         if serializer.validated_data.get('payment_method') == 'ONLINE':
-            from api.services.sslcommerz_service import SSLCommerzService
-            from django.conf import settings as django_settings
             gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
             data['gateway_url'] = gateway_url
             return ApiResponse(message="Proceed to payment", data=data, status_code=201)

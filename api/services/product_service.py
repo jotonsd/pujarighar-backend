@@ -1,9 +1,10 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, Q, Subquery, OuterRef, Value, When
+from django.db.models.functions import Greatest
 from django.utils import timezone
-from api.models import Account, Category, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
+from api.models import Account, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class CategoryService:
 
 class ProductService:
 
-    def list_products(self, category=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False):
+    def list_products(self, category=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None):
         qs = Product.objects.select_related('category').prefetch_related('images', 'package_items')
         if not include_inactive:
             qs = qs.filter(is_active=True)
@@ -52,6 +53,30 @@ class ProductService:
             qs = qs.filter(unit_price__gte=min_price)
         if max_price is not None:
             qs = qs.filter(unit_price__lte=max_price)
+        if ordering in ('price_asc', 'price_desc'):
+            disc_type = Subquery(
+                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+                .values('discount_type')[:1]
+            )
+            disc_val = Subquery(
+                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+                .values('discount_value')[:1]
+            )
+            qs = qs.annotate(_disc_type=disc_type, _disc_val=disc_val).annotate(
+                _effective_price=Case(
+                    When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
+                        F('unit_price') - F('unit_price') * F('_disc_val') / Value(Decimal('100')),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )),
+                    When(_disc_type='FLAT', then=ExpressionWrapper(
+                        Greatest(Value(Decimal('0')), F('unit_price') - F('_disc_val')),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )),
+                    default=F('unit_price'),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                )
+            )
+            qs = qs.order_by('_effective_price' if ordering == 'price_asc' else '-_effective_price')
         return qs
 
     def get_product(self, pk: str) -> Product:

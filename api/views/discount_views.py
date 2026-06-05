@@ -1,0 +1,63 @@
+import logging
+from rest_framework import serializers as drf_serializers
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from api.models import Discount, Product
+from api.permissions import IsAdmin
+from api.utils.response import ApiResponse
+
+logger = logging.getLogger(__name__)
+
+
+class DiscountSerializer(drf_serializers.ModelSerializer):
+    product_name_bn = drf_serializers.CharField(source='product.name_bn', read_only=True)
+    product_name_en = drf_serializers.CharField(source='product.name_en', read_only=True)
+    product_sku     = drf_serializers.CharField(source='product.sku', read_only=True)
+
+    class Meta:
+        model  = Discount
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_sku',
+                  'discount_type', 'discount_value', 'note', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def list_discounts(request):
+    product_id = request.query_params.get('product')
+    qs = Discount.objects.select_related('product')
+    if product_id:
+        qs = qs.filter(product_id=product_id)
+    return ApiResponse(message="Discounts retrieved", data=DiscountSerializer(qs, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def create_discount(request):
+    s = DiscountSerializer(data=request.data)
+    if not s.is_valid():
+        return ApiResponse(message="Validation failed", errors=s.errors, status_code=422)
+    discount = s.save()
+    return ApiResponse(message="Discount created", data=DiscountSerializer(discount).data, status_code=201)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def toggle_discount(request, pk):
+    try:
+        discount = Discount.objects.get(pk=pk)
+        discount.is_active = not discount.is_active
+        discount.save(update_fields=['is_active'])
+        return ApiResponse(message="Updated", data=DiscountSerializer(discount).data)
+    except Discount.DoesNotExist:
+        return ApiResponse(message="Not found", errors="Not found", status_code=404)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def delete_discount(request, pk):
+    try:
+        Discount.objects.get(pk=pk).delete()
+        return ApiResponse(message="Deleted")
+    except Discount.DoesNotExist:
+        return ApiResponse(message="Not found", errors="Not found", status_code=404)

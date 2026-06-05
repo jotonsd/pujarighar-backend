@@ -1,4 +1,5 @@
 import logging
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import User
 
@@ -27,7 +28,6 @@ class AuthService:
 
     def logout(self, refresh_token: str) -> None:
         """Blacklist the refresh token."""
-        from rest_framework_simplejwt.exceptions import TokenError
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()

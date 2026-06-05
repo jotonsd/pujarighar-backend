@@ -3,7 +3,7 @@ from .user_views import (
     list_users, create_user, get_user, update_user, delete_user,
     activate_user, deactivate_user, change_role,
     get_me, update_me, change_password,
-    list_delivery_persons,
+    list_delivery_persons, lookup_user_by_phone,
 )
 from .product_views import (
     list_products, create_product, get_product, update_product, delete_product,
@@ -43,3 +43,4 @@ from .accounting_views import (
     get_dashboard_summary,
 )
 from .notification_views import list_notifications, mark_all_read, mark_one_read
+from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount

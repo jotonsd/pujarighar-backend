@@ -125,6 +125,16 @@ class Product(BaseModel):
         return f'{self.name_bn} ({self.sku})'
 
     @property
+    def effective_price(self) -> Decimal:
+        active = self.discounts.filter(is_active=True).order_by('-created_at').first()
+        if active:
+            if active.discount_type == 'PERCENTAGE':
+                return (self.unit_price * (1 - active.discount_value / 100)).quantize(Decimal('0.01'))
+            if active.discount_type == 'FLAT':
+                return max(Decimal('0'), self.unit_price - active.discount_value)
+        return self.unit_price
+
+    @property
     def stock_on_hand(self) -> Decimal:
         if self.is_package:
             # Package stock = max whole packages assembable from component stock
@@ -472,6 +482,26 @@ class HeroSlide(BaseModel):
 
     def __str__(self):
         return self.title_en or self.title_bn or f'Slide {self.order}'
+
+
+# ─── Discounts ───────────────────────────────────────────────────────────────
+
+class Discount(models.Model):
+    TYPES = [('PERCENTAGE', 'শতাংশ (%)'), ('FLAT', 'নির্দিষ্ট পরিমাণ (৳)')]
+
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    product        = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='discounts')
+    discount_type  = models.CharField(max_length=12, choices=TYPES)
+    discount_value = models.DecimalField(max_digits=10, decimal_places=2)
+    note           = models.CharField(max_length=200, blank=True)
+    is_active      = models.BooleanField(default=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.product.name_bn} — {self.discount_type} {self.discount_value}'
 
 
 # ─── Notifications ────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import logging
 import requests
 from django.conf import settings
-from api.models import SalesOrder, PaymentTransaction
+from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +102,6 @@ class SSLCommerzService:
         Returns the order if successful, None otherwise.
         Guards against double-processing.
         """
-        from api.models import OrderStatusLog, User
-
         try:
             txn = PaymentTransaction.objects.select_related('order').get(tran_id=tran_id)
         except PaymentTransaction.DoesNotExist:

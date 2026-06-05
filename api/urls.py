@@ -13,7 +13,8 @@ urlpatterns = [
     path('users/me/',                      views.get_me,               name='user-me'),
     path('users/me/update/',               views.update_me,            name='user-me-update'),
     path('users/me/change-password/',      views.change_password,      name='user-change-password'),
-    path('users/delivery-persons/',        views.list_delivery_persons, name='delivery-persons'),
+    path('users/delivery-persons/',        views.list_delivery_persons,  name='delivery-persons'),
+    path('users/lookup-by-phone/',         views.lookup_user_by_phone,   name='user-lookup-phone'),
     path('users/create/',                  views.create_user,          name='user-create'),
     path('users/<uuid:pk>/',               views.get_user,             name='user-detail'),
     path('users/<uuid:pk>/update/',        views.update_user,          name='user-update'),
@@ -107,6 +108,12 @@ urlpatterns = [
     path('hero-slides/create/',           views.create_hero_slide,    name='hero-slide-create'),
     path('hero-slides/<uuid:pk>/update/', views.update_hero_slide,    name='hero-slide-update'),
     path('hero-slides/<uuid:pk>/delete/', views.delete_hero_slide,    name='hero-slide-delete'),
+
+    # ─── Discounts ────────────────────────────────────────────────────────────
+    path('discounts/',                      views.list_discounts,   name='discount-list'),
+    path('discounts/create/',               views.create_discount,  name='discount-create'),
+    path('discounts/<uuid:pk>/toggle/',     views.toggle_discount,  name='discount-toggle'),
+    path('discounts/<uuid:pk>/delete/',     views.delete_discount,  name='discount-delete'),
 
     # ─── Notifications ────────────────────────────────────────────────────────
     path('notifications/',                      views.list_notifications, name='notification-list'),

@@ -7,6 +7,7 @@ from api.models import (
     SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
+    User, Notification,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class GuestCheckoutService:
         last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
         order_number = f'{prefix}{last + 1:04d}'
 
-        subtotal    = sum(i['product'].unit_price * i['quantity'] for i in items)
+        subtotal    = sum(i['product'].effective_price * i['quantity'] for i in items)
         grand_total = subtotal
 
         order = SalesOrder.objects.create(
@@ -60,9 +61,9 @@ class GuestCheckoutService:
                 product         = item['product'],
                 product_name_bn = item['product'].name_bn,
                 product_name_en = item['product'].name_en,
-                unit_price      = item['product'].unit_price,
+                unit_price      = item['product'].effective_price,
                 quantity        = item['quantity'],
-                line_total      = item['product'].unit_price * item['quantity'],
+                line_total      = item['product'].effective_price * item['quantity'],
             )
             self._deduct_stock(item['product'], item['quantity'], order.id)
 
@@ -80,7 +81,6 @@ class GuestCheckoutService:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _get_system_user(self):
-        from api.models import User
         return User.objects.filter(role='ADMIN').first()
 
     def _validate_stock(self, product, quantity: Decimal) -> None:
@@ -154,7 +154,6 @@ class GuestCheckoutService:
                 )
 
     def _notify_admins(self, order: SalesOrder) -> None:
-        from api.models import Notification, User
         admins  = User.objects.filter(role='ADMIN', is_active=True)
         amount  = f'৳{int(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
