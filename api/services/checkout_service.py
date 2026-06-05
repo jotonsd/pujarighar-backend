@@ -4,11 +4,21 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
-    Cart, SalesOrder, SalesOrderItem, OrderStatusLog,
+    Cart, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
     ShippingAddress, Notification, User,
 )
+
+_DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
+
+def _delivery_charge(district: str, zone: str | None = None) -> Decimal:
+    cfg = DeliveryCharge.get()
+    if zone == 'inside':
+        return cfg.inside_dhaka
+    if zone == 'outside':
+        return cfg.outside_dhaka
+    return cfg.inside_dhaka if district.strip().lower() in _DHAKA_DISTRICTS else cfg.outside_dhaka
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +26,7 @@ logger = logging.getLogger(__name__)
 class CheckoutService:
 
     @transaction.atomic
-    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None) -> SalesOrder:
+    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None, delivery_zone: str | None = None) -> SalesOrder:
         cart  = Cart.objects.select_for_update().get(user=user)
         items = list(cart.items.select_related('product').select_for_update())
 
@@ -56,8 +66,9 @@ class CheckoutService:
         last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
         order_number = f'{prefix}{last + 1:04d}'
 
-        subtotal    = sum(i.product.effective_price * i.quantity for i in items)
-        grand_total = subtotal
+        subtotal         = sum(i.product.effective_price * i.quantity for i in items)
+        delivery         = _delivery_charge(s_district or '', delivery_zone)
+        grand_total      = subtotal + delivery
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
@@ -74,6 +85,7 @@ class CheckoutService:
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
             subtotal            = subtotal,
+            delivery_charge     = delivery,
             grand_total         = grand_total,
         )
 
@@ -140,11 +152,12 @@ class CheckoutService:
                 return None
 
         for code, debit, credit in [
-            ('1100', order.grand_total,  Decimal('0')),
-            ('4000', Decimal('0'),       order.subtotal),
-            ('2100', Decimal('0'),       order.tax_amount),
-            ('5000', cogs,               Decimal('0')),
-            ('1300', Decimal('0'),       cogs),
+            ('1100', order.grand_total,        Decimal('0')),
+            ('4000', Decimal('0'),             order.subtotal),
+            ('4200', Decimal('0'),             Decimal(str(order.delivery_charge))),
+            ('2100', Decimal('0'),             order.tax_amount),
+            ('5000', cogs,                     Decimal('0')),
+            ('1300', Decimal('0'),             cogs),
         ]:
             acct = _acct(code)
             if acct and (debit or credit):

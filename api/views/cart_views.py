@@ -81,6 +81,7 @@ def clear_cart(request):
 def checkout(request):
     payment_method      = request.data.get('payment_method', 'COD')
     shipping_address_id = request.data.get('shipping_address_id') or None
+    delivery_zone       = request.data.get('delivery_zone') or None
     if payment_method not in ('COD', 'ONLINE'):
         return ApiResponse(message="Invalid payment method", errors="Use COD or ONLINE", status_code=422)
     try:
@@ -88,6 +89,7 @@ def checkout(request):
             request.user,
             payment_method=payment_method,
             shipping_address_id=shipping_address_id,
+            delivery_zone=delivery_zone,
         )
         data  = SalesOrderSerializer(order).data
 

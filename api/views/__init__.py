@@ -46,3 +46,4 @@ from .accounting_views import (
 from .notification_views import list_notifications, mark_all_read, mark_one_read
 from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount
 from .invoice_views import download_invoice
+from .delivery_charge_views import get_delivery_charges, update_delivery_charges

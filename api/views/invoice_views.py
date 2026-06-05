@@ -55,7 +55,8 @@ def _build_html(order: SalesOrder, lang: str) -> str:
     for i, item in enumerate(order.items.all(), 1):
         item_name = item.product_name_bn if isBn else item.product_name_en
         qty       = int(float(item.quantity))
-        pkg_badge = f'<span class="pkg-badge">{t("প্যাকেজ", "Pkg")}</span>' if item.product.is_package else ''
+        is_pkg    = item.product.is_package
+        pkg_badge = f'<span class="pkg-badge">{t("প্যাকেজ", "Pkg")}</span>' if is_pkg else ''
         rows_html += f"""
         <tr class="{'alt' if i % 2 == 0 else ''}">
             <td class="center">{i}</td>
@@ -63,6 +64,19 @@ def _build_html(order: SalesOrder, lang: str) -> str:
             <td class="right">{qty}</td>
             <td class="right">{_fmt(item.unit_price)}</td>
             <td class="right bold">{_fmt(item.line_total)}</td>
+        </tr>"""
+        if is_pkg:
+            for pkg_item in item.product.package_items.all():
+                comp      = pkg_item.component
+                comp_name = comp.name_bn if isBn else comp.name_en
+                comp_qty  = int(float(pkg_item.quantity)) * qty
+                rows_html += f"""
+        <tr class="pkg-component-row">
+            <td></td>
+            <td class="pkg-component">↳ {comp_name}</td>
+            <td class="right pkg-component">{comp_qty}</td>
+            <td class="right pkg-component">—</td>
+            <td class="right pkg-component">—</td>
         </tr>"""
 
     totals_html = f"""
@@ -76,6 +90,13 @@ def _build_html(order: SalesOrder, lang: str) -> str:
         <tr>
             <td colspan="4" class="right green">{t('ছাড়', 'Discount')}</td>
             <td class="right green">− {_fmt(order.discount_amount)}</td>
+        </tr>"""
+
+    if Decimal(str(order.delivery_charge)) > 0:
+        totals_html += f"""
+        <tr>
+            <td colspan="4" class="right gray">{t('ডেলিভারি চার্জ', 'Delivery Charge')}</td>
+            <td class="right">{_fmt(order.delivery_charge)}</td>
         </tr>"""
 
     if Decimal(str(order.tax_amount)) > 0:
@@ -187,6 +208,14 @@ def _build_html(order: SalesOrder, lang: str) -> str:
     border-radius: 2mm;
     margin-right: 1.5mm;
   }}
+  /* Package component sub-rows */
+  .pkg-component-row td {{ border-bottom: none; background: #f9fafb; }}
+  .pkg-component {{
+    font-size: 8.5pt;
+    color: #6b7280;
+    padding-top: 1mm !important;
+    padding-bottom: 1mm !important;
+  }}
   /* Totals */
   .totals-row td {{ border-bottom: none; padding: 1.5mm 3mm; }}
   .grand-total-row td {{
@@ -260,7 +289,9 @@ def _build_html(order: SalesOrder, lang: str) -> str:
 @permission_classes([IsAuthenticated])
 def download_invoice(request, pk):
     try:
-        order = SalesOrder.objects.prefetch_related('items__product').get(pk=pk)
+        order = SalesOrder.objects.prefetch_related(
+            'items__product__package_items__component',
+        ).get(pk=pk)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
 

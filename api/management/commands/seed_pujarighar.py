@@ -25,6 +25,7 @@ class Command(BaseCommand):
             ('3000', 'মালিকানা মূলধন',      'Owner Equity',         'EQUITY'),
             ('4000', 'বিক্রয় আয়',          'Sales Revenue',        'REVENUE'),
             ('4100', 'বিক্রয় ফেরত',         'Sales Returns',        'REVENUE'),
+            ('4200', 'ডেলিভারি আয়',         'Delivery Income',      'REVENUE'),
             ('5000', 'বিক্রীত মালের খরচ',   'Cost of Goods Sold',   'EXPENSE'),
             ('5100', 'পরিচালনা খরচ',        'Operating Expense',    'EXPENSE'),
         ]

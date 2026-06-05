@@ -68,6 +68,9 @@ class OrderService:
         order = self._transition(order, 'DELIVERED', user)
         order.delivery.delivered_at = timezone.now()
         order.delivery.save(update_fields=['delivered_at'])
+        if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
+            order.payment_status = 'PAID'
+            order.save(update_fields=['payment_status'])
         self._create_payment_journal(order, user)
         return order
 
@@ -176,11 +179,12 @@ class OrderService:
             created_by=user, is_posted=True,
         )
         for code, debit, credit in [
-            ('4000', order.subtotal,   Decimal('0')),
-            ('2100', order.tax_amount, Decimal('0')),
-            ('1300', cogs,             Decimal('0')),
-            ('1000', Decimal('0'),     order.grand_total),
-            ('5000', Decimal('0'),     cogs),
+            ('4000', order.subtotal,                    Decimal('0')),
+            ('4200', Decimal(str(order.delivery_charge)), Decimal('0')),
+            ('2100', order.tax_amount,                  Decimal('0')),
+            ('1300', cogs,                              Decimal('0')),
+            ('1000', Decimal('0'),                      order.grand_total),
+            ('5000', Decimal('0'),                      cogs),
         ]:
             acct = self._acct(code)
             if acct and (debit or credit):
@@ -199,11 +203,12 @@ class OrderService:
             created_by=user, is_posted=True,
         )
         for code, debit, credit in [
-            ('4000', order.subtotal,    Decimal('0')),
-            ('2100', order.tax_amount,  Decimal('0')),
-            ('1300', cogs,              Decimal('0')),
-            ('1100', Decimal('0'),      order.grand_total),
-            ('5000', Decimal('0'),      cogs),
+            ('4000', order.subtotal,                    Decimal('0')),
+            ('4200', Decimal(str(order.delivery_charge)), Decimal('0')),
+            ('2100', order.tax_amount,                  Decimal('0')),
+            ('1300', cogs,                              Decimal('0')),
+            ('1100', Decimal('0'),                      order.grand_total),
+            ('5000', Decimal('0'),                      cogs),
         ]:
             acct = self._acct(code)
             if acct and (debit or credit):

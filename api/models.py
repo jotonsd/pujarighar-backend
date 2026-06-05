@@ -311,6 +311,7 @@ class SalesOrder(BaseModel):
     subtotal            = models.DecimalField(max_digits=12, decimal_places=2)
     discount_amount     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
     notes_bn            = models.TextField(blank=True)
     notes_en            = models.TextField(blank=True)
@@ -502,6 +503,26 @@ class Discount(models.Model):
 
     def __str__(self):
         return f'{self.product.name_bn} — {self.discount_type} {self.discount_value}'
+
+
+# ─── Delivery Charge Settings ─────────────────────────────────────────────────
+
+class DeliveryCharge(models.Model):
+    inside_dhaka  = models.DecimalField(max_digits=8, decimal_places=2, default=60)
+    outside_dhaka = models.DecimalField(max_digits=8, decimal_places=2, default=120)
+    updated_at    = models.DateTimeField(auto_now=True)
+    updated_by    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        verbose_name = 'Delivery Charge Settings'
+
+    @classmethod
+    def get(cls) -> 'DeliveryCharge':
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f'ডেলিভারি চার্জ — ঢাকা: ৳{self.inside_dhaka}, বাইরে: ৳{self.outside_dhaka}'
 
 
 # ─── Notifications ────────────────────────────────────────────────────────────

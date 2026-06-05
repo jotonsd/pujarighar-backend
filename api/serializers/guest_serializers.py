@@ -32,3 +32,5 @@ class GuestCheckoutSerializer(serializers.Serializer):
     post_code        = serializers.CharField(max_length=10,  required=False, allow_blank=True, default='')
     notes_bn         = serializers.CharField(required=False, allow_blank=True, default='')
     payment_method   = serializers.ChoiceField(choices=['COD', 'ONLINE'], default='COD')
+    apply_delivery   = serializers.BooleanField(default=True)
+    delivery_zone    = serializers.ChoiceField(choices=['inside', 'outside'], required=False, allow_null=True, default=None)

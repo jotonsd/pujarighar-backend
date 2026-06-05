@@ -4,11 +4,21 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
-    SalesOrder, SalesOrderItem, OrderStatusLog,
+    DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
     User, Notification,
 )
+
+_DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
+
+def _delivery_charge(district: str, zone: str | None = None) -> Decimal:
+    cfg = DeliveryCharge.get()
+    if zone == 'inside':
+        return cfg.inside_dhaka
+    if zone == 'outside':
+        return cfg.outside_dhaka
+    return cfg.inside_dhaka if district.strip().lower() in _DHAKA_DISTRICTS else cfg.outside_dhaka
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +41,11 @@ class GuestCheckoutService:
         last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
         order_number = f'{prefix}{last + 1:04d}'
 
-        subtotal    = sum(i['product'].effective_price * i['quantity'] for i in items)
-        grand_total = subtotal
+        subtotal     = sum(i['product'].effective_price * i['quantity'] for i in items)
+        apply_deliv  = validated_data.get('apply_delivery', True)
+        zone         = validated_data.get('delivery_zone')
+        delivery     = _delivery_charge(shipping.get('district', ''), zone) if apply_deliv else Decimal('0')
+        grand_total  = subtotal + delivery
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
@@ -52,6 +65,7 @@ class GuestCheckoutService:
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
             subtotal            = subtotal,
+            delivery_charge     = delivery,
             grand_total         = grand_total,
         )
 
@@ -142,10 +156,12 @@ class GuestCheckoutService:
                 return None
 
         for code, debit, credit in [
-            ('1100', order.grand_total, Decimal('0')),
-            ('4000', Decimal('0'),      order.subtotal),
-            ('5000', cogs,              Decimal('0')),
-            ('1300', Decimal('0'),      cogs),
+            ('1100', order.grand_total,        Decimal('0')),
+            ('4000', Decimal('0'),             order.subtotal),
+            ('4200', Decimal('0'),             Decimal(str(order.delivery_charge))),
+            ('2100', Decimal('0'),             order.tax_amount),
+            ('5000', cogs,                     Decimal('0')),
+            ('1300', Decimal('0'),             cogs),
         ]:
             acct = _acct(code)
             if acct and (debit or credit):
