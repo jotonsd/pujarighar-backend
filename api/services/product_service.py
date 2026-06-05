@@ -38,7 +38,7 @@ class CategoryService:
 
 class ProductService:
 
-    def list_products(self, category=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None):
+    def list_products(self, category=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False):
         qs = Product.objects.select_related('category').prefetch_related('images', 'package_items')
         if not include_inactive:
             qs = qs.filter(is_active=True)
@@ -53,6 +53,8 @@ class ProductService:
             qs = qs.filter(unit_price__gte=min_price)
         if max_price is not None:
             qs = qs.filter(unit_price__lte=max_price)
+        if has_discount:
+            qs = qs.filter(discounts__is_active=True).distinct()
         if ordering in ('price_asc', 'price_desc'):
             disc_type = Subquery(
                 Discount.objects.filter(product=OuterRef('pk'), is_active=True)
