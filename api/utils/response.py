@@ -1,4 +1,5 @@
 import logging
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
@@ -34,6 +35,23 @@ class ApiResponse(Response):
             body["pagination"] = pagination
 
         super().__init__(data=body, status=status_code, **kwargs)
+
+
+def api_error(e, locale_hint: str = '') -> 'ApiResponse':
+    """
+    Convert any exception — especially DRF ValidationError with
+    message_bn / message_en — into a clean ApiResponse(400).
+    """
+    if isinstance(e, ValidationError) and isinstance(e.detail, dict):
+        detail   = e.detail
+        msg_bn   = str(detail.get('message_bn', 'ব্যর্থ হয়েছে'))
+        msg_en   = str(detail.get('message_en', 'Action failed'))
+        return ApiResponse(
+            message=msg_bn if locale_hint == 'bn' else msg_en,
+            errors={'message_bn': msg_bn, 'message_en': msg_en},
+            status_code=400,
+        )
+    return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
 def custom_exception_handler(exc, context):

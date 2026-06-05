@@ -10,7 +10,7 @@ from api.serializers.order_serializers import (
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
 )
 from api.services.order_service import OrderService
-from api.utils.response import ApiResponse
+from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
 from api.permissions import IsAdmin, IsAdminOrWarehouse, IsDelivery
 
@@ -33,7 +33,7 @@ def pos_create_order(request):
         )
     except Exception as e:
         logger.error(f"POS create error: {e}", exc_info=True)
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['GET'])
@@ -49,7 +49,7 @@ def list_orders(request):
         )
     except Exception as e:
         logger.error(f"List orders error: {e}", exc_info=True)
-        return ApiResponse(message=str(e), errors=str(e), status_code=500)
+        return api_error(e)
 
 
 @api_view(['GET'])
@@ -134,7 +134,7 @@ def confirm_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -146,7 +146,7 @@ def pack_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -163,7 +163,7 @@ def assign_delivery(request, pk):
         updated = _svc.assign_delivery(order, str(serializer.validated_data['delivery_person_id']), request.user)
         return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated).data)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -177,7 +177,7 @@ def dispatch_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -191,7 +191,7 @@ def deliver_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -210,7 +210,7 @@ def return_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e)
 
 
 @api_view(['POST'])
@@ -240,4 +240,4 @@ def cancel_order(request, pk):
         return ApiResponse(message="Order cancelled", data=SalesOrderSerializer(updated).data)
     except Exception as e:
         logger.error(f"Cancel order error: {e}", exc_info=True)
-        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+        return api_error(e, locale_hint=request.LANGUAGE_CODE)
