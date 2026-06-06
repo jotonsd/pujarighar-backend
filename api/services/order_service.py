@@ -55,7 +55,9 @@ class OrderService:
     def assign_delivery(self, order: SalesOrder, delivery_person_id: str, user: User) -> SalesOrder:
         delivery_person = User.objects.get(id=delivery_person_id, role='DELIVERY')
         DeliveryAssignment.objects.update_or_create(order=order, defaults={'delivery_person': delivery_person})
-        return self._transition(order, 'ASSIGNED', user)
+        updated = self._transition(order, 'ASSIGNED', user)
+        self._notify_delivery_person(updated, delivery_person)
+        return updated
 
     def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
         order = self._transition(order, 'ON_THE_WAY', user)
@@ -235,6 +237,17 @@ class OrderService:
             title_en=f'Order {label["en"]} — {order.order_number}',
             body_bn=f'আপনার অর্ডার #{order.order_number} এখন {label["bn"]}।',
             body_en=f'Your order #{order.order_number} is now {label["en"]}.',
+            reference_type='STATUS_CHANGED',
+            reference_id=order.id,
+        )
+
+    def _notify_delivery_person(self, order: SalesOrder, delivery_person: User) -> None:
+        Notification.objects.create(
+            user=delivery_person,
+            title_bn=f'নতুন ডেলিভারি বরাদ্দ — {order.order_number}',
+            title_en=f'New Delivery Assigned — {order.order_number}',
+            body_bn=f'অর্ডার #{order.order_number} আপনার কাছে ডেলিভারির জন্য বরাদ্দ করা হয়েছে।',
+            body_en=f'Order #{order.order_number} has been assigned to you for delivery.',
             reference_type='STATUS_CHANGED',
             reference_id=order.id,
         )
