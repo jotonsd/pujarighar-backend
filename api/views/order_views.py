@@ -256,3 +256,26 @@ def cancel_order(request, pk):
     except Exception as e:
         logger.error(f"Cancel order error: {e}", exc_info=True)
         return api_error(e, locale_hint=request.LANGUAGE_CODE)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def update_shipping(request, pk):
+    try:
+        order = SalesOrder.objects.get(pk=pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    allowed = [
+        'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
+        'shipping_address_bn', 'shipping_address_en',
+        'shipping_district', 'shipping_thana', 'shipping_post_code',
+    ]
+    fields = {k: v for k, v in request.data.items() if k in allowed}
+    if not fields:
+        return ApiResponse(message='No valid fields', errors='Provide at least one field', status_code=422)
+
+    for k, v in fields.items():
+        setattr(order, k, v)
+    order.save(update_fields=list(fields.keys()))
+    return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order).data)
