@@ -12,6 +12,9 @@ from .product_views import (
 from .category_views import (
     list_categories, create_category, get_category, update_category, delete_category,
 )
+from .brand_views import (
+    list_brands, create_brand, get_brand, update_brand, delete_brand,
+)
 from .stock_views import (
     get_stock, adjust_stock,
     list_package_items, add_package_item, delete_package_item,
@@ -45,5 +48,10 @@ from .accounting_views import (
 )
 from .notification_views import list_notifications, mark_all_read, mark_one_read
 from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount
+from .review_views import (
+    create_review, list_product_reviews, my_order_reviews,
+    eligible_order_for_product,
+    list_pending_reviews, approve_review, delete_review,
+)
 from .invoice_views import download_invoice
 from .delivery_charge_views import get_delivery_charges, update_delivery_charges

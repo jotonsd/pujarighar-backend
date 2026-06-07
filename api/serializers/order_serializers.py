@@ -36,7 +36,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
 
     def get_to_status_label(self, obj):
         labels = {
-            'PENDING': 'অপেক্ষমাণ', 'CONFIRMED': 'নিশ্চিত',
+            'PENDING': 'পেন্ডিং', 'CONFIRMED': 'নিশ্চিত',
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'ডেলিভারিম্যান নির্ধারিত',
             'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে', 'CANCELLED': 'বাতিল',
         }
@@ -95,7 +95,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 
 
 STATUS_LABELS_BN = {
-    'PENDING':'অপেক্ষমাণ', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
+    'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
     'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'ON_THE_WAY':'পথে আছে',
     'DELIVERED':'ডেলিভারি হয়েছে', 'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
 }

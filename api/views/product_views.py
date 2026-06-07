@@ -25,6 +25,7 @@ def list_products(request):
         include_inactive = request.query_params.get('include_inactive', '').lower() == 'true'
         qs = _svc.list_products(
             category=request.query_params.get('category'),
+            brand=request.query_params.get('brand'),
             search=request.query_params.get('search', ''),
             is_package=request.query_params.get('is_package'),
             min_price=request.query_params.get('min_price'),

@@ -1,12 +1,37 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, Q, Subquery, OuterRef, Value, When
+from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
-from api.models import Account, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
 
 logger = logging.getLogger(__name__)
+
+
+class BrandService:
+
+    def list_brands(self, include_inactive=False):
+        qs = Brand.objects.all()
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def get_brand(self, pk: str) -> Brand:
+        return Brand.objects.get(pk=pk)
+
+    def create_brand(self, validated_data: dict) -> Brand:
+        return Brand.objects.create(**validated_data)
+
+    def update_brand(self, brand: Brand, validated_data: dict) -> Brand:
+        for attr, value in validated_data.items():
+            setattr(brand, attr, value)
+        brand.save()
+        return brand
+
+    def delete_brand(self, brand: Brand) -> None:
+        brand.is_active = False
+        brand.save(update_fields=['is_active'])
 
 
 class CategoryService:
@@ -38,13 +63,36 @@ class CategoryService:
 
 class ProductService:
 
-    def list_products(self, category=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False):
-        qs = Product.objects.select_related('category').prefetch_related('images', 'package_items')
+    def _with_ratings(self, qs):
+        from api.models import Review
+        avg_sq = (
+            Review.objects.filter(product=OuterRef('pk'), is_approved=True)
+            .values('product')
+            .annotate(v=Avg('rating'))
+            .values('v')
+        )
+        cnt_sq = (
+            Review.objects.filter(product=OuterRef('pk'), is_approved=True)
+            .values('product')
+            .annotate(v=Count('id'))
+            .values('v')
+        )
+        return qs.annotate(
+            average_rating=Subquery(avg_sq, output_field=FloatField()),
+            review_count=Subquery(cnt_sq, output_field=IntegerField()),
+        )
+
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False):
+        qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+        qs = self._with_ratings(qs)
         if not include_inactive:
             qs = qs.filter(is_active=True)
         if category:
             ids = [c.strip() for c in category.split(',') if c.strip()]
             qs = qs.filter(category_id__in=ids) if ids else qs
+        if brand:
+            ids = [b.strip() for b in brand.split(',') if b.strip()]
+            qs = qs.filter(brand_id__in=ids) if ids else qs
         if search:
             qs = qs.filter(Q(name_bn__icontains=search) | Q(name_en__icontains=search) | Q(sku__icontains=search))
         if is_package is not None:
@@ -82,7 +130,9 @@ class ProductService:
         return qs
 
     def get_product(self, pk: str) -> Product:
-        return Product.objects.select_related('category').prefetch_related('images', 'package_items').get(pk=pk)
+        return self._with_ratings(
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+        ).get(pk=pk)
 
     def create_product(self, validated_data: dict) -> Product:
         product = Product.objects.create(**validated_data)

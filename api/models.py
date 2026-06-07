@@ -98,6 +98,20 @@ class Category(BaseModel):
         return self.name_bn or self.name_en
 
 
+class Brand(BaseModel):
+    name_bn   = models.CharField(max_length=200)
+    name_en   = models.CharField(max_length=200)
+    slug      = models.SlugField(unique=True)
+    logo      = models.ImageField(upload_to='brands/', blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name_bn']
+
+    def __str__(self):
+        return self.name_bn or self.name_en
+
+
 class Product(BaseModel):
     name_bn        = models.CharField(max_length=300)
     name_en        = models.CharField(max_length=300)
@@ -105,6 +119,7 @@ class Product(BaseModel):
     description_en = models.TextField(blank=True)
     sku            = models.CharField(max_length=100, unique=True)
     category       = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='products')
+    brand          = models.ForeignKey('Brand', null=True, blank=True, on_delete=models.SET_NULL, related_name='products')
     unit_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     cost_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     unit_bn        = models.CharField(max_length=50, default='পিস')
@@ -262,7 +277,7 @@ class CartItem(BaseModel):
 # ─── Orders ───────────────────────────────────────────────────────────────────
 
 ORDER_STATUS = [
-    ('PENDING',    'অপেক্ষমাণ'),
+    ('PENDING',    'পেন্ডিং'),
     ('CONFIRMED',  'নিশ্চিত'),
     ('PACKED',     'প্যাক হয়েছে'),
     ('ASSIGNED',   'ডেলিভারিম্যান নির্ধারিত'),
@@ -544,3 +559,21 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'{self.title_en} → {self.user.email}'
+
+
+# ─── Reviews ──────────────────────────────────────────────────────────────────
+
+class Review(BaseModel):
+    product     = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    order       = models.ForeignKey(SalesOrder, on_delete=models.SET_NULL, null=True, related_name='reviews')
+    user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
+    rating      = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])
+    comment     = models.TextField(blank=True)
+    is_approved = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = [('product', 'order', 'user')]
+
+    def __str__(self):
+        return f'{self.user.email} → {self.product.name_en} ({self.rating}★)'

@@ -1,12 +1,18 @@
 from decimal import Decimal
 from rest_framework import serializers
-from api.models import Category, Product, ProductImage, ProductPackageItem, StockMovement
+from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement
 
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model  = Category
         fields = ['id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'is_active', 'created_at']
+
+
+class BrandSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Brand
+        fields = ['id', 'name_bn', 'name_en', 'slug', 'logo', 'is_active', 'created_at']
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -47,9 +53,13 @@ class ProductSerializer(serializers.ModelSerializer):
     package_items        = PackageItemReadSerializer(many=True, read_only=True)
     category_name_bn     = serializers.CharField(source='category.name_bn', read_only=True)
     category_name_en     = serializers.CharField(source='category.name_en', read_only=True)
+    brand_name_bn        = serializers.CharField(source='brand.name_bn', read_only=True, default=None)
+    brand_name_en        = serializers.CharField(source='brand.name_en', read_only=True, default=None)
     effective_price      = serializers.SerializerMethodField()
     active_discount_type  = serializers.SerializerMethodField()
     active_discount_value = serializers.SerializerMethodField()
+    average_rating        = serializers.FloatField(read_only=True, default=None)
+    review_count          = serializers.IntegerField(read_only=True, default=0)
 
     def _active_discount(self, obj):
         return obj.discounts.filter(is_active=True).order_by('-created_at').first()
@@ -71,11 +81,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'name_bn', 'name_en',
             'description_bn', 'description_en',
             'sku', 'category', 'category_name_bn', 'category_name_en',
+            'brand', 'brand_name_bn', 'brand_name_en',
             'unit_price', 'cost_price', 'effective_price',
             'active_discount_type', 'active_discount_value',
             'unit_bn', 'unit_en',
             'is_package', 'discount_type', 'discount_value', 'is_active',
             'stock_on_hand', 'images', 'package_items',
+            'average_rating', 'review_count',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'cost_price', 'created_at', 'updated_at']

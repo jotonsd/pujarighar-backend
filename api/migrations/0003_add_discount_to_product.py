@@ -23,6 +23,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='salesorder',
             name='status',
-            field=models.CharField(choices=[('PENDING', 'অপেক্ষমাণ'), ('CONFIRMED', 'নিশ্চিত'), ('PACKED', 'প্যাক হয়েছে'), ('ASSIGNED', 'ডেলিভারিম্যান নির্ধারিত'), ('ON_THE_WAY', 'পথে আছে'), ('DELIVERED', 'ডেলিভারি হয়েছে'), ('RETURNED', 'ফেরত'), ('CANCELLED', 'বাতিল')], default='PENDING', max_length=20),
+            field=models.CharField(choices=[('PENDING', 'পেন্ডিং'), ('CONFIRMED', 'নিশ্চিত'), ('PACKED', 'প্যাক হয়েছে'), ('ASSIGNED', 'ডেলিভারিম্যান নির্ধারিত'), ('ON_THE_WAY', 'পথে আছে'), ('DELIVERED', 'ডেলিভারি হয়েছে'), ('RETURNED', 'ফেরত'), ('CANCELLED', 'বাতিল')], default='PENDING', max_length=20),
         ),
     ]

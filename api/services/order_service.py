@@ -222,7 +222,7 @@ class OrderService:
         STATUS_LABELS = {
             'CONFIRMED':  {'bn': 'নিশ্চিত হয়েছে',        'en': 'Confirmed'},
             'PACKED':     {'bn': 'প্যাক হয়েছে',           'en': 'Packed'},
-            'ASSIGNED':   {'bn': 'ডেলিভারি বরাদ্দ হয়েছে', 'en': 'Delivery Assigned'},
+            'ASSIGNED':   {'bn': 'ডেলিভারি এসাইন্ড হয়েছে', 'en': 'Delivery Assigned'},
             'ON_THE_WAY': {'bn': 'পথে আছে',               'en': 'Out for Delivery'},
             'DELIVERED':  {'bn': 'ডেলিভারি হয়েছে',        'en': 'Delivered'},
             'RETURNED':   {'bn': 'ফেরত হয়েছে',            'en': 'Returned'},
@@ -244,9 +244,9 @@ class OrderService:
     def _notify_delivery_person(self, order: SalesOrder, delivery_person: User) -> None:
         Notification.objects.create(
             user=delivery_person,
-            title_bn=f'নতুন ডেলিভারি বরাদ্দ — {order.order_number}',
+            title_bn=f'নতুন ডেলিভারি এসাইন্ড — {order.order_number}',
             title_en=f'New Delivery Assigned — {order.order_number}',
-            body_bn=f'অর্ডার #{order.order_number} আপনার কাছে ডেলিভারির জন্য বরাদ্দ করা হয়েছে।',
+            body_bn=f'অর্ডার #{order.order_number} আপনার কাছে ডেলিভারির জন্য এসাইন্ড করা হয়েছে।',
             body_en=f'Order #{order.order_number} has been assigned to you for delivery.',
             reference_type='STATUS_CHANGED',
             reference_id=order.id,

@@ -30,6 +30,13 @@ urlpatterns = [
     path('categories/<uuid:pk>/update/', views.update_category, name='category-update'),
     path('categories/<uuid:pk>/delete/', views.delete_category, name='category-delete'),
 
+    # ─── Brands ───────────────────────────────────────────────────────────────
+    path('brands/',                      views.list_brands,   name='brand-list'),
+    path('brands/create/',               views.create_brand,  name='brand-create'),
+    path('brands/<uuid:pk>/',            views.get_brand,     name='brand-detail'),
+    path('brands/<uuid:pk>/update/',     views.update_brand,  name='brand-update'),
+    path('brands/<uuid:pk>/delete/',     views.delete_brand,  name='brand-delete'),
+
     # ─── Products ─────────────────────────────────────────────────────────────
     path('products/',                 views.list_products,  name='product-list'),
     path('products/create/',          views.create_product, name='product-create'),
@@ -126,4 +133,13 @@ urlpatterns = [
     path('notifications/',                      views.list_notifications, name='notification-list'),
     path('notifications/mark-all-read/',        views.mark_all_read,      name='notification-mark-all'),
     path('notifications/<uuid:pk>/mark-read/',  views.mark_one_read,      name='notification-mark-one'),
+
+    # ─── Reviews ──────────────────────────────────────────────────────────────
+    path('reviews/',                            views.create_review,         name='review-create'),
+    path('reviews/my-order/',                   views.my_order_reviews,      name='review-my-order'),
+    path('reviews/pending/',                    views.list_pending_reviews,  name='review-pending'),
+    path('reviews/<uuid:pk>/approve/',          views.approve_review,        name='review-approve'),
+    path('reviews/<uuid:pk>/delete/',           views.delete_review,         name='review-delete'),
+    path('products/<uuid:pk>/reviews/',         views.list_product_reviews,       name='product-reviews'),
+    path('products/<uuid:pk>/eligible-order/', views.eligible_order_for_product, name='product-eligible-order'),
 ]

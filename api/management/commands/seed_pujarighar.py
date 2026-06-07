@@ -1,3 +1,4 @@
+import random
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -10,6 +11,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self._seed_accounts()
         self._seed_categories()
+        self._seed_brands()
         self._seed_products()
         self._seed_users()
         self._seed_images()
@@ -51,11 +53,27 @@ class Command(BaseCommand):
             Category.objects.get_or_create(slug=slug, defaults={'name_bn': name_bn, 'name_en': name_en})
         self.stdout.write('  ✓ Categories seeded')
 
-    def _seed_products(self):
-        from api.models import Category, Product, StockMovement, User
+    def _seed_brands(self):
+        from api.models import Brand
+        rows = [
+            ('সাইকেল',       'Cycle',       'cycle'),
+            ('মঙ্গলদীপ',     'Mangaldeep',  'mangaldeep'),
+            ('পতঞ্জলি',      'Patanjali',   'patanjali'),
+            ('দেবজ্যোতি',    'Devjyoti',    'devjyoti'),
+            ('পুজারীঘর',     'PujariGhar',  'pujarighar'),
+        ]
+        for name_bn, name_en, slug in rows:
+            Brand.objects.get_or_create(slug=slug, defaults={'name_bn': name_bn, 'name_en': name_en})
+        self.stdout.write('  ✓ Brands seeded')
 
-        admin = User.objects.filter(role='ADMIN').first()
-        cat   = {c.slug: c for c in Category.objects.all()}
+    def _seed_products(self):
+        from api.models import Brand, Category, Product, StockMovement, User
+
+        admin  = User.objects.filter(role='ADMIN').first()
+        cat    = {c.slug: c for c in Category.objects.all()}
+        brands = {b.slug: b for b in Brand.objects.all()}
+
+        brand_list = list(brands.values())
 
         # (name_bn, name_en, desc_bn, desc_en, sku, cat_slug, price, cost, stock)
         items = [
@@ -256,12 +274,16 @@ class Command(BaseCommand):
             category = cat.get(cat_slug)
             if not category:
                 continue
-            p, _ = Product.objects.get_or_create(sku=sku, defaults={
+            p, created = Product.objects.get_or_create(sku=sku, defaults={
                 'name_bn': name_bn, 'name_en': name_en,
                 'description_bn': desc_bn, 'description_en': desc_en,
                 'category': category,
+                'brand': random.choice(brand_list) if brand_list else None,
                 'unit_price': Decimal(price), 'cost_price': Decimal(cost),
             })
+            if not created and p.brand is None and brand_list:
+                p.brand = random.choice(brand_list)
+                p.save(update_fields=['brand'])
             if admin and not p.stock_movements.exists():
                 StockMovement.objects.create(
                     product=p, movement_type='PURCHASE',

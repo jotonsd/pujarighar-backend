@@ -176,7 +176,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('order_number', models.CharField(max_length=30, unique=True)),
-                ('status', models.CharField(choices=[('PENDING', 'অপেক্ষমাণ'), ('CONFIRMED', 'নিশ্চিত'), ('PACKED', 'প্যাক হয়েছে'), ('ASSIGNED', 'ডেলিভারিম্যান নির্ধারিত'), ('ON_THE_WAY', 'পথে আছে'), ('DELIVERED', 'ডেলিভারি হয়েছে'), ('CANCELLED', 'বাতিল')], default='PENDING', max_length=20)),
+                ('status', models.CharField(choices=[('PENDING', 'পেন্ডিং'), ('CONFIRMED', 'নিশ্চিত'), ('PACKED', 'প্যাক হয়েছে'), ('ASSIGNED', 'ডেলিভারিম্যান নির্ধারিত'), ('ON_THE_WAY', 'পথে আছে'), ('DELIVERED', 'ডেলিভারি হয়েছে'), ('CANCELLED', 'বাতিল')], default='PENDING', max_length=20)),
                 ('shipping_name_bn', models.CharField(max_length=200)),
                 ('shipping_name_en', models.CharField(blank=True, max_length=200)),
                 ('shipping_phone', models.CharField(max_length=15)),
