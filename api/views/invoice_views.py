@@ -15,6 +15,7 @@ from api.utils.response import ApiResponse
 logger    = logging.getLogger(__name__)
 _FONT_DIR = os.path.join(os.path.dirname(__file__), '..', 'fonts')
 _FONT_URL = f"file://{os.path.abspath(os.path.join(_FONT_DIR, 'NotoSansBengali-Regular.ttf'))}"
+_LOGO_URL = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets', 'logo.png'))}"
 
 
 def _fmt(value) -> str:
@@ -133,17 +134,16 @@ def _build_html(order: SalesOrder, lang: str) -> str:
   .header {{
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    background: #d97706;
-    color: #fff;
-    padding: 10mm 12mm;
-    margin: -20mm -18mm 6mm -18mm;
+    align-items: center;
+    border-bottom: 0.5mm solid #d97706;
+    padding-bottom: 5mm;
+    margin-bottom: 6mm;
   }}
-  .shop-name {{ font-size: 20pt; font-weight: bold; }}
-  .shop-sub  {{ font-size: 8pt; opacity: 0.8; margin-top: 2mm; }}
+  .shop-brand {{ display: flex; align-items: center; gap: 3mm; }}
+  .shop-sub  {{ font-size: 8pt; color: #6b7280; }}
   .invoice-label {{ text-align: right; }}
-  .invoice-title {{ font-size: 16pt; font-weight: bold; }}
-  .invoice-num   {{ font-size: 9pt; opacity: 0.85; margin-top: 2mm; font-family: monospace; }}
+  .invoice-title {{ font-size: 16pt; font-weight: bold; color: #d97706; }}
+  .invoice-num   {{ font-size: 9pt; color: #6b7280; margin-top: 1mm; font-family: monospace; }}
   /* Meta row */
   .meta {{
     display: flex;
@@ -237,9 +237,9 @@ def _build_html(order: SalesOrder, lang: str) -> str:
 <body>
 
 <div class="header">
-  <div>
-    <div class="shop-name">{t('পূজারিঘর', 'PujariGhar')}</div>
-    <div class="shop-sub">pujarighar.com</div>
+  <div class="shop-brand">
+    <img src="{_LOGO_URL}" alt="PujariGhar" style="height:10mm; width:auto; object-fit:contain;" />
+    <span class="shop-sub">pujarighar.com</span>
   </div>
   <div class="invoice-label">
     <div class="invoice-title">{t('চালান', 'Invoice')}</div>
