@@ -60,7 +60,7 @@ class Command(BaseCommand):
             ('মঙ্গলদীপ',     'Mangaldeep',  'mangaldeep'),
             ('পতঞ্জলি',      'Patanjali',   'patanjali'),
             ('দেবজ্যোতি',    'Devjyoti',    'devjyoti'),
-            ('পুজারীঘর',     'PujariGhar',  'pujarighar'),
+            ('পূজারিঘর',     'PujariGhar',  'pujarighar'),
         ]
         for name_bn, name_en, slug in rows:
             Brand.objects.get_or_create(slug=slug, defaults={'name_bn': name_bn, 'name_en': name_en})
