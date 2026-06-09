@@ -112,6 +112,20 @@ class Brand(BaseModel):
         return self.name_bn or self.name_en
 
 
+class Supplier(BaseModel):
+    name_bn   = models.CharField(max_length=200)
+    name_en   = models.CharField(max_length=200, blank=True)
+    phone     = models.CharField(max_length=15, blank=True)
+    address   = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name_bn']
+
+    def __str__(self):
+        return self.name_bn or self.name_en
+
+
 class Product(BaseModel):
     name_bn        = models.CharField(max_length=300)
     name_en        = models.CharField(max_length=300)
@@ -201,17 +215,24 @@ class StockMovement(models.Model):
         ('RETURN',     'ফেরত'),
         ('ADJUSTMENT', 'সমন্বয়'),
     ]
+    PAYMENT_METHODS = [
+        ('CASH',   'নগদ'),
+        ('CREDIT', 'বাকিতে'),
+    ]
 
-    id            = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    product       = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='stock_movements')
-    movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
-    quantity      = models.DecimalField(max_digits=12, decimal_places=3)
-    unit_cost     = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # buying price per unit at time of purchase
-    reference_id  = models.UUIDField(null=True, blank=True)
-    note_bn       = models.TextField(blank=True)
-    note_en       = models.TextField(blank=True)
-    created_by    = models.ForeignKey(User, on_delete=models.PROTECT)
-    created_at    = models.DateTimeField(auto_now_add=True)
+    id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    product        = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='stock_movements')
+    movement_type  = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
+    quantity       = models.DecimalField(max_digits=12, decimal_places=3)
+    unit_cost      = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    supplier       = models.ForeignKey('Supplier', null=True, blank=True, on_delete=models.SET_NULL)
+    supplier_name  = models.CharField(max_length=200, blank=True)
+    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS, default='CASH')
+    reference_id   = models.UUIDField(null=True, blank=True)
+    note_bn        = models.TextField(blank=True)
+    note_en        = models.TextField(blank=True)
+    created_by     = models.ForeignKey(User, on_delete=models.PROTECT)
+    created_at     = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -434,8 +455,13 @@ class JournalEntry(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     entry_number   = models.CharField(max_length=30, unique=True)
     reference_type = models.CharField(max_length=20, choices=[
-        ('PURCHASE', 'ক্রয়'), ('SALE', 'বিক্রয়'),
-        ('PAYMENT', 'পেমেন্ট'), ('RETURN', 'ফেরত'), ('ADJUSTMENT', 'সমন্বয়'),
+        ('PURCHASE',   'ক্রয়'),
+        ('SALE',       'বিক্রয়'),
+        ('PAYMENT',    'পেমেন্ট'),
+        ('RETURN',     'ফেরত'),
+        ('ADJUSTMENT', 'সমন্বয়'),
+        ('EXPENSE',    'খরচ'),
+        ('EQUITY',     'ইক্যুইটি'),
     ])
     reference_id   = models.UUIDField(null=True, blank=True)
     description_bn = models.TextField(blank=True)
@@ -459,6 +485,38 @@ class JournalLine(models.Model):
     credit        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     memo_bn       = models.TextField(blank=True)
     memo_en       = models.TextField(blank=True)
+
+
+class Partner(BaseModel):
+    name_bn           = models.CharField(max_length=200)
+    name_en           = models.CharField(max_length=200, blank=True)
+    equity_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    invested_amount   = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    is_active         = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name_bn']
+
+    def __str__(self):
+        return f'{self.name_bn} ({self.equity_percentage}%)'
+
+
+class PartnerProfitPayment(BaseModel):
+    partner      = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name='profit_payments')
+    year         = models.IntegerField()
+    month        = models.IntegerField()
+    total_profit = models.DecimalField(max_digits=14, decimal_places=2)
+    share_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    paid_amount  = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    paid_date    = models.DateField(null=True, blank=True)
+    note         = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-year', '-month', 'partner']
+        unique_together = [['partner', 'year', 'month']]
+
+    def __str__(self):
+        return f'{self.partner.name_bn} — {self.year}/{self.month:02d}'
 
 
 class Banner(BaseModel):

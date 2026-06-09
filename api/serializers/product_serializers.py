@@ -1,6 +1,6 @@
 from decimal import Decimal
 from rest_framework import serializers
-from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement
+from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -93,26 +93,43 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'cost_price', 'created_at', 'updated_at']
 
 
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Supplier
+        fields = ['id', 'name_bn', 'name_en', 'phone', 'address', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class StockMovementSerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+    supplier_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = StockMovement
         fields = [
             'id', 'product', 'movement_type', 'quantity', 'unit_cost',
+            'supplier', 'supplier_name', 'supplier_display', 'payment_method',
             'reference_id', 'note_bn', 'note_en',
             'created_by', 'created_by_email', 'created_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at']
 
+    def get_supplier_display(self, obj):
+        if obj.supplier:
+            return obj.supplier.name_bn or obj.supplier.name_en
+        return obj.supplier_name or ''
+
 
 class StockAdjustSerializer(serializers.Serializer):
-    movement_type = serializers.ChoiceField(choices=['PURCHASE', 'ADJUSTMENT'])
-    quantity      = serializers.DecimalField(max_digits=12, decimal_places=3)
-    unit_cost     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'))
-    unit_price    = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, default=None)
-    note_bn       = serializers.CharField(required=False, allow_blank=True, default='')
-    note_en       = serializers.CharField(required=False, allow_blank=True, default='')
+    movement_type  = serializers.ChoiceField(choices=['PURCHASE', 'ADJUSTMENT'])
+    quantity       = serializers.DecimalField(max_digits=12, decimal_places=3)
+    unit_cost      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'))
+    unit_price     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, default=None)
+    supplier_id    = serializers.UUIDField(required=False, allow_null=True, default=None)
+    supplier_name  = serializers.CharField(required=False, allow_blank=True, default='')
+    payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False, default='CASH')
+    note_bn        = serializers.CharField(required=False, allow_blank=True, default='')
+    note_en        = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_quantity(self, value):
         if value == 0:

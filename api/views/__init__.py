@@ -44,7 +44,7 @@ from .accounting_views import (
     list_journal_entries, get_journal_entry,
     get_ledger,
     get_trial_balance, get_profit_loss, get_sales_summary,
-    get_dashboard_summary,
+    get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, mark_all_read, mark_one_read
 from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount
@@ -55,3 +55,5 @@ from .review_views import (
 )
 from .invoice_views import download_invoice
 from .delivery_charge_views import get_delivery_charges, update_delivery_charges
+from .supplier_views import list_suppliers, create_supplier, get_supplier, update_supplier, delete_supplier
+from .partner_views import list_partners, create_partner, update_partner, delete_partner, list_partner_payments, create_partner_payment, update_partner_payment, delete_partner_payment

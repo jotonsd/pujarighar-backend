@@ -99,6 +99,9 @@ class OrderService:
     @transaction.atomic
     def return_order(self, order: SalesOrder, user: User, note_bn: str = '', note_en: str = '') -> SalesOrder:
         order = self._transition(order, 'RETURNED', user, note_bn, note_en)
+        if order.payment_status == 'PAID':
+            order.payment_status = 'UNPAID'
+            order.save(update_fields=['payment_status'])
         for item in order.items.select_related('product'):
             StockMovement.objects.create(
                 product=item.product, movement_type='RETURN',
@@ -116,7 +119,10 @@ class OrderService:
                 product=item.product, movement_type='RETURN',
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
-        self._create_reversal_journal(order, user)
+        # Only reverse accounting if a payment journal was already posted
+        # (pre-delivery COD cancellations have no prior financial entry)
+        if JournalEntry.objects.filter(reference_id=order.id, reference_type='PAYMENT').exists():
+            self._create_return_journal(order, user)
         return order
 
     # ── private ───────────────────────────────────────────────────────────────
@@ -152,27 +158,37 @@ class OrderService:
             return None
 
     def _create_payment_journal(self, order: SalesOrder, user: User) -> None:
-        entry = JournalEntry.objects.create(
-            entry_number=self._next_entry_number(), reference_type='PAYMENT',
-            reference_id=order.id,
-            description_bn=f'পেমেন্ট — {order.order_number}',
-            description_en=f'Payment — {order.order_number}',
-            created_by=user, is_posted=True,
-        )
-        for code, debit, credit in [
-            ('1000', order.grand_total,  Decimal('0')),
-            ('1100', Decimal('0'),       order.grand_total),
-        ]:
-            acct = self._acct(code)
-            if acct:
-                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
-
-    def _create_return_journal(self, order: SalesOrder, user: User) -> None:
-        """Post-delivery return: cash was already collected, so refund 1000 Cash (not 1100 Receivable)."""
         cogs = sum(
             item.product.cost_price * item.quantity
             for item in order.items.select_related('product')
         )
+        # Delivery charge passes through to the delivery person — excluded from platform accounting.
+        # We record only the product revenue (subtotal) and cost.
+        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='PAYMENT',
+            reference_id=order.id,
+            description_bn=f'বিক্রয় ও পেমেন্ট — {order.order_number}',
+            description_en=f'Sale & Payment — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('1000', revenue, Decimal('0')),   # Dr Cash (net product revenue)
+            ('5000', cogs,    Decimal('0')),   # Dr COGS
+            ('4000', Decimal('0'), revenue),   # Cr Sales Revenue
+            ('1300', Decimal('0'), cogs),      # Cr Inventory
+        ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_return_journal(self, order: SalesOrder, user: User) -> None:
+        cogs = sum(
+            item.product.cost_price * item.quantity
+            for item in order.items.select_related('product')
+        )
+        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='RETURN',
             reference_id=order.id,
@@ -180,14 +196,13 @@ class OrderService:
             description_en=f'Goods Return — {order.order_number}',
             created_by=user, is_posted=True,
         )
-        for code, debit, credit in [
-            ('4000', order.subtotal,                    Decimal('0')),
-            ('4200', Decimal(str(order.delivery_charge)), Decimal('0')),
-            ('2100', order.tax_amount,                  Decimal('0')),
-            ('1300', cogs,                              Decimal('0')),
-            ('1000', Decimal('0'),                      order.grand_total),
-            ('5000', Decimal('0'),                      cogs),
-        ]:
+        lines = [
+            ('4000', revenue,       Decimal('0')),  # Dr Sales Revenue (reversal)
+            ('1300', cogs,          Decimal('0')),  # Dr Inventory (stock back)
+            ('1000', Decimal('0'),  revenue),       # Cr Cash (refund)
+            ('5000', Decimal('0'),  cogs),          # Cr COGS (reversal)
+        ]
+        for code, debit, credit in lines:
             acct = self._acct(code)
             if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
@@ -197,6 +212,7 @@ class OrderService:
             item.product.cost_price * item.quantity
             for item in order.items.select_related('product')
         )
+        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='RETURN',
             reference_id=order.id,
@@ -204,14 +220,13 @@ class OrderService:
             description_en=f'Sale reversal — {order.order_number}',
             created_by=user, is_posted=True,
         )
-        for code, debit, credit in [
-            ('4000', order.subtotal,                    Decimal('0')),
-            ('4200', Decimal(str(order.delivery_charge)), Decimal('0')),
-            ('2100', order.tax_amount,                  Decimal('0')),
-            ('1300', cogs,                              Decimal('0')),
-            ('1100', Decimal('0'),                      order.grand_total),
-            ('5000', Decimal('0'),                      cogs),
-        ]:
+        lines = [
+            ('4000', revenue,      Decimal('0')),  # Dr Sales Revenue
+            ('1300', cogs,         Decimal('0')),  # Dr Inventory
+            ('1100', Decimal('0'), revenue),       # Cr AR
+            ('5000', Decimal('0'), cogs),          # Cr COGS
+        ]
+        for code, debit, credit in lines:
             acct = self._acct(code)
             if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)

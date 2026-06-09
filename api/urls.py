@@ -92,15 +92,33 @@ urlpatterns = [
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),
     path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
 
+    # ─── Suppliers ────────────────────────────────────────────────────────────
+    path('suppliers/',                      views.list_suppliers,   name='supplier-list'),
+    path('suppliers/create/',               views.create_supplier,  name='supplier-create'),
+    path('suppliers/<uuid:pk>/',            views.get_supplier,     name='supplier-detail'),
+    path('suppliers/<uuid:pk>/update/',     views.update_supplier,  name='supplier-update'),
+    path('suppliers/<uuid:pk>/delete/',     views.delete_supplier,  name='supplier-delete'),
+
+    # ─── Partners ─────────────────────────────────────────────────────────────
+    path('partners/',                                                       views.list_partners,           name='partner-list'),
+    path('partners/create/',                                                views.create_partner,          name='partner-create'),
+    path('partners/<uuid:pk>/update/',                                      views.update_partner,          name='partner-update'),
+    path('partners/<uuid:pk>/delete/',                                      views.delete_partner,          name='partner-delete'),
+    path('partners/<uuid:pk>/payments/',                                    views.list_partner_payments,   name='partner-payment-list'),
+    path('partners/<uuid:pk>/payments/create/',                             views.create_partner_payment,  name='partner-payment-create'),
+    path('partners/<uuid:pk>/payments/<uuid:payment_pk>/update/',           views.update_partner_payment,  name='partner-payment-update'),
+    path('partners/<uuid:pk>/payments/<uuid:payment_pk>/delete/',           views.delete_partner_payment,  name='partner-payment-delete'),
+
     # ─── Accounting ───────────────────────────────────────────────────────────
-    path('accounting/accounts/',                      views.list_accounts,       name='account-list'),
-    path('accounting/accounts/<uuid:pk>/',             views.get_account,         name='account-detail'),
-    path('accounting/journal-entries/',                views.list_journal_entries, name='journal-list'),
-    path('accounting/journal-entries/<uuid:pk>/',      views.get_journal_entry,   name='journal-detail'),
-    path('accounting/ledger/<uuid:account_id>/',       views.get_ledger,          name='ledger'),
-    path('accounting/reports/trial-balance/',          views.get_trial_balance,   name='trial-balance'),
-    path('accounting/reports/profit-loss/',            views.get_profit_loss,     name='profit-loss'),
-    path('accounting/reports/sales-summary/',          views.get_sales_summary,   name='sales-summary'),
+    path('accounting/accounts/',                      views.list_accounts,         name='account-list'),
+    path('accounting/accounts/<uuid:pk>/',             views.get_account,           name='account-detail'),
+    path('accounting/journal-entries/',                views.list_journal_entries,  name='journal-list'),
+    path('accounting/journal-entries/create/',         views.create_manual_journal, name='journal-create'),
+    path('accounting/journal-entries/<uuid:pk>/',      views.get_journal_entry,     name='journal-detail'),
+    path('accounting/ledger/<uuid:account_id>/',       views.get_ledger,            name='ledger'),
+    path('accounting/reports/trial-balance/',          views.get_trial_balance,     name='trial-balance'),
+    path('accounting/reports/profit-loss/',            views.get_profit_loss,       name='profit-loss'),
+    path('accounting/reports/sales-summary/',          views.get_sales_summary,     name='sales-summary'),
 
     # ─── Dashboard ────────────────────────────────────────────────────────────
     path('dashboard/summary/', views.get_dashboard_summary, name='dashboard-summary'),

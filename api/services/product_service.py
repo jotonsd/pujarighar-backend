@@ -4,7 +4,7 @@ from django.db import transaction
 from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement, Supplier
 
 logger = logging.getLogger(__name__)
 
@@ -162,10 +162,23 @@ class StockService:
     def adjust_stock(self, product: Product, movement_type: str, quantity: Decimal,
                      note_bn: str, note_en: str, user,
                      unit_cost: Decimal = Decimal('0'),
-                     unit_price: Decimal = None) -> StockMovement:
+                     unit_price: Decimal = None,
+                     supplier_id: str = None,
+                     supplier_name: str = '',
+                     payment_method: str = 'CASH') -> StockMovement:
+        supplier = None
+        if supplier_id:
+            try:
+                supplier = Supplier.objects.get(pk=supplier_id)
+            except Supplier.DoesNotExist:
+                pass
+
         movement = StockMovement(
             product=product, movement_type=movement_type,
             quantity=quantity, unit_cost=unit_cost,
+            supplier=supplier,
+            supplier_name=supplier_name if not supplier else (supplier.name_bn or supplier.name_en),
+            payment_method=payment_method if movement_type == 'PURCHASE' else 'CASH',
             note_bn=note_bn, note_en=note_en, created_by=user,
         )
         movement.clean()
@@ -178,18 +191,20 @@ class StockService:
                 product.save(update_fields=['cost_price', 'unit_price'])
             else:
                 product.save(update_fields=['cost_price'])
-            self._create_purchase_journal(product, quantity, unit_cost, movement, user)
+            self._create_purchase_journal(product, quantity, unit_cost, movement, user, payment_method)
 
         logger.info(f"Stock adjusted: {product.sku} {movement_type} {quantity}")
         return movement
 
     def _create_purchase_journal(self, product: Product, quantity: Decimal,
-                                  unit_cost: Decimal, movement: StockMovement, user) -> None:
+                                  unit_cost: Decimal, movement: StockMovement, user,
+                                  payment_method: str = 'CASH') -> None:
         today        = timezone.now().date()
         prefix       = f'JE-{today:%Y%m%d}-'
         last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
         entry_number = f'{prefix}{last + 1:04d}'
         total_cost   = unit_cost * quantity
+        credit_acct  = '1000' if payment_method == 'CASH' else '2000'
 
         entry = JournalEntry.objects.create(
             entry_number=entry_number, reference_type='PURCHASE',
@@ -206,8 +221,8 @@ class StockService:
                 return None
 
         for code, debit, credit in [
-            ('1300', total_cost,        Decimal('0')),   # DR Inventory
-            ('1000', Decimal('0'),      total_cost),     # CR Cash
+            ('1300',       total_cost,   Decimal('0')),  # Dr Inventory
+            (credit_acct,  Decimal('0'), total_cost),    # Cr Cash or Accounts Payable
         ]:
             acct = _acct(code)
             if acct and (debit or credit):

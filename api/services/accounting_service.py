@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.db.models import Sum
 from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
 from django.utils import timezone
-from api.models import Account, JournalEntry, JournalLine, JournalLine as JL, SalesOrder, User, Product
+from api.models import Account, JournalEntry, JournalLine, JournalLine as JL, SalesOrder, User, Product, Partner
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,25 @@ class AccountingService:
                 revenue += line.credit - line.debit
             else:
                 expense += line.debit - line.credit
-        return {'revenue': str(revenue), 'expense': str(expense), 'net_profit': str(revenue - expense)}
+
+        net_profit = revenue - expense
+        partners   = Partner.objects.filter(is_active=True)
+        equity_shares = [
+            {
+                'partner_id':   str(p.id),
+                'name_bn':      p.name_bn,
+                'name_en':      p.name_en,
+                'percentage':   str(p.equity_percentage),
+                'share_amount': str((net_profit * p.equity_percentage / 100).quantize(Decimal('0.01'))),
+            }
+            for p in partners
+        ]
+        return {
+            'revenue':       str(revenue),
+            'expense':       str(expense),
+            'net_profit':    str(net_profit),
+            'equity_shares': equity_shares,
+        }
 
     def get_sales_summary(self, from_date: str, to_date: str, group_by: str) -> list:
         qs = SalesOrder.objects.filter(status='DELIVERED')

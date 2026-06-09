@@ -1,8 +1,11 @@
 import logging
+from decimal import Decimal, InvalidOperation
+from django.db import transaction
+from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
-from api.models import Account, JournalEntry
+from api.models import Account, JournalEntry, JournalLine
 from api.serializers.accounting_serializers import AccountSerializer, JournalEntrySerializer
 from api.services.accounting_service import AccountingService
 from api.utils.response import ApiResponse
@@ -119,3 +122,65 @@ def get_dashboard_summary(_request):
     except Exception as e:
         logger.error(f"Dashboard error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+@transaction.atomic
+def create_manual_journal(request):
+    """
+    Manual journal entry for expenses, equity contributions, bank transfers, etc.
+    Body: { description_bn, description_en, reference_type, lines: [{account_code, debit, credit, memo_bn}] }
+    """
+    data = request.data
+    lines_data = data.get('lines', [])
+    if len(lines_data) < 2:
+        return ApiResponse(message="At least 2 lines required", errors="Validation error", status_code=422)
+
+    # Validate debits == credits
+    try:
+        total_debit  = sum(Decimal(str(l.get('debit',  0))) for l in lines_data)
+        total_credit = sum(Decimal(str(l.get('credit', 0))) for l in lines_data)
+    except InvalidOperation:
+        return ApiResponse(message="Invalid amount", errors="Validation error", status_code=422)
+
+    if abs(total_debit - total_credit) > Decimal('0.01'):
+        return ApiResponse(
+            message=f"Journal not balanced — debits {total_debit} ≠ credits {total_credit}",
+            errors="Imbalance", status_code=422,
+        )
+
+    today  = timezone.now().date()
+    prefix = f'JE-{today:%Y%m%d}-'
+    last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
+    entry_number = f'{prefix}{last + 1:04d}'
+
+    ref_type = data.get('reference_type', 'EXPENSE')
+    entry = JournalEntry.objects.create(
+        entry_number=entry_number,
+        reference_type=ref_type,
+        description_bn=data.get('description_bn', ''),
+        description_en=data.get('description_en', ''),
+        created_by=request.user,
+        is_posted=True,
+    )
+
+    for line in lines_data:
+        try:
+            acct = Account.objects.get(code=line['account_code'])
+        except Account.DoesNotExist:
+            raise ValueError(f"Account {line['account_code']} not found")
+        JournalLine.objects.create(
+            journal_entry=entry,
+            account=acct,
+            debit=Decimal(str(line.get('debit', 0))),
+            credit=Decimal(str(line.get('credit', 0))),
+            memo_bn=line.get('memo_bn', ''),
+            memo_en=line.get('memo_en', ''),
+        )
+
+    return ApiResponse(
+        message="Journal entry created",
+        data=JournalEntrySerializer(entry).data,
+        status_code=201,
+    )
