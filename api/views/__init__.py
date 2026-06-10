@@ -55,6 +55,7 @@ from .review_views import (
 )
 from .invoice_views import download_invoice
 from .delivery_charge_views import get_delivery_charges, update_delivery_charges
+from .cashback_views import list_cashback_tiers, create_cashback_tier, update_cashback_tier, delete_cashback_tier
 from .supplier_views import (
     list_suppliers, create_supplier, get_supplier, update_supplier, delete_supplier,
     list_supplier_payments, create_supplier_payment, delete_supplier_payment,

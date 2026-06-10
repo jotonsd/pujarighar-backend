@@ -17,9 +17,19 @@ _FONT_DIR = os.path.join(os.path.dirname(__file__), '..', 'fonts')
 _FONT_URL = f"file://{os.path.abspath(os.path.join(_FONT_DIR, 'NotoSansBengali-Regular.ttf'))}"
 _LOGO_URL = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets', 'logo.png'))}"
 
+SHOP_NAME    = 'পূজারিঘর'
+SHOP_NAME_EN = 'PujariGhar'
+SHOP_PHONE   = '01XXXXXXXXX'
+SHOP_WEB     = 'pujarighar.com'
+SHOP_ADDRESS = 'Dhaka, Bangladesh'
+
 
 def _fmt(value) -> str:
-    return f'৳{Decimal(str(value)):,.0f}'
+    try:
+        v = Decimal(str(value))
+        return f'{v:,.2f}'
+    except Exception:
+        return '0.00'
 
 
 def _build_html(order: SalesOrder, lang: str) -> str:
@@ -28,90 +38,90 @@ def _build_html(order: SalesOrder, lang: str) -> str:
     def t(bn: str, en: str) -> str:
         return bn if isBn else en
 
-    date_str = order.created_at.strftime('%d %B %Y')
+    order_date   = order.created_at.strftime('%d/%m/%Y')
+    invoice_date = order.created_at.strftime('%d/%m/%Y')
 
-    payment_method = t(
-        'ক্যাশ অন ডেলিভারি' if order.payment_method == 'COD' else 'অনলাইন পেমেন্ট',
-        'Cash on Delivery'   if order.payment_method == 'COD' else 'Online Payment',
-    )
-    payment_status_label = t(
-        'পরিশোধিত ✓' if order.payment_status == 'PAID' else 'অপরিশোধিত',
-        'PAID ✓'     if order.payment_status == 'PAID' else 'UNPAID',
-    )
-    payment_status_class = 'paid' if order.payment_status == 'PAID' else 'unpaid'
-
-    name = order.shipping_name_bn if isBn else order.shipping_name_en
-    addr = order.shipping_address_bn if isBn else order.shipping_address_en
-
-    location_parts = []
-    if order.shipping_district:
-        location_parts.append(order.shipping_district)
-    if order.shipping_thana:
-        location_parts.append(order.shipping_thana)
-    if order.shipping_post_code:
-        location_parts.append(order.shipping_post_code)
+    name  = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_bn or order.shipping_name_en
+    addr  = (order.shipping_address_bn if isBn else order.shipping_address_en) or ''
+    location_parts = [p for p in [order.shipping_district, order.shipping_thana, order.shipping_post_code] if p]
     location = ', '.join(location_parts)
 
+    # ── Item rows ──────────────────────────────────────────────────────────────
     rows_html = ''
     for i, item in enumerate(order.items.all(), 1):
-        item_name = item.product_name_bn if isBn else item.product_name_en
-        qty       = int(float(item.quantity))
-        is_pkg    = item.product.is_package
-        pkg_badge = f'<span class="pkg-badge">{t("প্যাকেজ", "Pkg")}</span>' if is_pkg else ''
+        item_name  = (item.product_name_bn if isBn else item.product_name_en) or item.product_name_bn
+        qty        = int(float(item.quantity))
+        unit_price = Decimal(str(item.unit_price))
+        line_total = Decimal(str(item.line_total))
+        is_pkg     = item.product.is_package
+        pkg_badge  = f'<span class="pkg-badge">{t("প্যাকেজ","Pkg")}</span>' if is_pkg else ''
+
         rows_html += f"""
         <tr class="{'alt' if i % 2 == 0 else ''}">
             <td class="center">{i}</td>
             <td>{pkg_badge}{item_name}</td>
-            <td class="right">{qty}</td>
-            <td class="right">{_fmt(item.unit_price)}</td>
-            <td class="right bold">{_fmt(item.line_total)}</td>
-        </tr>"""
-        if is_pkg:
-            for pkg_item in item.product.package_items.all():
-                comp      = pkg_item.component
-                comp_name = comp.name_bn if isBn else comp.name_en
-                comp_qty  = int(float(pkg_item.quantity)) * qty
-                rows_html += f"""
-        <tr class="pkg-component-row">
-            <td></td>
-            <td class="pkg-component">↳ {comp_name}</td>
-            <td class="right pkg-component">{comp_qty}</td>
-            <td class="right pkg-component">—</td>
-            <td class="right pkg-component">—</td>
+            <td class="center">{qty}</td>
+            <td class="right">{_fmt(unit_price)}</td>
+            <td class="right">{_fmt(line_total)}</td>
         </tr>"""
 
+        if is_pkg:
+            for pi in item.product.package_items.all():
+                comp      = pi.component
+                comp_name = (comp.name_bn if isBn else comp.name_en) or comp.name_bn
+                comp_qty  = int(float(pi.quantity)) * qty
+                rows_html += f"""
+        <tr class="pkg-sub">
+            <td></td>
+            <td class="sub-label">↳ {comp_name}</td>
+            <td class="center sub-label">{comp_qty}</td>
+            <td></td><td></td>
+        </tr>"""
+
+    # ── Totals ─────────────────────────────────────────────────────────────────
     totals_html = f"""
         <tr>
-            <td colspan="4" class="right gray">{t('সাবটোটাল', 'Subtotal')}</td>
+            <td class="label">{t('সাবটোটাল','Subtotal')}</td>
             <td class="right">{_fmt(order.subtotal)}</td>
         </tr>"""
 
     if Decimal(str(order.discount_amount)) > 0:
         totals_html += f"""
-        <tr>
-            <td colspan="4" class="right green">{t('ছাড়', 'Discount')}</td>
-            <td class="right green">− {_fmt(order.discount_amount)}</td>
+        <tr class="green-row">
+            <td class="label">{t('ছাড়','Discount')}</td>
+            <td class="right">− {_fmt(order.discount_amount)}</td>
         </tr>"""
 
     if Decimal(str(order.delivery_charge)) > 0:
         totals_html += f"""
         <tr>
-            <td colspan="4" class="right gray">{t('ডেলিভারি চার্জ', 'Delivery Charge')}</td>
+            <td class="label">{t('ডেলিভারি চার্জ','Delivery Charge')}</td>
             <td class="right">{_fmt(order.delivery_charge)}</td>
         </tr>"""
 
     if Decimal(str(order.tax_amount)) > 0:
         totals_html += f"""
         <tr>
-            <td colspan="4" class="right gray">{t('কর', 'Tax')}</td>
+            <td class="label">{t('কর','Tax')}</td>
             <td class="right">{_fmt(order.tax_amount)}</td>
         </tr>"""
 
+    paid_label = t('(পরিশোধিত)', '(Paid)') if order.payment_status == 'PAID' else ''
     totals_html += f"""
-        <tr class="grand-total-row">
-            <td colspan="4" class="right amber bold">{t('সর্বমোট', 'Grand Total')}</td>
-            <td class="right amber bold">{_fmt(order.grand_total)}</td>
+        <tr class="grand-row">
+            <td class="label bold">{t('সর্বমোট','Amount Payable')}</td>
+            <td class="right bold">{_fmt(order.grand_total)} {paid_label}</td>
         </tr>"""
+
+    # ── Cashback section ───────────────────────────────────────────────────────
+    cashback_html = ''
+    cb = Decimal(str(order.cashback_amount))
+    if cb > 0 and not order.is_guest:
+        cashback_html = f"""
+<div class="cashback-box">
+    <p class="cashback-title">{t(f'৳{_fmt(cb)} ক্যাশব্যাক পেয়েছেন এই অর্ডারে!', f'৳{_fmt(cb)} Cashback Rewarded For This Order')}</p>
+    <p class="cashback-note">* {t('এই ক্যাশব্যাক আপনার পরবর্তী অর্ডারে প্রযোজ্য হবে', 'This cashback will be applicable to your next order')}</p>
+</div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="{lang}">
@@ -125,160 +135,223 @@ def _build_html(order: SalesOrder, lang: str) -> str:
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     font-family: 'NotoSansBengali', Arial, sans-serif;
-    font-size: 11pt;
+    font-size: 10pt;
     color: #111827;
     background: #fff;
-    padding: 20mm 18mm;
+    padding: 14mm 16mm;
   }}
-  /* Header bar */
+
+  /* ── Header ── */
   .header {{
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    border-bottom: 0.5mm solid #d97706;
+    align-items: flex-start;
     padding-bottom: 5mm;
-    margin-bottom: 6mm;
+    margin-bottom: 5mm;
+    border-bottom: 0.4mm solid #e5e7eb;
   }}
-  .shop-brand {{ display: flex; align-items: center; gap: 3mm; }}
-  .shop-sub  {{ font-size: 8pt; color: #6b7280; }}
+  .logo-wrap img {{ height: 12mm; width: auto; object-fit: contain; }}
   .invoice-label {{ text-align: right; }}
-  .invoice-title {{ font-size: 16pt; font-weight: bold; color: #d97706; }}
-  .invoice-num   {{ font-size: 9pt; color: #6b7280; margin-top: 1mm; font-family: monospace; }}
-  /* Meta row */
-  .meta {{
+  .invoice-title {{ font-size: 18pt; font-weight: bold; color: #111; letter-spacing: 0.5mm; }}
+  .invoice-sub   {{ font-size: 9pt; color: #6b7280; margin-top: 1mm; }}
+
+  /* ── Order meta row ── */
+  .meta-row {{
     display: flex;
-    justify-content: space-between;
+    gap: 6mm;
     font-size: 9pt;
-    color: #6b7280;
-    margin-bottom: 6mm;
-    border-bottom: 0.3mm solid #e5e7eb;
-    padding-bottom: 3mm;
+    border: 0.3mm solid #e5e7eb;
+    border-radius: 2mm;
+    padding: 3mm 4mm;
+    margin-bottom: 5mm;
   }}
-  .paid   {{ color: #16a34a; font-weight: bold; }}
-  .unpaid {{ color: #d97706; font-weight: bold; }}
-  /* Customer */
-  .section-title {{
+  .meta-row .meta-item {{ flex: 1; }}
+  .meta-row .meta-item strong {{ font-weight: 600; color: #111; }}
+  .meta-row .meta-item span  {{ color: #6b7280; }}
+
+  /* ── Bill from / to ── */
+  .billing {{
+    display: flex;
+    gap: 6mm;
+    margin-bottom: 5mm;
+    border: 0.3mm solid #e5e7eb;
+    border-radius: 2mm;
+    padding: 4mm;
+  }}
+  .billing-col {{ flex: 1; }}
+  .billing-col .section-label {{
     font-size: 8pt;
     font-weight: bold;
-    color: #d97706;
+    color: #6b7280;
     text-transform: uppercase;
-    letter-spacing: 0.5mm;
+    letter-spacing: 0.4mm;
     margin-bottom: 2mm;
   }}
-  .customer-name  {{ font-size: 13pt; font-weight: bold; margin-bottom: 1mm; }}
-  .customer-info  {{ font-size: 9pt; color: #6b7280; margin-bottom: 1mm; }}
-  /* Table */
-  table {{
+  .billing-col .biz-name {{ font-size: 11pt; font-weight: bold; margin-bottom: 1mm; }}
+  .billing-col .biz-info {{ font-size: 8.5pt; color: #6b7280; margin-bottom: 0.5mm; }}
+  .billing-col .cust-name {{ font-size: 11pt; font-weight: bold; margin-bottom: 1mm; }}
+  .divider {{ width: 0.3mm; background: #e5e7eb; margin: 0 2mm; }}
+
+  /* ── Items table ── */
+  table.items {{
     width: 100%;
     border-collapse: collapse;
-    margin-top: 6mm;
-    font-size: 10pt;
+    margin-bottom: 5mm;
+    font-size: 9.5pt;
   }}
-  thead tr {{
-    background: #fef3c7;
+  table.items thead tr {{
+    background: #f9fafb;
+    border-top: 0.4mm solid #d1d5db;
+    border-bottom: 0.4mm solid #d1d5db;
   }}
-  thead th {{
-    padding: 3mm 3mm;
-    color: #d97706;
-    font-weight: bold;
-    font-size: 9pt;
+  table.items thead th {{
+    padding: 2.5mm 3mm;
+    font-weight: 600;
+    font-size: 8.5pt;
+    color: #374151;
     text-transform: uppercase;
-    letter-spacing: 0.3mm;
+    letter-spacing: 0.2mm;
   }}
-  .th-left  {{ text-align: left; }}
-  .th-right {{ text-align: right; }}
-  .th-center{{ text-align: center; }}
-  tbody tr td {{
+  table.items tbody td {{
     padding: 2.5mm 3mm;
     border-bottom: 0.2mm solid #f3f4f6;
     vertical-align: middle;
   }}
-  tbody tr.alt td {{ background: #f9fafb; }}
-  .center {{ text-align: center; color: #9ca3af; font-size: 9pt; }}
+  table.items tbody tr.alt td {{ background: #f9fafb; }}
+  table.items tbody tr.pkg-sub td {{ border-bottom: none; }}
+  .sub-label {{ font-size: 8pt; color: #9ca3af; padding-top: 0.5mm !important; padding-bottom: 0.5mm !important; }}
+  .center {{ text-align: center; }}
   .right  {{ text-align: right; }}
+  .left   {{ text-align: left; }}
   .bold   {{ font-weight: bold; }}
-  .gray   {{ color: #6b7280; }}
-  .green  {{ color: #16a34a; }}
-  .amber  {{ color: #d97706; }}
+  .green-row td {{ color: #16a34a; }}
   .pkg-badge {{
-    font-size: 7.5pt;
+    font-size: 7pt;
     background: #fef3c7;
     color: #d97706;
     padding: 0.5mm 1.5mm;
-    border-radius: 2mm;
+    border-radius: 1.5mm;
     margin-right: 1.5mm;
   }}
-  /* Package component sub-rows */
-  .pkg-component-row td {{ border-bottom: none; background: #f9fafb; }}
-  .pkg-component {{
-    font-size: 8.5pt;
-    color: #6b7280;
-    padding-top: 1mm !important;
-    padding-bottom: 1mm !important;
+
+  /* ── Bottom: totals right, space left ── */
+  .bottom-section {{
+    display: flex;
+    gap: 6mm;
+    align-items: flex-start;
   }}
-  /* Totals */
-  .totals-row td {{ border-bottom: none; padding: 1.5mm 3mm; }}
-  .grand-total-row td {{
-    border-top: 0.5mm solid #d97706;
+  .bottom-left {{ flex: 1; }}
+  .totals-table {{
+    width: 70mm;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    border: 0.3mm solid #e5e7eb;
+    border-radius: 2mm;
+    overflow: hidden;
+  }}
+  .totals-table td {{ padding: 2mm 4mm; border-bottom: 0.2mm solid #f3f4f6; }}
+  .totals-table td.label {{ color: #6b7280; }}
+  .totals-table tr.grand-row td {{
+    border-top: 0.4mm solid #111;
+    border-bottom: none;
+    font-size: 10.5pt;
     padding-top: 3mm;
-    font-size: 12pt;
+    padding-bottom: 3mm;
+    color: #111;
   }}
-  /* Footer */
-  .footer {{
-    margin-top: 12mm;
-    border-top: 0.3mm solid #e5e7eb;
-    padding-top: 4mm;
+
+  /* ── Cashback ── */
+  .cashback-box {{
+    margin-top: 8mm;
     text-align: center;
-    font-size: 8.5pt;
+    padding: 4mm;
+    border-top: 0.3mm dashed #d1d5db;
+  }}
+  .cashback-title {{ font-size: 13pt; font-weight: bold; color: #111; margin-bottom: 1.5mm; }}
+  .cashback-note  {{ font-size: 8.5pt; color: #6b7280; font-style: italic; }}
+
+  /* ── Footer ── */
+  .footer {{
+    margin-top: 8mm;
+    border-top: 0.3mm solid #e5e7eb;
+    padding-top: 3mm;
+    text-align: center;
+    font-size: 8pt;
     color: #9ca3af;
   }}
 </style>
 </head>
 <body>
 
+<!-- Header -->
 <div class="header">
-  <div class="shop-brand">
-    <img src="{_LOGO_URL}" alt="PujariGhar" style="height:10mm; width:auto; object-fit:contain;" />
-    <span class="shop-sub">pujarighar.com</span>
+  <div class="logo-wrap">
+    <img src="{_LOGO_URL}" alt="{SHOP_NAME_EN}" />
   </div>
   <div class="invoice-label">
-    <div class="invoice-title">{t('চালান', 'Invoice')}</div>
-    <div class="invoice-num"># {order.order_number}</div>
+    <div class="invoice-title">{t('চালান', 'TAX INVOICE')}</div>
+    <div class="invoice-sub"># {order.order_number}</div>
   </div>
 </div>
 
-<div class="meta">
-  <span>{t('তারিখ:', 'Date:')} {date_str}</span>
-  <span>{t('পেমেন্ট:', 'Payment:')} {payment_method}</span>
-  <span class="{payment_status_class}">{payment_status_label}</span>
+<!-- Order meta row -->
+<div class="meta-row">
+  <div class="meta-item"><span>{t('অর্ডার নং:', 'Order No:')}</span> <strong>{order.order_number}</strong></div>
+  <div class="meta-item"><span>{t('অর্ডার তারিখ:', 'Order Date:')}</span> <strong>{order_date}</strong></div>
+  <div class="meta-item"><span>{t('চালান তারিখ:', 'Invoice Date:')}</span> <strong>{invoice_date}</strong></div>
+  <div class="meta-item"><span>{t('পেমেন্ট:', 'Payment:')}</span> <strong>{'COD' if order.payment_method == 'COD' else t('অনলাইন','Online')}</strong></div>
 </div>
 
-<div class="section-title">{t('গ্রাহকের তথ্য', 'Bill To')}</div>
-<div class="customer-name">{name}</div>
-<div class="customer-info">{order.shipping_phone}</div>
-{f'<div class="customer-info">{addr}</div>' if addr else ''}
-{f'<div class="customer-info">{location}</div>' if location else ''}
+<!-- Bill From / Bill To -->
+<div class="billing">
+  <div class="billing-col">
+    <div class="section-label">{t('প্রেরক', 'Bill From')}</div>
+    <div class="biz-name">{SHOP_NAME_EN}</div>
+    <div class="biz-info">{SHOP_PHONE}</div>
+    <div class="biz-info">{SHOP_WEB}</div>
+    <div class="biz-info">{SHOP_ADDRESS}</div>
+  </div>
+  <div class="divider"></div>
+  <div class="billing-col">
+    <div class="section-label">{t('গ্রাহক', 'Billed To')}</div>
+    <div class="cust-name">{name}</div>
+    <div class="biz-info">{order.shipping_phone}</div>
+    {f'<div class="section-label" style="margin-top:2mm">{t("ডেলিভারি ঠিকানা","Deliver To")}</div>' if addr or location else ''}
+    {f'<div class="biz-info">{addr}</div>' if addr else ''}
+    {f'<div class="biz-info">{location}</div>' if location else ''}
+  </div>
+</div>
 
-<table>
+<!-- Items table -->
+<table class="items">
   <thead>
     <tr>
-      <th class="th-center" style="width:8mm">#</th>
-      <th class="th-left">{t('পণ্য', 'Item')}</th>
-      <th class="th-right" style="width:18mm">{t('পরিমাণ', 'Qty')}</th>
-      <th class="th-right" style="width:28mm">{t('একক মূল্য', 'Unit Price')}</th>
-      <th class="th-right" style="width:28mm">{t('মোট', 'Total')}</th>
+      <th class="center" style="width:8mm">{t('ক্র.','SL')}</th>
+      <th class="left">{t('পণ্য','Products')}</th>
+      <th class="center" style="width:16mm">{t('পরিমাণ','Qty')}</th>
+      <th class="right" style="width:26mm">{t('একক মূল্য','Unit Price')}</th>
+      <th class="right" style="width:26mm">{t('মোট','Amount')}</th>
     </tr>
   </thead>
   <tbody>
     {rows_html}
   </tbody>
-  <tbody class="totals-row">
-    {totals_html}
-  </tbody>
 </table>
 
+<!-- Bottom: left space + right totals -->
+<div class="bottom-section">
+  <div class="bottom-left"></div>
+  <table class="totals-table">
+    <tbody>
+      {totals_html}
+    </tbody>
+  </table>
+</div>
+
+{cashback_html}
+
 <div class="footer">
-  {t('ধন্যবাদ আপনার ক্রয়ের জন্য • পূজারিঘর', 'Thank you for your purchase • PujariGhar')}
+  {t('ক্রয়ের জন্য ধন্যবাদ — পূজারিঘর', 'Thank you for your purchase — PujariGhar')}
 </div>
 
 </body>

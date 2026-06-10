@@ -73,9 +73,10 @@ class Profile(models.Model):
     address_en   = models.TextField(blank=True)
     district     = models.CharField(max_length=100, blank=True)
     thana        = models.CharField(max_length=100, blank=True)
-    post_code    = models.CharField(max_length=10, blank=True)
-    created_at   = models.DateTimeField(auto_now_add=True)
-    updated_at   = models.DateTimeField(auto_now=True)
+    post_code         = models.CharField(max_length=10, blank=True)
+    cashback_balance  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    created_at        = models.DateTimeField(auto_now_add=True)
+    updated_at        = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.full_name_bn or self.full_name_en}'
@@ -155,7 +156,22 @@ class Product(BaseModel):
 
     @property
     def effective_price(self) -> Decimal:
-        active = self.discounts.filter(is_active=True).order_by('-created_at').first()
+        from django.utils import timezone
+        today = timezone.now().date()
+        active = (
+            self.discounts
+            .filter(
+                is_active=True,
+            )
+            .filter(
+                models.Q(start_date__isnull=True) | models.Q(start_date__lte=today)
+            )
+            .filter(
+                models.Q(end_date__isnull=True) | models.Q(end_date__gte=today)
+            )
+            .order_by('-created_at')
+            .first()
+        )
         if active:
             if active.discount_type == 'PERCENTAGE':
                 return (self.unit_price * (1 - active.discount_value / 100)).quantize(Decimal('0.01'))
@@ -365,6 +381,8 @@ class SalesOrder(BaseModel):
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
+    cashback_amount     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
+    cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     notes_bn            = models.TextField(blank=True)
     notes_en            = models.TextField(blank=True)
 
@@ -627,6 +645,8 @@ class Discount(models.Model):
     discount_value = models.DecimalField(max_digits=10, decimal_places=2)
     note           = models.CharField(max_length=200, blank=True)
     is_active      = models.BooleanField(default=True)
+    start_date     = models.DateField(null=True, blank=True)
+    end_date       = models.DateField(null=True, blank=True)
     created_at     = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -654,6 +674,41 @@ class DeliveryCharge(models.Model):
 
     def __str__(self):
         return f'ডেলিভারি চার্জ — ঢাকা: ৳{self.inside_dhaka}, বাইরে: ৳{self.outside_dhaka}'
+
+
+class CashbackTier(models.Model):
+    TYPES = [('FIXED', 'Fixed Amount'), ('PERCENTAGE', 'Percentage')]
+    min_order_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    cashback_type    = models.CharField(max_length=10, choices=TYPES, default='FIXED')
+    cashback_value   = models.DecimalField(max_digits=8, decimal_places=2)
+    max_cashback     = models.DecimalField(max_digits=8, decimal_places=2, default=0)  # 0 = no cap
+    is_active        = models.BooleanField(default=True)
+    created_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['min_order_amount']
+        verbose_name = 'Cashback Tier'
+
+    @classmethod
+    def calculate(cls, order_amount: Decimal) -> Decimal:
+        """Return cashback for the highest qualifying active tier."""
+        tier = (
+            cls.objects.filter(is_active=True, min_order_amount__lte=order_amount)
+                       .order_by('-min_order_amount')
+                       .first()
+        )
+        if not tier:
+            return Decimal('0')
+        if tier.cashback_type == 'FIXED':
+            amount = tier.cashback_value
+        else:
+            amount = (order_amount * tier.cashback_value / 100).quantize(Decimal('0.01'))
+        if tier.max_cashback > 0:
+            amount = min(amount, tier.max_cashback)
+        return amount
+
+    def __str__(self):
+        return f'৳{self.min_order_amount}+ → {self.cashback_type} {self.cashback_value}'
 
 
 # ─── Notifications ────────────────────────────────────────────────────────────

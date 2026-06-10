@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
@@ -73,7 +74,14 @@ class OrderService:
         if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
             order.payment_status = 'PAID'
             order.save(update_fields=['payment_status'])
-        self._create_payment_journal(order, user)
+        if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+            self._create_payment_journal(order, user)
+        # Credit cashback earned to customer's balance
+        cb = Decimal(str(order.cashback_amount or 0))
+        if cb > 0 and not order.is_guest and order.customer_id:
+            order.customer.profile.cashback_balance = F('cashback_balance') + cb
+            order.customer.profile.save(update_fields=['cashback_balance'])
+            self._create_cashback_earned_journal(order, cb, user)
         return order
 
     @transaction.atomic
@@ -148,8 +156,9 @@ class OrderService:
     def _next_entry_number(self) -> str:
         today  = timezone.now().date()
         prefix = f'JE-{today:%Y%m%d}-'
-        last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        return f'{prefix}{last + 1:04d}'
+        last   = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
+        seq    = int(last.rsplit('-', 1)[1]) if last else 0
+        return f'{prefix}{seq + 1:04d}'
 
     def _acct(self, code: str):
         try:
@@ -158,29 +167,44 @@ class OrderService:
             return None
 
     def _create_payment_journal(self, order: SalesOrder, user: User) -> None:
-        cogs = sum(
-            item.product.cost_price * item.quantity
-            for item in order.items.select_related('product')
-        )
-        # Delivery charge passes through to the delivery person — excluded from platform accounting.
-        # We record only the product revenue (subtotal) and cost.
+        cogs    = sum(item.product.cost_price * item.quantity for item in order.items.select_related('product'))
         revenue = order.subtotal - (order.discount_amount or Decimal('0'))
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='PAYMENT',
             reference_id=order.id,
-            description_bn=f'বিক্রয় ও পেমেন্ট — {order.order_number}',
-            description_en=f'Sale & Payment — {order.order_number}',
+            description_bn=f'পেমেন্ট — {order.order_number}',
+            description_en=f'Payment — {order.order_number}',
             created_by=user, is_posted=True,
         )
+        cb_used = Decimal(str(order.cashback_used or 0))
         lines = [
-            ('1000', revenue, Decimal('0')),   # Dr Cash (net product revenue)
-            ('5000', cogs,    Decimal('0')),   # Dr COGS
-            ('4000', Decimal('0'), revenue),   # Cr Sales Revenue
-            ('1300', Decimal('0'), cogs),      # Cr Inventory
+            ('1000', order.grand_total,                    Decimal('0')),  # Dr Cash (already net of cashback)
+            ('5000', cogs,                                 Decimal('0')),  # Dr COGS
+            ('4000', Decimal('0'),                         revenue),       # Cr Revenue
+            ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),   # Cr Delivery Income
+            ('1300', Decimal('0'),                         cogs),          # Cr Inventory
         ]
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable (discharged)
         for code, debit, credit in lines:
             acct = self._acct(code)
             if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_cashback_earned_journal(self, order: SalesOrder, amount: Decimal, user: User) -> None:
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='CASHBACK',
+            reference_id=order.id,
+            description_bn=f'ক্যাশব্যাক অর্জিত — {order.order_number}',
+            description_en=f'Cashback Earned — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('6350', amount,         Decimal('0')),  # Dr Cashback Expense
+            ('2250', Decimal('0'),   amount),        # Cr Cashback Payable
+        ]:
+            acct = self._acct(code)
+            if acct:
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
     def _create_return_journal(self, order: SalesOrder, user: User) -> None:

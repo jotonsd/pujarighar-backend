@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
-    Cart, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
+    Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
     ShippingAddress, Notification, User,
@@ -70,6 +70,11 @@ class CheckoutService:
         delivery         = _delivery_charge(s_district or '', delivery_zone)
         grand_total      = subtotal + delivery
 
+        # Auto-apply user's cashback balance
+        profile          = user.profile
+        cashback_used    = min(profile.cashback_balance, grand_total)
+        grand_total      = grand_total - cashback_used
+
         order = SalesOrder.objects.create(
             order_number        = order_number,
             customer            = user,
@@ -87,7 +92,12 @@ class CheckoutService:
             subtotal            = subtotal,
             delivery_charge     = delivery,
             grand_total         = grand_total,
+            cashback_used       = cashback_used,
         )
+
+        if cashback_used > 0:
+            profile.cashback_balance -= cashback_used
+            profile.save(update_fields=['cashback_balance'])
 
         for item in items:
             SalesOrderItem.objects.create(
@@ -105,7 +115,13 @@ class CheckoutService:
             order=order, from_status='', to_status='PENDING', changed_by=user,
         )
 
-        self._create_sale_journal(order, user)
+        cashback = CashbackTier.calculate(grand_total)
+        if cashback > 0:
+            order.cashback_amount = cashback
+            order.save(update_fields=['cashback_amount'])
+
+        if payment_method != 'COD':
+            self._create_sale_journal(order, user)
         cart.items.all().delete()
         self._notify_admins(order)
 
@@ -130,8 +146,8 @@ class CheckoutService:
     def _create_sale_journal(self, order: SalesOrder, user) -> None:
         today        = timezone.now().date()
         prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
+        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
 
         cogs = sum(
             item.product.cost_price * item.quantity
@@ -151,14 +167,19 @@ class CheckoutService:
             except Account.DoesNotExist:
                 return None
 
-        for code, debit, credit in [
-            ('1100', order.grand_total,        Decimal('0')),
-            ('4000', Decimal('0'),             order.subtotal),
-            ('4200', Decimal('0'),             Decimal(str(order.delivery_charge))),
-            ('2100', Decimal('0'),             order.tax_amount),
-            ('5000', cogs,                     Decimal('0')),
-            ('1300', Decimal('0'),             cogs),
-        ]:
+        lines = [
+            ('1100', order.grand_total,                    Decimal('0')),  # Dr AR
+            ('4000', Decimal('0'),                         order.subtotal),  # Cr Revenue
+            ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),  # Cr Delivery
+            ('2100', Decimal('0'),                         order.tax_amount),  # Cr Tax
+            ('5000', cogs,                                 Decimal('0')),  # Dr COGS
+            ('1300', Decimal('0'),                         cogs),  # Cr Inventory
+        ]
+        cb_used = Decimal(str(order.cashback_used or 0))
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
+
+        for code, debit, credit in lines:
             acct = _acct(code)
             if acct and (debit or credit):
                 JournalLine.objects.create(

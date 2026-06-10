@@ -87,7 +87,8 @@ class GuestCheckoutService:
             changed_by=system_user,
         )
 
-        self._create_sale_journal(order)
+        if payment_method != 'COD':
+            self._create_sale_journal(order)
         self._notify_admins(order)
         logger.info(f"Guest order created: {order.order_number} phone={order.shipping_phone}")
         return order
@@ -134,8 +135,8 @@ class GuestCheckoutService:
 
         today        = timezone.now().date()
         prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
+        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
 
         cogs = sum(
             item.product.cost_price * item.quantity

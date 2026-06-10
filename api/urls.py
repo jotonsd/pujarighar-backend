@@ -153,6 +153,12 @@ urlpatterns = [
     path('delivery-charges/',        views.get_delivery_charges,    name='delivery-charges-get'),
     path('delivery-charges/update/', views.update_delivery_charges, name='delivery-charges-update'),
 
+    # ─── Cashback Tiers ───────────────────────────────────────────────────────
+    path('cashback/',              views.list_cashback_tiers,   name='cashback-list'),
+    path('cashback/create/',       views.create_cashback_tier,  name='cashback-create'),
+    path('cashback/<int:pk>/update/', views.update_cashback_tier, name='cashback-update'),
+    path('cashback/<int:pk>/delete/', views.delete_cashback_tier, name='cashback-delete'),
+
     # ─── Discounts ────────────────────────────────────────────────────────────
     path('discounts/',                      views.list_discounts,   name='discount-list'),
     path('discounts/create/',               views.create_discount,  name='discount-create'),

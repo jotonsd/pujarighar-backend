@@ -48,19 +48,22 @@ def _build_nav_menu(role: str) -> list:
                 item('/admin/settings/suppliers',  '🚛', 'সরবরাহকারী',   'Suppliers'),
             ]),
             group('⚙️', 'সেটিংস', 'Settings', [
-                item('/admin/settings/delivery-charges', '🚚', 'ডেলিভারি চার্জ', 'Delivery Charges'),
-                item('/admin/settings/reviews',          '⭐', 'রিভিউ',           'Reviews'),
-                item('/admin/settings/partners',         '🤝', 'অংশীদার',         'Partners'),
-                item('/admin/settings/loans',           '💰', 'ঋণ বিনিয়োগকারী', 'Loan Investors'),
+                item('/admin/settings/delivery-charges', '🚚', 'ডেলিভারি চার্জ',   'Delivery Charges'),
+                item('/admin/settings/cashback',         '🎁', 'ক্যাশব্যাক',        'Cashback'),
+                item('/admin/settings/reviews',          '⭐', 'রিভিউ',             'Reviews'),
+                item('/admin/settings/partners',         '🤝', 'অংশীদার',           'Partners'),
+                item('/admin/settings/loans',            '💰', 'ঋণ বিনিয়োগকারী',  'Loan Investors'),
             ]),
             group('🎨', 'মার্কেটিং', 'Marketing', [
                 item('/admin/slides',  '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),
                 item('/admin/banners', '🎯', 'ব্যানার',         'Banners'),
             ]),
             group('📒', 'হিসাব', 'Accounting', [
-                item('/admin/accounting/journal', '📓', 'জার্নাল', 'Journal'),
-                item('/admin/accounting/ledger',  '📒', 'খাতা',    'Ledger'),
-                item('/admin/accounting/reports', '📊', 'রিপোর্ট', 'Reports'),
+                item('/admin/accounting/journal',       '📓', 'জার্নাল',          'Journal'),
+                item('/admin/accounting/ledger',        '📒', 'খাতা',              'Ledger'),
+                item('/admin/accounting/profit-loss',   '📈', 'লাভ-ক্ষতি',        'Profit & Loss'),
+                item('/admin/accounting/trial-balance', '⚖️', 'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
+                item('/admin/accounting/sales-summary', '🛒', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
             ]),
         ]
 

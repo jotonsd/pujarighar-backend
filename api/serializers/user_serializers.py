@@ -10,9 +10,10 @@ class ProfileSerializer(serializers.ModelSerializer):
             'full_name_bn', 'full_name_en', 'avatar',
             'address_bn', 'address_en',
             'district', 'thana', 'post_code',
+            'cashback_balance',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['cashback_balance', 'created_at', 'updated_at']
 
 
 class UserSerializer(serializers.ModelSerializer):
