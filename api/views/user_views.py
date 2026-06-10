@@ -18,6 +18,81 @@ logger = logging.getLogger(__name__)
 _svc = UserService()
 
 
+def _build_nav_menu(role: str) -> list:
+    """Return structured nav menu for the given role. Consumed by the frontend Navbar."""
+
+    def link(href, icon, bn, en):
+        return {'type': 'link', 'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en}
+
+    def group(icon, bn, en, items):
+        return {'type': 'group', 'icon': icon, 'label_bn': bn, 'label_en': en, 'items': items}
+
+    def item(href, icon, bn, en):
+        return {'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en}
+
+    if role == 'ADMIN':
+        return [
+            link('/admin/orders/new',  '🧾', 'নতুন অর্ডার',    'New Order'),
+            link('/admin/orders',      '🛍️', 'অর্ডার',          'Orders'),
+            link('/admin/users',       '👥', 'ব্যবহারকারী',     'Users'),
+            link('/admin/dashboard',   '📊', 'ড্যাশবোর্ড',      'Dashboard'),
+            group('📦', 'পণ্য', 'Catalog', [
+                item('/admin/products',         '📦', 'পণ্য',          'Products'),
+                item('/admin/packages',         '🎁', 'প্যাকেজ',       'Packages'),
+                item('/admin/categories',       '🏷️', 'কেটাগরি',       'Categories'),
+                item('/admin/settings/brands',  '🔖', 'ব্র্যান্ড',     'Brands'),
+                item('/admin/discounts',        '💸', 'ডিসকাউন্ট',     'Discounts'),
+            ]),
+            group('🏭', 'গুদাম', 'Inventory', [
+                item('/admin/inventory',           '📋', 'স্টক',         'Stock'),
+                item('/admin/settings/suppliers',  '🚛', 'সরবরাহকারী',   'Suppliers'),
+            ]),
+            group('⚙️', 'সেটিংস', 'Settings', [
+                item('/admin/settings/delivery-charges', '🚚', 'ডেলিভারি চার্জ', 'Delivery Charges'),
+                item('/admin/settings/reviews',          '⭐', 'রিভিউ',           'Reviews'),
+                item('/admin/settings/partners',         '🤝', 'অংশীদার',         'Partners'),
+            ]),
+            group('🎨', 'মার্কেটিং', 'Marketing', [
+                item('/admin/slides',  '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),
+                item('/admin/banners', '🎯', 'ব্যানার',         'Banners'),
+            ]),
+            group('📒', 'হিসাব', 'Accounting', [
+                item('/admin/accounting/journal', '📓', 'জার্নাল', 'Journal'),
+                item('/admin/accounting/ledger',  '📒', 'খাতা',    'Ledger'),
+                item('/admin/accounting/reports', '📊', 'রিপোর্ট', 'Reports'),
+            ]),
+        ]
+
+    if role == 'WAREHOUSE':
+        return [
+            link('/admin/orders/new', '🧾', 'নতুন অর্ডার', 'New Order'),
+            link('/admin/orders',     '🛍️', 'অর্ডার',       'Orders'),
+            group('📦', 'পণ্য', 'Catalog', [
+                item('/admin/products',        '📦', 'পণ্য',      'Products'),
+                item('/admin/packages',        '🎁', 'প্যাকেজ',   'Packages'),
+                item('/admin/categories',      '🏷️', 'কেটাগরি',   'Categories'),
+                item('/admin/settings/brands', '🔖', 'ব্র্যান্ড', 'Brands'),
+            ]),
+            link('/admin/inventory', '🏭', 'গুদাম', 'Inventory'),
+        ]
+
+    if role == 'DELIVERY':
+        return [
+            link('/delivery/orders', '🚚', 'ডেলিভারি', 'My Deliveries'),
+        ]
+
+    if role == 'CUSTOMER':
+        return [
+            link('/',         '🏠', 'হোম',           'Home'),
+            link('/products', '🪔', 'পণ্য',           'Products'),
+            link('/packages', '🎁', 'প্যাকেজ',        'Packages'),
+            link('/track',    '📦', 'অর্ডার ট্র্যাক', 'Track Order'),
+            link('/orders',   '🛍️', 'আমার অর্ডার',   'My Orders'),
+        ]
+
+    return []
+
+
 # ─── Admin: user list & create ───────────────────────────────────────────────
 
 @api_view(['GET'])
@@ -140,7 +215,9 @@ def change_role(request, pk):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_me(request):
-    return ApiResponse(message="Profile retrieved", data=UserSerializer(request.user).data)
+    data = UserSerializer(request.user).data
+    data['nav_menu'] = _build_nav_menu(request.user.role)
+    return ApiResponse(message="Profile retrieved", data=data)
 
 
 @api_view(['PATCH'])
@@ -152,7 +229,9 @@ def update_me(request):
     try:
         _svc.update_profile(request.user, {**serializer.validated_data,
                                             'preferred_language': request.data.get('preferred_language')})
-        return ApiResponse(message="Profile updated", data=UserSerializer(request.user).data)
+        data = UserSerializer(request.user).data
+        data['nav_menu'] = _build_nav_menu(request.user.role)
+        return ApiResponse(message="Profile updated", data=data)
     except Exception as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
 

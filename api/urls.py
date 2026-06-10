@@ -93,11 +93,14 @@ urlpatterns = [
     path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
 
     # ─── Suppliers ────────────────────────────────────────────────────────────
-    path('suppliers/',                      views.list_suppliers,   name='supplier-list'),
-    path('suppliers/create/',               views.create_supplier,  name='supplier-create'),
-    path('suppliers/<uuid:pk>/',            views.get_supplier,     name='supplier-detail'),
-    path('suppliers/<uuid:pk>/update/',     views.update_supplier,  name='supplier-update'),
-    path('suppliers/<uuid:pk>/delete/',     views.delete_supplier,  name='supplier-delete'),
+    path('suppliers/',                                              views.list_suppliers,           name='supplier-list'),
+    path('suppliers/create/',                                       views.create_supplier,          name='supplier-create'),
+    path('suppliers/<uuid:pk>/',                                    views.get_supplier,             name='supplier-detail'),
+    path('suppliers/<uuid:pk>/update/',                             views.update_supplier,          name='supplier-update'),
+    path('suppliers/<uuid:pk>/delete/',                             views.delete_supplier,          name='supplier-delete'),
+    path('suppliers/<uuid:pk>/payments/',                           views.list_supplier_payments,   name='supplier-payment-list'),
+    path('suppliers/<uuid:pk>/payments/create/',                    views.create_supplier_payment,  name='supplier-payment-create'),
+    path('suppliers/<uuid:pk>/payments/<uuid:payment_pk>/delete/',  views.delete_supplier_payment,  name='supplier-payment-delete'),
 
     # ─── Partners ─────────────────────────────────────────────────────────────
     path('partners/',                                                       views.list_partners,           name='partner-list'),

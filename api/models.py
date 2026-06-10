@@ -246,6 +246,22 @@ class StockMovement(models.Model):
                 })
 
 
+# ─── Supplier Payments ───────────────────────────────────────────────────────
+
+class SupplierPayment(BaseModel):
+    supplier   = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='payments')
+    amount     = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_date  = models.DateField()
+    note       = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='supplier_payments')
+
+    class Meta:
+        ordering = ['-paid_date', '-created_at']
+
+    def __str__(self):
+        return f'{self.supplier.name_bn} — {self.amount} ({self.paid_date})'
+
+
 # ─── Shipping Addresses ───────────────────────────────────────────────────────
 
 class ShippingAddress(BaseModel):
@@ -454,14 +470,15 @@ class Account(models.Model):
 class JournalEntry(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     entry_number   = models.CharField(max_length=30, unique=True)
-    reference_type = models.CharField(max_length=20, choices=[
-        ('PURCHASE',   'ক্রয়'),
-        ('SALE',       'বিক্রয়'),
-        ('PAYMENT',    'পেমেন্ট'),
-        ('RETURN',     'ফেরত'),
-        ('ADJUSTMENT', 'সমন্বয়'),
-        ('EXPENSE',    'খরচ'),
-        ('EQUITY',     'ইক্যুইটি'),
+    reference_type = models.CharField(max_length=30, choices=[
+        ('PURCHASE',         'ক্রয়'),
+        ('SALE',             'বিক্রয়'),
+        ('PAYMENT',          'পেমেন্ট'),
+        ('RETURN',           'ফেরত'),
+        ('ADJUSTMENT',       'সমন্বয়'),
+        ('EXPENSE',          'খরচ'),
+        ('EQUITY',           'ইক্যুইটি'),
+        ('SUPPLIER_PAYMENT', 'সরবরাহকারী পেমেন্ট'),
     ])
     reference_id   = models.UUIDField(null=True, blank=True)
     description_bn = models.TextField(blank=True)

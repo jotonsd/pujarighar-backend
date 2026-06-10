@@ -55,5 +55,8 @@ from .review_views import (
 )
 from .invoice_views import download_invoice
 from .delivery_charge_views import get_delivery_charges, update_delivery_charges
-from .supplier_views import list_suppliers, create_supplier, get_supplier, update_supplier, delete_supplier
+from .supplier_views import (
+    list_suppliers, create_supplier, get_supplier, update_supplier, delete_supplier,
+    list_supplier_payments, create_supplier_payment, delete_supplier_payment,
+)
 from .partner_views import list_partners, create_partner, update_partner, delete_partner, list_partner_payments, create_partner_payment, update_partner_payment, delete_partner_payment

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
-from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier
+from django.db.models import Sum
+from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier, SupplierPayment
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -94,10 +95,44 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class SupplierSerializer(serializers.ModelSerializer):
+    total_credit  = serializers.SerializerMethodField()
+    total_paid    = serializers.SerializerMethodField()
+    total_balance = serializers.SerializerMethodField()
+
     class Meta:
         model  = Supplier
-        fields = ['id', 'name_bn', 'name_en', 'phone', 'address', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        fields = ['id', 'name_bn', 'name_en', 'phone', 'address', 'is_active', 'created_at',
+                  'total_credit', 'total_paid', 'total_balance']
+        read_only_fields = ['id', 'created_at', 'total_credit', 'total_paid', 'total_balance']
+
+    def _totals(self, obj):
+        if not hasattr(obj, '_sup_cache'):
+            movements    = obj.stockmovement_set.filter(movement_type='PURCHASE', payment_method='CREDIT')
+            total_credit = sum(m.unit_cost * m.quantity for m in movements)
+            total_paid   = obj.payments.aggregate(t=Sum('amount'))['t'] or Decimal('0')
+            obj._sup_cache = (Decimal(str(total_credit)), Decimal(str(total_paid)))
+        return obj._sup_cache
+
+    def get_total_credit(self, obj):
+        return str(self._totals(obj)[0])
+
+    def get_total_paid(self, obj):
+        return str(self._totals(obj)[1])
+
+    def get_total_balance(self, obj):
+        c, p = self._totals(obj)
+        return str(c - p)
+
+
+class SupplierPaymentSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source='supplier.name_bn', read_only=True)
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+
+    class Meta:
+        model  = SupplierPayment
+        fields = ['id', 'supplier', 'supplier_name', 'amount', 'paid_date', 'note',
+                  'created_by', 'created_by_email', 'created_at']
+        read_only_fields = ['id', 'created_by', 'created_at', 'supplier_name', 'created_by_email']
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
