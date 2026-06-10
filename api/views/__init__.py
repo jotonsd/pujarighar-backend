@@ -47,7 +47,7 @@ from .accounting_views import (
     get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, mark_all_read, mark_one_read
-from .discount_views import list_discounts, create_discount, toggle_discount, delete_discount
+from .discount_views import list_discounts, create_discount, toggle_discount, update_discount, delete_discount
 from .review_views import (
     create_review, list_product_reviews, my_order_reviews,
     eligible_order_for_product,

@@ -180,6 +180,18 @@ class Product(BaseModel):
         return self.unit_price
 
     @property
+    def original_price(self) -> Decimal:
+        """For packages: sum of component unit_prices. For regular products: unit_price."""
+        if self.is_package:
+            total = sum(
+                (item.component.unit_price * item.quantity
+                 for item in self.package_items.select_related('component').all()),
+                Decimal('0'),
+            )
+            return total if total > 0 else self.unit_price
+        return self.unit_price
+
+    @property
     def stock_on_hand(self) -> Decimal:
         if self.is_package:
             # Package stock = max whole packages assembable from component stock
@@ -402,9 +414,10 @@ class SalesOrderItem(models.Model):
     product         = models.ForeignKey(Product, on_delete=models.PROTECT)
     product_name_bn = models.CharField(max_length=300)
     product_name_en = models.CharField(max_length=300)
-    unit_price      = models.DecimalField(max_digits=12, decimal_places=2)
-    quantity        = models.DecimalField(max_digits=10, decimal_places=3)
-    line_total      = models.DecimalField(max_digits=12, decimal_places=2)
+    original_unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    unit_price          = models.DecimalField(max_digits=12, decimal_places=2)
+    quantity            = models.DecimalField(max_digits=10, decimal_places=3)
+    line_total          = models.DecimalField(max_digits=12, decimal_places=2)
 
 
 class OrderStatusLog(models.Model):

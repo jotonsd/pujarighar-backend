@@ -1,6 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
-from django.db.models import Sum
+from django.db.models import Q, Sum
+from django.utils import timezone
 from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier, SupplierPayment
 
 
@@ -63,7 +64,15 @@ class ProductSerializer(serializers.ModelSerializer):
     review_count          = serializers.IntegerField(read_only=True, default=0)
 
     def _active_discount(self, obj):
-        return obj.discounts.filter(is_active=True).order_by('-created_at').first()
+        today = timezone.now().date()
+        return (
+            obj.discounts
+            .filter(is_active=True)
+            .filter(Q(start_date__isnull=True) | Q(start_date__lte=today))
+            .filter(Q(end_date__isnull=True)   | Q(end_date__gte=today))
+            .order_by('-created_at')
+            .first()
+        )
 
     def get_effective_price(self, obj):
         return str(obj.effective_price)

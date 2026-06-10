@@ -41,11 +41,13 @@ class GuestCheckoutService:
         last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
         order_number = f'{prefix}{last + 1:04d}'
 
-        subtotal     = sum(i['product'].effective_price * i['quantity'] for i in items)
-        apply_deliv  = validated_data.get('apply_delivery', True)
-        zone         = validated_data.get('delivery_zone')
-        delivery     = _delivery_charge(shipping.get('district', ''), zone) if apply_deliv else Decimal('0')
-        grand_total  = subtotal + delivery
+        original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
+        subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
+        discount_amount   = original_subtotal - subtotal
+        apply_deliv       = validated_data.get('apply_delivery', True)
+        zone              = validated_data.get('delivery_zone')
+        delivery          = _delivery_charge(shipping.get('district', ''), zone) if apply_deliv else Decimal('0')
+        grand_total       = subtotal + delivery
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
@@ -65,19 +67,21 @@ class GuestCheckoutService:
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
             subtotal            = subtotal,
+            discount_amount     = discount_amount,
             delivery_charge     = delivery,
             grand_total         = grand_total,
         )
 
         for item in items:
             SalesOrderItem.objects.create(
-                order           = order,
-                product         = item['product'],
-                product_name_bn = item['product'].name_bn,
-                product_name_en = item['product'].name_en,
-                unit_price      = item['product'].effective_price,
-                quantity        = item['quantity'],
-                line_total      = item['product'].effective_price * item['quantity'],
+                order                = order,
+                product              = item['product'],
+                product_name_bn      = item['product'].name_bn,
+                product_name_en      = item['product'].name_en,
+                original_unit_price  = item['product'].original_price,
+                unit_price           = item['product'].effective_price,
+                quantity             = item['quantity'],
+                line_total           = item['product'].effective_price * item['quantity'],
             )
             self._deduct_stock(item['product'], item['quantity'], order.id)
 

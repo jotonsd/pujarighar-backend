@@ -54,6 +54,20 @@ def toggle_discount(request, pk):
         return ApiResponse(message="Not found", errors="Not found", status_code=404)
 
 
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def update_discount(request, pk):
+    try:
+        discount = Discount.objects.get(pk=pk)
+    except Discount.DoesNotExist:
+        return ApiResponse(message="Not found", errors="Not found", status_code=404)
+    s = DiscountSerializer(discount, data=request.data, partial=True)
+    if not s.is_valid():
+        return ApiResponse(message="Validation failed", errors=s.errors, status_code=422)
+    s.save()
+    return ApiResponse(message="Discount updated", data=DiscountSerializer(discount).data)
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def delete_discount(request, pk):

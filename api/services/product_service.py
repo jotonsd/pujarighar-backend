@@ -102,7 +102,13 @@ class ProductService:
         if max_price is not None:
             qs = qs.filter(unit_price__lte=max_price)
         if has_discount:
-            qs = qs.filter(discounts__is_active=True).distinct()
+            today = timezone.now().date()
+            qs = qs.filter(
+                discounts__is_active=True,
+            ).filter(
+                Q(discounts__start_date__isnull=True) | Q(discounts__start_date__lte=today),
+                Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
+            ).distinct()
         if ordering in ('price_asc', 'price_desc'):
             disc_type = Subquery(
                 Discount.objects.filter(product=OuterRef('pk'), is_active=True)

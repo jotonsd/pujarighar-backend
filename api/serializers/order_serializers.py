@@ -9,7 +9,8 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SalesOrderItem
         fields = ['id', 'product', 'product_name_bn', 'product_name_en',
-                  'unit_price', 'quantity', 'line_total', 'is_package', 'package_items']
+                  'original_unit_price', 'unit_price', 'quantity', 'line_total',
+                  'is_package', 'package_items']
 
     def get_package_items(self, obj):
         if not obj.product.is_package:
