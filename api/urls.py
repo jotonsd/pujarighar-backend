@@ -112,6 +112,15 @@ urlpatterns = [
     path('partners/<uuid:pk>/payments/<uuid:payment_pk>/update/',           views.update_partner_payment,  name='partner-payment-update'),
     path('partners/<uuid:pk>/payments/<uuid:payment_pk>/delete/',           views.delete_partner_payment,  name='partner-payment-delete'),
 
+    # ─── Loan Investors ───────────────────────────────────────────────────────
+    path('loans/',                                                          views.list_loan_investors,     name='loan-list'),
+    path('loans/create/',                                                   views.create_loan_investor,    name='loan-create'),
+    path('loans/<uuid:pk>/update/',                                         views.update_loan_investor,    name='loan-update'),
+    path('loans/<uuid:pk>/delete/',                                         views.delete_loan_investor,    name='loan-delete'),
+    path('loans/<uuid:pk>/payments/',                                       views.list_loan_payments,      name='loan-payment-list'),
+    path('loans/<uuid:pk>/payments/create/',                                views.create_loan_payment,     name='loan-payment-create'),
+    path('loans/<uuid:pk>/payments/<uuid:payment_pk>/delete/',              views.delete_loan_payment,     name='loan-payment-delete'),
+
     # ─── Accounting ───────────────────────────────────────────────────────────
     path('accounting/accounts/',                      views.list_accounts,         name='account-list'),
     path('accounting/accounts/<uuid:pk>/',             views.get_account,           name='account-detail'),

@@ -51,6 +51,7 @@ def _build_nav_menu(role: str) -> list:
                 item('/admin/settings/delivery-charges', '🚚', 'ডেলিভারি চার্জ', 'Delivery Charges'),
                 item('/admin/settings/reviews',          '⭐', 'রিভিউ',           'Reviews'),
                 item('/admin/settings/partners',         '🤝', 'অংশীদার',         'Partners'),
+                item('/admin/settings/loans',           '💰', 'ঋণ বিনিয়োগকারী', 'Loan Investors'),
             ]),
             group('🎨', 'মার্কেটিং', 'Marketing', [
                 item('/admin/slides',  '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),

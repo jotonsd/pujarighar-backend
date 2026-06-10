@@ -75,6 +75,30 @@ def _create_profit_payment_journal(payment: PartnerProfitPayment, paid_delta: De
             JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
 
+def _create_capital_journal(partner: Partner, user) -> None:
+    """
+    Dr Cash (1000) = invested_amount   — cash received from partner
+    Cr Owner's Capital (3000) = invested_amount — equity recorded
+    """
+    amount = Decimal(str(partner.invested_amount))
+    if amount <= 0:
+        return
+    entry = JournalEntry.objects.create(
+        entry_number=_next_entry_number(), reference_type='CAPITAL',
+        reference_id=partner.id,
+        description_bn=f'মূলধন বিনিয়োগ — {partner.name_bn}',
+        description_en=f'Capital Contribution — {partner.name_en or partner.name_bn}',
+        created_by=user, is_posted=True,
+    )
+    for code, debit, credit in [
+        ('1000', amount,         Decimal('0')),  # Dr Cash
+        ('3000', Decimal('0'),   amount),        # Cr Owner's Capital
+    ]:
+        acct = _acct(code)
+        if acct:
+            JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+
 # ─── Partners CRUD ────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
@@ -91,6 +115,7 @@ def create_partner(request):
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     partner = serializer.save()
+    _create_capital_journal(partner, request.user)
     return ApiResponse(message="Partner created", data=PartnerSerializer(partner).data, status_code=201)
 
 

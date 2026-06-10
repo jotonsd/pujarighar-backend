@@ -479,6 +479,10 @@ class JournalEntry(models.Model):
         ('EXPENSE',          'খরচ'),
         ('EQUITY',           'ইক্যুইটি'),
         ('SUPPLIER_PAYMENT', 'সরবরাহকারী পেমেন্ট'),
+        ('CAPITAL',          'মূলধন বিনিয়োগ'),
+        ('LOAN_RECEIVED',    'ঋণ গ্রহণ'),
+        ('LOAN_INTEREST',    'সুদ পরিশোধ'),
+        ('LOAN_PRINCIPAL',   'ঋণ পরিশোধ'),
     ])
     reference_id   = models.UUIDField(null=True, blank=True)
     description_bn = models.TextField(blank=True)
@@ -534,6 +538,43 @@ class PartnerProfitPayment(BaseModel):
 
     def __str__(self):
         return f'{self.partner.name_bn} — {self.year}/{self.month:02d}'
+
+
+class LoanInvestor(BaseModel):
+    name_bn       = models.CharField(max_length=200)
+    name_en       = models.CharField(max_length=200, blank=True)
+    phone         = models.CharField(max_length=20, blank=True)
+    principal     = models.DecimalField(max_digits=14, decimal_places=2, help_text='Original loan amount')
+    interest_rate = models.DecimalField(max_digits=5, decimal_places=2, help_text='Annual interest rate %')
+    loan_date     = models.DateField()
+    due_date      = models.DateField(null=True, blank=True)
+    is_active     = models.BooleanField(default=True)
+    note          = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-loan_date']
+
+    def __str__(self):
+        return f'{self.name_bn} — ৳{self.principal} @ {self.interest_rate}%'
+
+
+class LoanPayment(BaseModel):
+    PAYMENT_TYPES = [
+        ('INTEREST',  'সুদ পরিশোধ'),
+        ('PRINCIPAL', 'আসল পরিশোধ'),
+    ]
+    loan         = models.ForeignKey(LoanInvestor, on_delete=models.PROTECT, related_name='payments')
+    payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPES)
+    amount       = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_date    = models.DateField()
+    note         = models.TextField(blank=True)
+    created_by   = models.ForeignKey('User', on_delete=models.PROTECT, related_name='loan_payments')
+
+    class Meta:
+        ordering = ['-paid_date']
+
+    def __str__(self):
+        return f'{self.loan.name_bn} — {self.payment_type} ৳{self.amount}'
 
 
 class Banner(BaseModel):

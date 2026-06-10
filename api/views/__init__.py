@@ -60,3 +60,7 @@ from .supplier_views import (
     list_supplier_payments, create_supplier_payment, delete_supplier_payment,
 )
 from .partner_views import list_partners, create_partner, update_partner, delete_partner, list_partner_payments, create_partner_payment, update_partner_payment, delete_partner_payment
+from .loan_views import (
+    list_loan_investors, create_loan_investor, update_loan_investor, delete_loan_investor,
+    list_loan_payments, create_loan_payment, delete_loan_payment,
+)
