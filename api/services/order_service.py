@@ -168,7 +168,7 @@ class OrderService:
 
     def _create_payment_journal(self, order: SalesOrder, user: User) -> None:
         cogs    = sum(item.product.cost_price * item.quantity for item in order.items.select_related('product'))
-        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
+        revenue = order.subtotal  # already net of discount
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='PAYMENT',
             reference_id=order.id,
@@ -212,7 +212,7 @@ class OrderService:
             item.product.cost_price * item.quantity
             for item in order.items.select_related('product')
         )
-        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
+        revenue = order.subtotal  # already net of discount
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='RETURN',
             reference_id=order.id,
@@ -236,7 +236,7 @@ class OrderService:
             item.product.cost_price * item.quantity
             for item in order.items.select_related('product')
         )
-        revenue = order.subtotal - (order.discount_amount or Decimal('0'))
+        revenue = order.subtotal  # already net of discount
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='RETURN',
             reference_id=order.id,

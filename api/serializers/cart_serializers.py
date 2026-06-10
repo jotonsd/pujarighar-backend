@@ -4,19 +4,20 @@ from api.models import Cart, CartItem, Product
 
 
 class CartItemSerializer(serializers.ModelSerializer):
-    product_name_bn = serializers.CharField(source='product.name_bn', read_only=True)
-    product_name_en = serializers.CharField(source='product.name_en', read_only=True)
-    unit_price      = serializers.SerializerMethodField()
-    stock_on_hand   = serializers.SerializerMethodField()
-    line_total      = serializers.SerializerMethodField()
-    is_package      = serializers.BooleanField(source='product.is_package', read_only=True)
-    package_items   = serializers.SerializerMethodField()
-    product_image   = serializers.SerializerMethodField()
+    product_name_bn     = serializers.CharField(source='product.name_bn', read_only=True)
+    product_name_en     = serializers.CharField(source='product.name_en', read_only=True)
+    unit_price          = serializers.SerializerMethodField()
+    original_unit_price = serializers.SerializerMethodField()
+    stock_on_hand       = serializers.SerializerMethodField()
+    line_total          = serializers.SerializerMethodField()
+    is_package          = serializers.BooleanField(source='product.is_package', read_only=True)
+    package_items       = serializers.SerializerMethodField()
+    product_image       = serializers.SerializerMethodField()
 
     class Meta:
         model  = CartItem
         fields = ['id', 'product', 'product_name_bn', 'product_name_en',
-                  'unit_price', 'quantity', 'line_total', 'stock_on_hand',
+                  'unit_price', 'original_unit_price', 'quantity', 'line_total', 'stock_on_hand',
                   'is_package', 'package_items', 'product_image']
         read_only_fields = ['id']
 
@@ -32,6 +33,9 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     def get_unit_price(self, obj):
         return str(obj.product.effective_price)
+
+    def get_original_unit_price(self, obj):
+        return str(obj.product.original_price)
 
     def get_line_total(self, obj):
         return str(obj.product.effective_price * obj.quantity)
@@ -50,16 +54,24 @@ class CartItemSerializer(serializers.ModelSerializer):
 
 
 class CartSerializer(serializers.ModelSerializer):
-    items      = CartItemSerializer(many=True, read_only=True)
-    subtotal   = serializers.SerializerMethodField()
-    item_count = serializers.SerializerMethodField()
+    items           = CartItemSerializer(many=True, read_only=True)
+    subtotal        = serializers.SerializerMethodField()
+    discount_amount = serializers.SerializerMethodField()
+    item_count      = serializers.SerializerMethodField()
 
     class Meta:
         model  = Cart
-        fields = ['id', 'items', 'subtotal', 'item_count']
+        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count']
 
     def get_subtotal(self, obj):
         return str(sum(item.product.effective_price * item.quantity for item in obj.items.all()))
+
+    def get_discount_amount(self, obj):
+        total = sum(
+            (item.product.original_price - item.product.effective_price) * item.quantity
+            for item in obj.items.all()
+        )
+        return str(max(total, Decimal('0')))
 
     def get_item_count(self, obj):
         return obj.items.count()

@@ -58,6 +58,7 @@ class ProductSerializer(serializers.ModelSerializer):
     brand_name_bn        = serializers.CharField(source='brand.name_bn', read_only=True, default=None)
     brand_name_en        = serializers.CharField(source='brand.name_en', read_only=True, default=None)
     effective_price      = serializers.SerializerMethodField()
+    original_price       = serializers.SerializerMethodField()
     active_discount_type  = serializers.SerializerMethodField()
     active_discount_value = serializers.SerializerMethodField()
     average_rating        = serializers.FloatField(read_only=True, default=None)
@@ -77,6 +78,9 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_effective_price(self, obj):
         return str(obj.effective_price)
 
+    def get_original_price(self, obj):
+        return str(obj.original_price)
+
     def get_active_discount_type(self, obj):
         d = self._active_discount(obj)
         return d.discount_type if d else None
@@ -92,7 +96,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'description_bn', 'description_en',
             'sku', 'category', 'category_name_bn', 'category_name_en',
             'brand', 'brand_name_bn', 'brand_name_en',
-            'unit_price', 'cost_price', 'effective_price',
+            'unit_price', 'cost_price', 'effective_price', 'original_price',
             'active_discount_type', 'active_discount_value',
             'unit_bn', 'unit_en',
             'is_package', 'discount_type', 'discount_value', 'is_active',

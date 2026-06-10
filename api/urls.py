@@ -38,9 +38,10 @@ urlpatterns = [
     path('brands/<uuid:pk>/delete/',     views.delete_brand,  name='brand-delete'),
 
     # ─── Products ─────────────────────────────────────────────────────────────
-    path('products/',                 views.list_products,  name='product-list'),
-    path('products/create/',          views.create_product, name='product-create'),
-    path('products/<uuid:pk>/',       views.get_product,    name='product-detail'),
+    path('products/',                          views.list_products,         name='product-list'),
+    path('products/create/',                   views.create_product,        name='product-create'),
+    path('products/popular-by-category/',      views.popular_by_category,   name='popular-by-category'),
+    path('products/<uuid:pk>/',                views.get_product,           name='product-detail'),
     path('products/<uuid:pk>/update/', views.update_product, name='product-update'),
     path('products/<uuid:pk>/delete/', views.delete_product, name='product-delete'),
     path('products/<uuid:pk>/images/', views.add_product_image, name='product-image-add'),

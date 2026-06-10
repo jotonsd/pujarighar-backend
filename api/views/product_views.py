@@ -1,10 +1,13 @@
 import logging
+from decimal import Decimal
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
+from django.db.models.functions import Coalesce
 
-from api.models import Product, ProductImage
-from api.serializers.product_serializers import ProductSerializer, ProductImageSerializer
+from api.models import Product, ProductImage, Category, SalesOrderItem
+from api.serializers.product_serializers import ProductSerializer, ProductImageSerializer, CategorySerializer
 from api.services.product_service import ProductService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
@@ -148,3 +151,37 @@ def delete_product_image(request, pk, image_id):
         return ApiResponse(message="Image deleted")
     except ProductImage.DoesNotExist:
         return ApiResponse(message="Image not found", errors="Not found", status_code=404)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def popular_by_category(request):
+    try:
+        sold_sq = Subquery(
+            SalesOrderItem.objects.filter(
+                product_id=OuterRef('pk'),
+                order__status__in=['CONFIRMED', 'PACKED', 'ASSIGNED', 'ON_THE_WAY', 'DELIVERED'],
+            ).values('product_id').annotate(total=Sum('quantity')).values('total')[:1],
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+
+        categories = Category.objects.filter(is_active=True).order_by('name_bn')
+        result = []
+        for cat in categories:
+            products = list(
+                Product.objects
+                .filter(category=cat, is_active=True, is_package=False)
+                .select_related('category', 'brand')
+                .prefetch_related('images')
+                .annotate(total_sold=Coalesce(sold_sq, Value(Decimal('0')), output_field=DecimalField()))
+                .order_by('-total_sold')[:12]
+            )
+            if products:
+                result.append({
+                    'category': CategorySerializer(cat).data,
+                    'products': ProductSerializer(products, many=True, context={'request': request}).data,
+                })
+        return ApiResponse(message="Popular by category", data=result)
+    except Exception as e:
+        logger.error(f"popular_by_category error: {e}", exc_info=True)
+        return ApiResponse(message=str(e), errors=str(e), status_code=500)
