@@ -131,6 +131,11 @@ class OrderService:
         # (pre-delivery COD cancellations have no prior financial entry)
         if JournalEntry.objects.filter(reference_id=order.id, reference_type='PAYMENT').exists():
             self._create_return_journal(order, user)
+        # Refund cashback that was used on this order back to the customer
+        cb_used = Decimal(str(order.cashback_used or 0))
+        if cb_used > 0 and not order.is_guest and order.customer_id:
+            order.customer.profile.cashback_balance = F('cashback_balance') + cb_used
+            order.customer.profile.save(update_fields=['cashback_balance'])
         return order
 
     # ── private ───────────────────────────────────────────────────────────────
