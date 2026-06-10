@@ -3,6 +3,7 @@ from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 # ─── Base ─────────────────────────────────────────────────────────────────────
@@ -156,7 +157,6 @@ class Product(BaseModel):
 
     @property
     def effective_price(self) -> Decimal:
-        from django.utils import timezone
         today = timezone.now().date()
         active = (
             self.discounts

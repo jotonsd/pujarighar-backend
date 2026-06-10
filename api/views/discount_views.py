@@ -17,7 +17,8 @@ class DiscountSerializer(drf_serializers.ModelSerializer):
     class Meta:
         model  = Discount
         fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_sku',
-                  'discount_type', 'discount_value', 'note', 'is_active', 'created_at']
+                  'discount_type', 'discount_value', 'note', 'is_active',
+                  'start_date', 'end_date', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 
