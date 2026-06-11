@@ -440,8 +440,18 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
 </html>"""
 
 
-def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
+def _thermal_page_height(order: SalesOrder) -> str:
+    mm = 85  # base: header + meta + separators + totals + footer
+    for item in order.items.all():
+        mm += 10  # item name line + qty×price line
+        if item.product.is_package:
+            mm += item.product.package_items.count() * 5
+    return f'{mm + 10}mm'  # +10mm buffer
+
+
+def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:  # noqa: ARG001
     isBn = lang == 'bn'
+    page_height = _thermal_page_height(order)
     def t(bn, en): return bn if isBn else en
 
     order_date = order.created_at.strftime('%b %d, %Y  %I:%M %p')
@@ -498,7 +508,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
     font-family: 'NotoSansBengali';
     src: url('{_FONT_URL}') format('truetype');
   }}
-  @page {{ size: 80mm auto; margin: 0; }}
+  @page {{ size: 80mm {page_height}; margin: 0; }}
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     font-family: 'NotoSansBengali', 'Courier New', monospace;
