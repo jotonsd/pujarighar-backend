@@ -50,12 +50,13 @@ class DeliveryAssignmentSerializer(serializers.ModelSerializer):
     delivery_person_name    = serializers.SerializerMethodField()
     delivery_person_name_bn = serializers.SerializerMethodField()
     delivery_person_name_en = serializers.SerializerMethodField()
+    delivery_person_avatar  = serializers.SerializerMethodField()
 
     class Meta:
         model  = DeliveryAssignment
         fields = ['id', 'delivery_person', 'delivery_person_email', 'delivery_person_phone',
                   'delivery_person_name', 'delivery_person_name_bn', 'delivery_person_name_en',
-                  'assigned_at', 'picked_up_at', 'delivered_at', 'tracking_note']
+                  'delivery_person_avatar', 'assigned_at', 'picked_up_at', 'delivered_at', 'tracking_note']
 
     def get_delivery_person_name(self, obj):
         p = getattr(obj.delivery_person, 'profile', None)
@@ -68,6 +69,13 @@ class DeliveryAssignmentSerializer(serializers.ModelSerializer):
     def get_delivery_person_name_en(self, obj):
         p = getattr(obj.delivery_person, 'profile', None)
         return p.full_name_en if p else ''
+
+    def get_delivery_person_avatar(self, obj):
+        p = getattr(obj.delivery_person, 'profile', None)
+        if p and p.avatar:
+            request = self.context.get('request')
+            return request.build_absolute_uri(p.avatar.url) if request else p.avatar.url
+        return None
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):

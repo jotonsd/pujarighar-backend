@@ -219,7 +219,7 @@ def change_role(request, pk):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_me(request):
-    data = UserSerializer(request.user).data
+    data = UserSerializer(request.user, context={'request': request}).data
     data['nav_menu'] = _build_nav_menu(request.user.role)
     return ApiResponse(message="Profile retrieved", data=data)
 
@@ -227,13 +227,14 @@ def get_me(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_me(request):
-    serializer = ProfileSerializer(request.user.profile, data=request.data, partial=True)
+    serializer = ProfileSerializer(request.user.profile, data=request.data, partial=True,
+                                   context={'request': request})
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
         _svc.update_profile(request.user, {**serializer.validated_data,
                                             'preferred_language': request.data.get('preferred_language')})
-        data = UserSerializer(request.user).data
+        data = UserSerializer(request.user, context={'request': request}).data
         data['nav_menu'] = _build_nav_menu(request.user.role)
         return ApiResponse(message="Profile updated", data=data)
     except Exception as e:
