@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from weasyprint import HTML as WeasyHTML
 from weasyprint.text.fonts import FontConfiguration
 
-from api.models import SalesOrder
+from api.models import SalesOrder, SiteSetting
 from api.utils.response import ApiResponse
 
 logger    = logging.getLogger(__name__)
@@ -45,7 +45,31 @@ def _fmt(value) -> str:
         return '0.00'
 
 
-def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
+PAGE_CSS = {
+    'A4':      '@page { size: A4; margin: 0; }',
+    'A5':      '@page { size: A5; margin: 0; }',
+    'LETTER':  '@page { size: letter; margin: 0; }',
+    'THERMAL': '@page { size: 80mm auto; margin: 0; }',
+}
+
+THERMAL_BODY_CSS = """
+    body { padding: 4mm 5mm 4mm; font-size: 8pt; }
+    .hdr { flex-direction: column; align-items: center; text-align: center; gap: 2mm; }
+    .hdr-left, .hdr-inv { text-align: center; }
+    .hdr-inv .iw { font-size: 14pt; }
+    .billing { flex-direction: column; gap: 2mm; }
+    .bill-col { text-align: left !important; }
+    .bill-divider { display: none; }
+    .items-table { font-size: 8pt; }
+    .items-table thead th { font-size: 7pt; }
+    .totals-wrap { flex-direction: column; align-items: flex-start; gap: 2mm; }
+    .totals-table { width: 100%; }
+    .totals-qr img { width: 18mm; height: 18mm; }
+    .footer { flex-direction: column; gap: 1mm; font-size: 7.5pt; }
+"""
+
+
+def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size: str = 'A5') -> str:
     isBn = lang == 'bn'
 
     def t(bn: str, en: str) -> str:
@@ -175,24 +199,25 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
     font-family: 'NotoSansBengali';
     src: url('{_FONT_URL}') format('truetype');
   }}
-  @page {{ size: A5; margin: 0; }}
+  {PAGE_CSS.get(page_size, PAGE_CSS['A5'])}
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     font-family: 'NotoSansBengali', Arial, sans-serif;
     font-size: 9.5pt;
     color: #1c1c1c;
     background: #fff;
-    padding: 8mm 10mm 6mm;
+    padding: 5mm 8mm 4mm;
   }}
+  {THERMAL_BODY_CSS if page_size == 'THERMAL' else ''}
 
   /* ── Top header ── */
   .hdr {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 3mm;
+    padding-bottom: 2mm;
     border-bottom: 0.3mm dotted #aaa;
-    margin-bottom: 3mm;
+    margin-bottom: 2mm;
   }}
   .hdr-left {{ display: flex; align-items: center; }}
   .hdr-shop img  {{ height: 11mm; width: auto; object-fit: contain; display: block; }}
@@ -204,7 +229,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
   .meta-strip {{
     display: flex;
     justify-content: space-between;
-    margin-bottom: 3mm;
+    margin-bottom: 2mm;
     align-items: baseline;
   }}
   .meta-cell {{ white-space: nowrap; }}
@@ -217,10 +242,10 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
   .billing {{
     display: flex;
     gap: 5mm;
-    margin-bottom: 3mm;
+    margin-bottom: 2mm;
     border-top: 0.25mm dotted #aaa;
     border-bottom: 0.25mm dotted #aaa;
-    padding: 2.5mm 0;
+    padding: 1.5mm 0;
   }}
   .bill-col {{ flex: 1; }}
   .bill-col .bc-lbl  {{ font-size: 7pt; text-transform: uppercase; letter-spacing: 0.4mm; color: #999; font-weight: bold; margin-bottom: 1mm; }}
@@ -232,29 +257,29 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
   .items-table {{
     width: 100%;
     border-collapse: collapse;
-    font-size: 9.5pt;
+    font-size: 7pt;
   }}
   .items-table thead tr {{
     border-top: 0.3mm dotted #aaa;
     border-bottom: 0.3mm dotted #aaa;
   }}
   .items-table thead th {{
-    padding: 2mm 3mm;
-    font-size: 7.5pt;
+    padding: 1mm 1.5mm;
+    font-size: 6.5pt;
     font-weight: bold;
     text-transform: uppercase;
-    letter-spacing: 0.3mm;
+    letter-spacing: 0.2mm;
     color: #333;
   }}
   .items-table tbody td {{
-    padding: 2mm 3mm;
-    border-bottom: 0.2mm dotted #ddd;
+    padding: 0.8mm 1.5mm;
+    border-bottom: 0.2mm dotted #eee;
     vertical-align: top;
   }}
-  .row-alt td {{ background: #fafafa; }}
+  .row-alt td {{ background: none; }}
   .row-sub td {{ border-bottom: none; }}
-  .sub-item  {{ font-size: 8pt; color: #aaa; padding-top: 0.3mm !important; padding-bottom: 0.3mm !important; }}
-  .sl        {{ font-size: 8pt; color: #bbb; }}
+  .sub-item  {{ font-size: 6.5pt; color: #aaa; padding-top: 0.1mm !important; padding-bottom: 0.1mm !important; }}
+  .sl        {{ font-size: 6.5pt; color: #bbb; }}
   .tc {{ text-align: center; }}
   .tr {{ text-align: right; }}
   .pkg-badge {{
@@ -262,7 +287,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
     border: 0.2mm dotted #bbb; color: #777;
     padding: 0.2mm 1.2mm; border-radius: 0.6mm;
   }}
-  .old-p {{ color: #bbb; text-decoration: line-through; font-size: 8.5pt; }}
+  .old-p {{ color: #bbb; text-decoration: line-through; font-size: 6pt; }}
 
   /* ── Totals ── */
   .totals-wrap {{
@@ -270,8 +295,8 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
     justify-content: space-between;
     align-items: flex-end;
     border-top: 0.3mm dotted #aaa;
-    padding-top: 3mm;
-    margin-top: 1mm;
+    padding-top: 2mm;
+    margin-top: 0.5mm;
   }}
   .totals-qr img {{ width: 22mm; height: 22mm; display: block; }}
   .totals-qr p   {{ font-size: 7pt; color: #aaa; text-align: center; margin-top: 1mm; }}
@@ -415,6 +440,123 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
 </html>"""
 
 
+def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
+    isBn = lang == 'bn'
+    def t(bn, en): return bn if isBn else en
+
+    order_date = order.created_at.strftime('%b %d, %Y  %I:%M %p')
+    name = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_bn or order.shipping_name_en or ''
+
+    items_html = ''
+    for i, item in enumerate(order.items.all(), 1):
+        item_name  = (item.product_name_bn if isBn else item.product_name_en) or item.product_name_bn
+        qty        = int(float(item.quantity))
+        unit_price = Decimal(str(item.unit_price))
+        line_total = Decimal(str(item.line_total))
+        orig_unit  = Decimal(str(item.original_unit_price)) if item.original_unit_price else unit_price
+        is_pkg     = item.product.is_package
+
+        unit_display = f'<s style="color:#bbb;font-size:6.5pt;">{_fmt(orig_unit)}</s> {_fmt(unit_price)}' if orig_unit > unit_price else _fmt(unit_price)
+
+        items_html += f"""
+<div class="item">
+  <div class="item-name">{i}. {item_name}</div>
+  <div class="item-row"><span>{qty} &times; ৳ {unit_display}</span><span>৳ {_fmt(line_total)}</span></div>
+</div>"""
+
+        if is_pkg:
+            for pi in item.product.package_items.all():
+                comp      = pi.component
+                comp_name = (comp.name_bn if isBn else comp.name_en) or comp.name_bn
+                comp_qty  = int(float(pi.quantity)) * qty
+                items_html += f'<div class="sub-item">↳ {comp_name} &times; {comp_qty}</div>'
+
+    discount_amount = Decimal(str(order.discount_amount or 0))
+    payment_label   = t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery') if order.payment_method == 'COD' else t('অনলাইন', 'Online')
+
+    totals_html = f'<div class="tot-row"><span>{t("সাবটোটাল","Subtotal")}</span><span>৳ {_fmt(order.subtotal)}</span></div>'
+
+    if discount_amount > 0:
+        totals_html += f'<div class="tot-row disc"><span>{t("ছাড়","Discount")}</span><span>− ৳ {_fmt(discount_amount)}</span></div>'
+
+    if Decimal(str(order.delivery_charge)) > 0:
+        totals_html += f'<div class="tot-row"><span>{t("ডেলিভারি","Delivery")}</span><span>৳ {_fmt(order.delivery_charge)}</span></div>'
+
+    if Decimal(str(order.tax_amount)) > 0:
+        totals_html += f'<div class="tot-row"><span>{t("কর","Tax")}</span><span>৳ {_fmt(order.tax_amount)}</span></div>'
+
+    paid_html = ''
+    if order.payment_status == 'PAID':
+        paid_html = f'<div class="tot-row"><span>{t("পরিশোধিত","Paid")}</span><span>৳ {_fmt(order.grand_total)}</span></div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {{
+    font-family: 'NotoSansBengali';
+    src: url('{_FONT_URL}') format('truetype');
+  }}
+  @page {{ size: 80mm auto; margin: 0; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    font-family: 'NotoSansBengali', 'Courier New', monospace;
+    font-size: 8pt;
+    color: #000;
+    background: #fff;
+    padding: 4mm 5mm 6mm;
+    width: 80mm;
+  }}
+  .center  {{ text-align: center; }}
+  .shop-name {{ font-weight: bold; font-size: 10pt; margin-bottom: 0.5mm; }}
+  .shop-info {{ font-size: 7.5pt; color: #444; line-height: 1.6; }}
+  .sep {{ border: none; border-top: 1px dashed #000; margin: 2.5mm 0; }}
+  .meta-row {{ display: flex; justify-content: space-between; font-size: 7.5pt; margin: 1mm 0; }}
+  .meta-label {{ color: #555; }}
+  .meta-val   {{ color: #000; text-align: right; }}
+  .item {{ margin: 1.5mm 0; }}
+  .item-name {{ font-weight: bold; font-size: 8pt; }}
+  .item-row  {{ display: flex; justify-content: space-between; font-size: 7.5pt; color: #333; margin-top: 0.3mm; }}
+  .sub-item  {{ font-size: 6.5pt; color: #999; padding-left: 3mm; margin-top: 0.3mm; }}
+  .tot-row   {{ display: flex; justify-content: space-between; font-size: 7.5pt; margin: 0.8mm 0; }}
+  .disc      {{ color: #166534; font-weight: 600; }}
+  .grand     {{ font-weight: bold; font-size: 10pt; margin: 1.5mm 0 0.5mm; }}
+  .thank     {{ font-size: 7.5pt; font-style: italic; color: #555; }}
+</style>
+</head>
+<body>
+
+<div class="center">
+  <div class="shop-name">{SHOP_NAME_EN}</div>
+  <div class="shop-info">{SHOP_ADDRESS}<br>{SHOP_PHONE}</div>
+</div>
+
+<hr class="sep">
+
+<div class="meta-row"><span class="meta-label">{t("চালান","Invoice")}</span><span class="meta-val">{order.order_number}</span></div>
+<div class="meta-row"><span class="meta-label">{t("তারিখ","Date")}</span><span class="meta-val">{order_date}</span></div>
+<div class="meta-row"><span class="meta-label">{t("গ্রাহক","Customer")}</span><span class="meta-val">{name}</span></div>
+<div class="meta-row"><span class="meta-label">{t("পেমেন্ট","Payment")}</span><span class="meta-val">{payment_label}</span></div>
+
+<hr class="sep">
+
+{items_html}
+
+<hr class="sep">
+
+{totals_html}
+<div class="tot-row grand"><span>{t("সর্বমোট","Total")}</span><span>৳ {_fmt(order.grand_total)}</span></div>
+{paid_html}
+
+<hr class="sep">
+
+<div class="center thank">{t("কেনার জন্য ধন্যবাদ!","Thank you for your purchase!")}</div>
+
+</body>
+</html>"""
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_invoice(request, pk):
@@ -435,8 +577,13 @@ def download_invoice(request, pk):
     lang        = request.query_params.get('lang', 'en')
     disposition = request.query_params.get('disposition', 'inline')
 
+    page_size = SiteSetting.get().invoice_page_size
+
     try:
-        html_str    = _build_html(order, lang, is_admin=is_admin)
+        if page_size == 'THERMAL':
+            html_str = _build_thermal_html(order, lang, is_admin=is_admin)
+        else:
+            html_str = _build_html(order, lang, is_admin=is_admin, page_size=page_size)
         font_config = FontConfiguration()
         pdf         = WeasyHTML(string=html_str).write_pdf(font_config=font_config)
     except Exception as e:

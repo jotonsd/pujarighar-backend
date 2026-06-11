@@ -761,3 +761,33 @@ class Review(BaseModel):
 
     def __str__(self):
         return f'{self.user.email} → {self.product.name_en} ({self.rating}★)'
+
+
+# ─── Site Settings ─────────────────────────────────────────────────────────────
+
+class SiteSetting(models.Model):
+    PAGE_SIZE_CHOICES = [
+        ('A4',      'A4 (210×297mm)'),
+        ('A5',      'A5 (148×210mm)'),
+        ('LETTER',  'US Letter (216×279mm)'),
+        ('THERMAL', 'POS Thermal (80mm)'),
+    ]
+    # Invoice
+    invoice_page_size = models.CharField(max_length=10, choices=PAGE_SIZE_CHOICES, default='A5')
+    # General
+    company_name_bn   = models.CharField(max_length=100, default='পূজারিঘর')
+    company_name_en   = models.CharField(max_length=100, default='PujariGhar')
+    contact_phone     = models.CharField(max_length=20, blank=True, default='01978604807')
+    contact_email     = models.EmailField(blank=True, default='')
+    address_bn        = models.TextField(blank=True, default='')
+    address_en        = models.TextField(blank=True, default='')
+    logo              = models.ImageField(upload_to='site/', null=True, blank=True)
+    favicon           = models.ImageField(upload_to='site/', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Site Setting'
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

@@ -180,4 +180,8 @@ urlpatterns = [
     path('reviews/<uuid:pk>/delete/',           views.delete_review,         name='review-delete'),
     path('products/<uuid:pk>/reviews/',         views.list_product_reviews,       name='product-reviews'),
     path('products/<uuid:pk>/eligible-order/', views.eligible_order_for_product, name='product-eligible-order'),
+
+    # ─── Site Settings ─────────────────────────────────────────────────────────
+    path('settings/',        views.get_site_settings,    name='site-settings'),
+    path('settings/update/', views.update_site_settings, name='site-settings-update'),
 ]

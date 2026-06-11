@@ -65,3 +65,4 @@ from .loan_views import (
     list_loan_investors, create_loan_investor, update_loan_investor, delete_loan_investor,
     list_loan_payments, create_loan_payment, delete_loan_payment,
 )
+from .settings_views import get_site_settings, update_site_settings
