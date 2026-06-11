@@ -203,26 +203,27 @@ def update_partner_payment(request, pk, payment_pk):
     except PartnerProfitPayment.DoesNotExist:
         return ApiResponse(message="Not found", errors="Not found", status_code=404)
 
-    old_paid = Decimal(str(payment.paid_amount))
     serializer = PartnerProfitPaymentSerializer(payment, data=request.data, partial=True)
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     payment = serializer.save()
 
-    # Only journal the delta if paid_amount increased
-    new_paid = Decimal(str(payment.paid_amount))
-    delta = new_paid - old_paid
-    if delta > 0:
-        _create_profit_payment_journal(payment, delta, request.user)
+    # Void existing journals for this payment and recreate from current values
+    JournalEntry.objects.filter(reference_type='EQUITY', reference_id=payment.id).delete()
+    _create_profit_accrual_journal(payment, request.user)
+    if Decimal(str(payment.paid_amount)) > 0:
+        _create_profit_payment_journal(payment, Decimal(str(payment.paid_amount)), request.user)
 
     return ApiResponse(message="Payment updated", data=PartnerProfitPaymentSerializer(payment).data)
 
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated, IsAdmin])
+@transaction.atomic
 def delete_partner_payment(_request, pk, payment_pk):
     try:
         payment = PartnerProfitPayment.objects.get(pk=payment_pk, partner__id=pk)
+        JournalEntry.objects.filter(reference_type='EQUITY', reference_id=payment.id).delete()
         payment.delete()
         return ApiResponse(message="Payment deleted")
     except PartnerProfitPayment.DoesNotExist:
