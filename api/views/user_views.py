@@ -258,7 +258,7 @@ def change_password(request):
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_delivery_persons(request):
     persons = _svc.list_delivery_persons()
-    return ApiResponse(message="Delivery persons retrieved", data=UserSerializer(persons, many=True).data)
+    return ApiResponse(message="Delivery persons retrieved", data=UserSerializer(persons, many=True, context={'request': request}).data)
 
 
 @api_view(['GET'])

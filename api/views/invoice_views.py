@@ -1,7 +1,10 @@
+import base64
+import io
 import os
 import logging
 from decimal import Decimal
 
+import qrcode
 from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -19,9 +22,19 @@ _LOGO_URL = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), '.
 
 SHOP_NAME_BN = 'পূজারিঘর'
 SHOP_NAME_EN = 'PujariGhar'
-SHOP_PHONE   = '01XXXXXXXXX'
+SHOP_PHONE   = '01978604807'
 SHOP_WEB     = 'pujarighar.com'
 SHOP_ADDRESS = 'Dhaka, Bangladesh'
+
+
+def _qr_data_uri(url: str) -> str:
+    qr = qrcode.QRCode(version=1, box_size=4, border=1)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
 
 def _fmt(value) -> str:
@@ -151,6 +164,8 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
     if note_text.strip():
         notes_html = f'<div class="note-block"><b>{t("নোট:","Note:")}</b> {note_text}</div>'
 
+    qr_uri = _qr_data_uri('https://pujarighar.com')
+
     return f"""<!DOCTYPE html>
 <html lang="{lang}">
 <head>
@@ -160,25 +175,27 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
     font-family: 'NotoSansBengali';
     src: url('{_FONT_URL}') format('truetype');
   }}
+  @page {{ size: A5; margin: 0; }}
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     font-family: 'NotoSansBengali', Arial, sans-serif;
     font-size: 9.5pt;
     color: #1c1c1c;
     background: #fff;
-    padding: 10mm 16mm 8mm;
+    padding: 8mm 10mm 6mm;
   }}
 
   /* ── Top header ── */
   .hdr {{
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     padding-bottom: 3mm;
     border-bottom: 0.3mm dotted #aaa;
     margin-bottom: 3mm;
   }}
-  .hdr-shop img  {{ height: 9mm; width: auto; object-fit: contain; display: block; }}
+  .hdr-left {{ display: flex; align-items: center; }}
+  .hdr-shop img  {{ height: 11mm; width: auto; object-fit: contain; display: block; }}
   .hdr-inv       {{ text-align: right; }}
   .hdr-inv .iw   {{ font-size: 20pt; font-weight: bold; letter-spacing: 1mm; color: #1c1c1c; line-height: 1; }}
   .hdr-inv .in   {{ font-size: 8.5pt; color: #888; margin-top: 1mm; }}
@@ -250,9 +267,14 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
   /* ── Totals ── */
   .totals-wrap {{
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: flex-end;
     border-top: 0.3mm dotted #aaa;
+    padding-top: 3mm;
+    margin-top: 1mm;
   }}
+  .totals-qr img {{ width: 22mm; height: 22mm; display: block; }}
+  .totals-qr p   {{ font-size: 7pt; color: #aaa; text-align: center; margin-top: 1mm; }}
   .totals-table {{
     width: 72mm;
     border-collapse: collapse;
@@ -311,8 +333,10 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
 
 <!-- Header -->
 <div class="hdr">
-  <div class="hdr-shop">
-    <img src="{_LOGO_URL}" alt="{SHOP_NAME_EN}">
+  <div class="hdr-left">
+    <div class="hdr-shop">
+      <img src="{_LOGO_URL}" alt="{SHOP_NAME_EN}">
+    </div>
   </div>
   <div class="hdr-inv">
     <div class="iw">{t('চালান', 'INVOICE')}</div>
@@ -363,6 +387,10 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False) -> str:
 
 <!-- Totals -->
 <div class="totals-wrap">
+  <div class="totals-qr">
+    <img src="{qr_uri}" alt="QR">
+    <p>pujarighar.com</p>
+  </div>
   <table class="totals-table">
     <tbody>
       {totals_html}
