@@ -28,7 +28,7 @@ def pos_create_order(request):
         order = GuestCheckoutService().checkout(serializer.validated_data)
         return ApiResponse(
             message="POS order created",
-            data=SalesOrderSerializer(order).data,
+            data=SalesOrderSerializer(order, context={'request': request}).data,
             status_code=201,
         )
     except Exception as e:
@@ -44,7 +44,7 @@ def list_orders(request):
         page_data, pagination = paginate_queryset(qs, request)
         return ApiResponse(
             message="Orders retrieved successfully",
-            data=SalesOrderSerializer(page_data, many=True).data,
+            data=SalesOrderSerializer(page_data, many=True, context={'request': request}).data,
             pagination=pagination,
         )
     except Exception as e:
@@ -64,7 +64,7 @@ def get_order(request, pk):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         if role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
-        return ApiResponse(message="Order retrieved", data=SalesOrderSerializer(order).data)
+        return ApiResponse(message="Order retrieved", data=SalesOrderSerializer(order, context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
 
@@ -130,7 +130,7 @@ def get_order_status_log(request, pk):
 def confirm_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(_svc.confirm(order, request.user)).data)
+        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(_svc.confirm(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -142,7 +142,7 @@ def confirm_order(request, pk):
 def pack_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        return ApiResponse(message="Order packed", data=SalesOrderSerializer(_svc.pack(order, request.user)).data)
+        return ApiResponse(message="Order packed", data=SalesOrderSerializer(_svc.pack(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -161,7 +161,7 @@ def assign_delivery(request, pk):
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
         updated = _svc.assign_delivery(order, str(serializer.validated_data['delivery_person_id']), request.user)
-        return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated).data)
+        return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         return api_error(e)
 
@@ -173,7 +173,7 @@ def dispatch_order(request, pk):
         order = _svc.get_order(pk)
         if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
-        return ApiResponse(message="Order dispatched", data=SalesOrderSerializer(_svc.dispatch(order, request.user)).data)
+        return ApiResponse(message="Order dispatched", data=SalesOrderSerializer(_svc.dispatch(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -187,7 +187,7 @@ def deliver_order(request, pk):
         order = _svc.get_order(pk)
         if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
-        return ApiResponse(message="Order delivered", data=SalesOrderSerializer(_svc.deliver(order, request.user)).data)
+        return ApiResponse(message="Order delivered", data=SalesOrderSerializer(_svc.deliver(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -205,7 +205,7 @@ def return_order(request, pk):
         note_en = request.data.get('note_en', '')
         return ApiResponse(
             message="Order returned",
-            data=SalesOrderSerializer(_svc.return_order(order, request.user, note_bn, note_en)).data,
+            data=SalesOrderSerializer(_svc.return_order(order, request.user, note_bn, note_en), context={'request': request}).data,
         )
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
@@ -222,7 +222,7 @@ def mark_cod_paid(request, pk):
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
     try:
         updated = _svc.mark_cod_paid(order, request.user)
-        return ApiResponse(message='Payment recorded', data=SalesOrderSerializer(updated).data)
+        return ApiResponse(message='Payment recorded', data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f'Mark COD paid error: {e}', exc_info=True)
         return api_error(e)
@@ -252,7 +252,7 @@ def cancel_order(request, pk):
         updated = _svc.cancel(order, request.user,
                               serializer.validated_data['note_bn'],
                               serializer.validated_data['note_en'])
-        return ApiResponse(message="Order cancelled", data=SalesOrderSerializer(updated).data)
+        return ApiResponse(message="Order cancelled", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f"Cancel order error: {e}", exc_info=True)
         return api_error(e, locale_hint=request.LANGUAGE_CODE)
@@ -278,4 +278,4 @@ def update_shipping(request, pk):
     for k, v in fields.items():
         setattr(order, k, v)
     order.save(update_fields=list(fields.keys()))
-    return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order).data)
+    return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order, context={'request': request}).data)
