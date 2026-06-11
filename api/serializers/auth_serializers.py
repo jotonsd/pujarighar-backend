@@ -7,18 +7,39 @@ from api.serializers.user_serializers import UserSerializer
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password     = serializers.CharField(write_only=True, validators=[validate_password])
-    full_name_bn = serializers.CharField(required=False, allow_blank=True)
-    full_name_en = serializers.CharField(required=False, allow_blank=True)
+    password        = serializers.CharField(write_only=True, validators=[validate_password])
+    full_name_bn    = serializers.CharField(required=False, allow_blank=True)
+    full_name_en    = serializers.CharField(required=False, allow_blank=True)
+    referral_code   = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model  = User
-        fields = ['email', 'phone', 'password', 'preferred_language', 'full_name_bn', 'full_name_en']
+        fields = ['email', 'phone', 'password', 'preferred_language', 'full_name_bn', 'full_name_en', 'referral_code']
+
+    def validate_referral_code(self, value):
+        if not value:
+            return value
+        try:
+            User.objects.get(referral_code=value.upper().strip())
+        except User.DoesNotExist:
+            raise serializers.ValidationError({
+                'message_bn': 'রেফারেল কোড সঠিক নয়',
+                'message_en': 'Invalid referral code',
+            })
+        return value.upper().strip()
 
     def create(self, validated_data):
-        full_name_bn = validated_data.pop('full_name_bn', '')
-        full_name_en = validated_data.pop('full_name_en', '')
+        full_name_bn  = validated_data.pop('full_name_bn', '')
+        full_name_en  = validated_data.pop('full_name_en', '')
+        referral_code = validated_data.pop('referral_code', '')
         user = User.objects.create_user(**validated_data)
+        if referral_code:
+            try:
+                referrer = User.objects.get(referral_code=referral_code)
+                user.referred_by = referrer
+                user.save(update_fields=['referred_by'])
+            except User.DoesNotExist:
+                pass
         user.profile.full_name_bn = full_name_bn
         user.profile.full_name_en = full_name_en
         user.profile.save()

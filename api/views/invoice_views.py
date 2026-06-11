@@ -52,6 +52,8 @@ PAGE_CSS = {
     'THERMAL': '@page { size: 80mm auto; margin: 0; }',
 }
 
+WIDE_BODY_PADDING = 'body { padding: 8mm 18mm 6mm; }'
+
 THERMAL_BODY_CSS = """
     body { padding: 4mm 5mm 4mm; font-size: 8pt; }
     .hdr { flex-direction: column; align-items: center; text-align: center; gap: 2mm; }
@@ -76,8 +78,8 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
         return bn if isBn else en
 
     order_date = order.created_at.strftime('%d %b %Y')
-    name       = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_bn or order.shipping_name_en
-    addr       = (order.shipping_address_bn if isBn else order.shipping_address_en) or ''
+    name       = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_en or order.shipping_name_bn or ''
+    addr       = (order.shipping_address_bn if isBn else order.shipping_address_en) or order.shipping_address_en or order.shipping_address_bn or ''
     location_parts = [p for p in [order.shipping_district, order.shipping_thana, order.shipping_post_code] if p]
     location   = ', '.join(location_parts)
 
@@ -208,7 +210,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     background: #fff;
     padding: 5mm 8mm 4mm;
   }}
-  {THERMAL_BODY_CSS if page_size == 'THERMAL' else ''}
+  {THERMAL_BODY_CSS if page_size == 'THERMAL' else WIDE_BODY_PADDING if page_size in ('A4', 'LETTER') else ''}
 
   /* ── Top header ── */
   .hdr {{
@@ -235,8 +237,8 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
   .meta-cell {{ white-space: nowrap; }}
   .meta-cell .mc-lbl {{ font-size: 8.5pt; color: #999; }}
   .meta-cell .mc-val {{ font-size: 8.5pt; color: #1c1c1c; font-weight: 600; }}
-  .stamp-paid   {{ font-size: 7.5pt; font-weight: bold; color: #166534; border: 0.25mm dotted #166534; padding: 0.2mm 1.5mm; border-radius: 0.8mm; }}
-  .stamp-unpaid {{ font-size: 7.5pt; font-weight: bold; color: #92400e; border: 0.25mm dotted #92400e; padding: 0.2mm 1.5mm; border-radius: 0.8mm; }}
+  .stamp-paid   {{ font-size: 7.5pt; font-weight: bold; color: #166534; }}
+  .stamp-unpaid {{ font-size: 7.5pt; font-weight: bold; color: #92400e; }}
 
   /* ── Billing ── */
   .billing {{
@@ -455,7 +457,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
     def t(bn, en): return bn if isBn else en
 
     order_date = order.created_at.strftime('%b %d, %Y  %I:%M %p')
-    name = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_bn or order.shipping_name_en or ''
+    name = (order.shipping_name_bn if isBn else order.shipping_name_en) or order.shipping_name_en or order.shipping_name_bn or ''
 
     items_html = ''
     for i, item in enumerate(order.items.all(), 1):
@@ -587,7 +589,9 @@ def download_invoice(request, pk):
     lang        = request.query_params.get('lang', 'en')
     disposition = request.query_params.get('disposition', 'inline')
 
-    page_size = SiteSetting.get().invoice_page_size
+    allowed_sizes = {'A4', 'A5', 'LETTER', 'THERMAL'}
+    param_size    = request.query_params.get('page_size', '').upper()
+    page_size     = param_size if param_size in allowed_sizes else SiteSetting.get().invoice_page_size
 
     try:
         if page_size == 'THERMAL':

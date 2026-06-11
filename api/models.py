@@ -1,9 +1,19 @@
+import secrets
+import string
 from decimal import Decimal
 from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+def _gen_referral_code():
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(secrets.choice(chars) for _ in range(8))
+        if not User.objects.filter(referral_code=code).exists():
+            return code
 
 
 # ─── Base ─────────────────────────────────────────────────────────────────────
@@ -54,12 +64,22 @@ class User(AbstractUser):
         choices=[('bn', 'বাংলা'), ('en', 'English')],
         default='bn',
     )
+    referral_code = models.CharField(max_length=8, unique=True, blank=True)
+    referred_by   = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='referrals',
+    )
     is_active   = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
 
     USERNAME_FIELD  = 'email'
     REQUIRED_FIELDS = ['phone']
     objects         = UserManager()
+
+    def save(self, *args, **kwargs):
+        if not self.referral_code:
+            self.referral_code = _gen_referral_code()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.email
@@ -791,3 +811,19 @@ class SiteSetting(models.Model):
     def get(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+# ─── Referral ─────────────────────────────────────────────────────────────────
+
+class ReferralBonus(models.Model):
+    referrer      = models.ForeignKey(User, on_delete=models.CASCADE, related_name='referral_bonuses_earned')
+    referred_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='referral_bonus_given')
+    order         = models.ForeignKey('SalesOrder', on_delete=models.SET_NULL, null=True, related_name='referral_bonus')
+    amount        = models.DecimalField(max_digits=8, decimal_places=2, default=8)
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('referrer', 'referred_user')]
+
+    def __str__(self):
+        return f'{self.referrer} ← {self.referred_user} ৳{self.amount}'

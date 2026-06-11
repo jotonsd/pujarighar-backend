@@ -7,6 +7,7 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     SalesOrder, OrderStatusLog, DeliveryAssignment, User,
     StockMovement, Account, JournalEntry, JournalLine, Notification,
+    ReferralBonus,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,8 @@ class OrderService:
             order.customer.profile.cashback_balance = F('cashback_balance') + cb
             order.customer.profile.save(update_fields=['cashback_balance'])
             self._create_cashback_earned_journal(order, cb, user)
+        # Credit referral bonus to referrer (one-time per referred user)
+        self._process_referral_bonus(order, user)
         return order
 
     @transaction.atomic
@@ -116,6 +119,7 @@ class OrderService:
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
         self._create_return_journal(order, user)
+        self._reverse_referral_bonus(order, user)
         return order
 
     @transaction.atomic
@@ -211,6 +215,65 @@ class OrderService:
             acct = self._acct(code)
             if acct:
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _process_referral_bonus(self, order: SalesOrder, actor: User) -> None:
+        if order.is_guest or not order.customer_id:
+            return
+        customer = order.customer
+        referrer = getattr(customer, 'referred_by', None)
+        if not referrer:
+            return
+        # Only pay once per referrer–referred pair
+        if ReferralBonus.objects.filter(referrer=referrer, referred_user=customer).exists():
+            return
+        amount = Decimal('8.00')
+        ReferralBonus.objects.create(referrer=referrer, referred_user=customer, order=order, amount=amount)
+        referrer.profile.cashback_balance = F('cashback_balance') + amount
+        referrer.profile.save(update_fields=['cashback_balance'])
+        self._create_referral_bonus_journal(referrer, order, amount, actor)
+        logger.info(f'Referral bonus ৳{amount} credited to {referrer.email} for referring {customer.email}')
+
+    def _create_referral_bonus_journal(self, referrer: User, order: SalesOrder, amount: Decimal, actor: User) -> None:
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='REFERRAL',
+            reference_id=order.id,
+            description_bn=f'রেফারেল বোনাস — {order.order_number} ({referrer.email})',
+            description_en=f'Referral Bonus — {order.order_number} ({referrer.email})',
+            created_by=actor, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('6300', amount,         Decimal('0')),  # Dr Marketing & Advertising
+            ('2250', Decimal('0'),   amount),        # Cr Cashback Payable
+        ]:
+            acct = self._acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _reverse_referral_bonus(self, order: SalesOrder, actor: User) -> None:
+        bonus = ReferralBonus.objects.filter(order=order).select_related('referrer__profile').first()
+        if not bonus:
+            return
+        referrer = bonus.referrer
+        amount   = bonus.amount
+        referrer.profile.cashback_balance = F('cashback_balance') - amount
+        referrer.profile.save(update_fields=['cashback_balance'])
+        # Post reversal journal: DR Cashback Payable / CR Marketing Expense
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='REFERRAL_REVERSAL',
+            reference_id=order.id,
+            description_bn=f'রেফারেল বোনাস বিপরীত — {order.order_number} ({referrer.email})',
+            description_en=f'Referral Bonus Reversed — {order.order_number} ({referrer.email})',
+            created_by=actor, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('2250', amount,         Decimal('0')),  # Dr Cashback Payable (liability cleared)
+            ('6300', Decimal('0'),   amount),        # Cr Marketing & Advertising (expense reversed)
+        ]:
+            acct = self._acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+        bonus.delete()  # allow bonus to fire again if referred user places a new delivered order
+        logger.info(f'Referral bonus ৳{amount} reversed from {referrer.email} for returned order {order.order_number}')
 
     def _create_return_journal(self, order: SalesOrder, user: User) -> None:
         cogs = sum(
