@@ -28,6 +28,7 @@ from .shipping_views import (
     list_shipping_addresses, create_shipping_address,
     update_shipping_address, delete_shipping_address,
     set_default_shipping_address,
+    admin_list_user_addresses, admin_create_user_address, admin_update_user_address,
 )
 from .payment_views import payment_ipn, payment_success, payment_fail, payment_cancel
 from .order_views import (

@@ -25,7 +25,15 @@ def pos_create_order(request):
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
-        order = GuestCheckoutService().checkout(serializer.validated_data)
+        customer_id = request.data.get('customer_id')
+        customer = None
+        if customer_id:
+            try:
+                from api.models import User as UserModel
+                customer = UserModel.objects.get(pk=customer_id)
+            except UserModel.DoesNotExist:
+                pass
+        order = GuestCheckoutService().checkout(serializer.validated_data, customer=customer)
         return ApiResponse(
             message="POS order created",
             data=SalesOrderSerializer(order, context={'request': request}).data,

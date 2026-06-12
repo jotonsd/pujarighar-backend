@@ -343,9 +343,8 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
 
   /* ── Footer ── */
   .footer {{
-    margin-top: 5mm;
-    border-top: 0.25mm dotted #ccc;
-    padding-top: 2.5mm;
+    margin-top: 0;
+    padding-top: 0;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
@@ -430,12 +429,6 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
 
 <!-- Footer -->
 <div class="footer">
-  <div class="terms">
-    {t('পণ্য গ্রহণের ৪৮ ঘণ্টার মধ্যে যেকোনো সমস্যা জানান।', 'Please report any issue within 48 hours of receiving your order.')}
-  </div>
-  <div class="thank">
-    {t('কেনার জন্য ধন্যবাদ!', 'Thank you for your purchase!')}
-  </div>
 </div>
 
 </body>
@@ -561,9 +554,6 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
 <div class="tot-row grand"><span>{t("সর্বমোট","Total")}</span><span>৳ {_fmt(order.grand_total)}</span></div>
 {paid_html}
 
-<hr class="sep">
-
-<div class="center thank">{t("কেনার জন্য ধন্যবাদ!","Thank you for your purchase!")}</div>
 
 </body>
 </html>"""

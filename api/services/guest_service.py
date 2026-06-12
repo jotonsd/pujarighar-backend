@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class GuestCheckoutService:
 
     @transaction.atomic
-    def checkout(self, validated_data: dict) -> SalesOrder:
+    def checkout(self, validated_data: dict, customer: User | None = None) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
@@ -51,8 +51,8 @@ class GuestCheckoutService:
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
-            customer            = None,
-            is_guest            = True,
+            customer            = customer,
+            is_guest            = customer is None,
             guest_email         = shipping.get('email', ''),
             payment_method      = payment_method,
             payment_status      = 'UNPAID',
@@ -179,11 +179,12 @@ class GuestCheckoutService:
         amount  = f'৳{int(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'
+        is_guest = order.is_guest
         notifications = [
             Notification(
                 user=admin,
-                title_bn=f'নতুন অর্ডার (গেস্ট) — {order.order_number}',
-                title_en=f'New Guest Order — {order.order_number}',
+                title_bn=f'নতুন অর্ডার {"(গেস্ট) " if is_guest else ""}— {order.order_number}',
+                title_en=f'New {"Guest " if is_guest else ""}Order — {order.order_number}',
                 body_bn=f'{name_bn} থেকে **{amount}** মূল্যের অর্ডার।',
                 body_en=f'Order of **{amount}** from {name_en}.',
                 reference_type='ORDER_CREATED',

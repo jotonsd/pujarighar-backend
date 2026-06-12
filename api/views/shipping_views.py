@@ -3,9 +3,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 from api.models import ShippingAddress
+from api.models import User as UserModel
 from api.serializers.shipping_serializers import ShippingAddressSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsCustomer
+from api.permissions import IsCustomer, IsAdminOrWarehouse
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +92,52 @@ def set_default_shipping_address(request, pk):
 
     address.set_as_default()
     return ApiResponse(message="Default address updated", data=ShippingAddressSerializer(address).data)
+
+
+# ── Admin endpoints (POS use) ─────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+def admin_list_user_addresses(request, user_id):
+    try:
+        user = UserModel.objects.get(pk=user_id)
+    except UserModel.DoesNotExist:
+        return ApiResponse(message="User not found", errors="Not found", status_code=404)
+    addresses = ShippingAddress.objects.filter(user=user).order_by('-is_default', '-created_at')
+    return ApiResponse(message="Addresses retrieved", data=ShippingAddressSerializer(addresses, many=True).data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+def admin_update_user_address(request, user_id, pk):
+    try:
+        address = ShippingAddress.objects.get(pk=pk, user__id=user_id)
+    except ShippingAddress.DoesNotExist:
+        return ApiResponse(message="Not found", errors="Not found", status_code=404)
+
+    serializer = ShippingAddressSerializer(address, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+
+    address = serializer.save()
+    return ApiResponse(message="Address updated", data=ShippingAddressSerializer(address).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+def admin_create_user_address(request, user_id):
+    try:
+        user = UserModel.objects.get(pk=user_id)
+    except UserModel.DoesNotExist:
+        return ApiResponse(message="User not found", errors="Not found", status_code=404)
+
+    serializer = ShippingAddressSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+
+    is_first = not ShippingAddress.objects.filter(user=user).exists()
+    address  = serializer.save(user=user, is_default=is_first)
+    if request.data.get('is_default') and not is_first:
+        address.set_as_default()
+
+    return ApiResponse(message="Address created", data=ShippingAddressSerializer(address).data, status_code=201)

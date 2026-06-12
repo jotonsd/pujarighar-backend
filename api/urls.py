@@ -60,6 +60,9 @@ urlpatterns = [
     path('shipping-addresses/<uuid:pk>/update/',       views.update_shipping_address,      name='shipping-address-update'),
     path('shipping-addresses/<uuid:pk>/delete/',       views.delete_shipping_address,      name='shipping-address-delete'),
     path('shipping-addresses/<uuid:pk>/set-default/',  views.set_default_shipping_address, name='shipping-address-set-default'),
+    path('users/<uuid:user_id>/shipping-addresses/',                    views.admin_list_user_addresses,   name='admin-user-address-list'),
+    path('users/<uuid:user_id>/shipping-addresses/create/',             views.admin_create_user_address,   name='admin-user-address-create'),
+    path('users/<uuid:user_id>/shipping-addresses/<uuid:pk>/update/',   views.admin_update_user_address,   name='admin-user-address-update'),
 
     # ─── Cart ─────────────────────────────────────────────────────────────────
     path('cart/',                          views.get_cart,        name='cart'),
