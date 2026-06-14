@@ -1,4 +1,4 @@
-from .auth_views import register, login, logout, token_refresh
+from .auth_views import register, login, logout, token_refresh, google_login
 from .user_views import (
     list_users, create_user, get_user, update_user, delete_user,
     activate_user, deactivate_user, change_role,

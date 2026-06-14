@@ -38,7 +38,7 @@ ROLE_CHOICES = [
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, phone, password=None, **extra):
+    def create_user(self, email, phone=None, password=None, **extra):
         if not email:
             raise ValueError('Email is required')
         user = self.model(email=self.normalize_email(email), phone=phone, **extra)
@@ -57,7 +57,7 @@ class User(AbstractUser):
     id                 = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     username           = None
     email              = models.EmailField(unique=True)
-    phone              = models.CharField(max_length=15, unique=True)
+    phone              = models.CharField(max_length=15, unique=True, null=True, blank=True)
     role               = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CUSTOMER')
     preferred_language = models.CharField(
         max_length=5,

@@ -7,6 +7,7 @@ urlpatterns = [
     path('auth/login/',          views.login,         name='auth-login'),
     path('auth/logout/',         views.logout,        name='auth-logout'),
     path('auth/token/refresh/',  views.token_refresh, name='auth-token-refresh'),
+    path('auth/google/',          views.google_login,  name='auth-google'),
 
     # ─── Users ────────────────────────────────────────────────────────────────
     path('users/',                         views.list_users,           name='user-list'),

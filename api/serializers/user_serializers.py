@@ -15,6 +15,14 @@ class ProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['cashback_balance', 'created_at', 'updated_at']
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # ImageField prepends MEDIA_URL, but Google avatar is already a full URL
+        avatar_name = str(instance.avatar) if instance.avatar else ''
+        if avatar_name.startswith('http://') or avatar_name.startswith('https://'):
+            data['avatar'] = avatar_name
+        return data
+
 
 class UserSerializer(serializers.ModelSerializer):
     profile = ProfileSerializer(read_only=True)

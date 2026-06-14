@@ -99,6 +99,9 @@ LANGUAGES = [('bn', 'বাংলা'), ('en', 'English')]
 BACKEND_URL  = config('BACKEND_URL',  default='http://localhost:8000')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
+# ─── Google OAuth ─────────────────────────────────────────────────────────────
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+
 # ─── SSLCommerz ───────────────────────────────────────────────────────────────
 SSLCOMMERZ_STORE_ID      = config('SSLCOMMERZ_STORE_ID',      default='')
 SSLCOMMERZ_STORE_PASS    = config('SSLCOMMERZ_STORE_PASS',    default='')
