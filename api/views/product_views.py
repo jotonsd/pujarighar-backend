@@ -110,6 +110,8 @@ def delete_product(_request, pk):
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
 
 
+MAX_IMAGES = 5
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def add_product_image(request, pk):
@@ -118,25 +120,36 @@ def add_product_image(request, pk):
     except Product.DoesNotExist:
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
 
-    if product.images.count() >= 3:
+    files = request.FILES.getlist('images') or (
+        [request.FILES['image']] if 'image' in request.FILES else []
+    )
+    if not files:
+        return ApiResponse(message="No image provided", errors="images is required", status_code=422)
+
+    current_count = product.images.count()
+    slots = MAX_IMAGES - current_count
+    if slots <= 0:
         return ApiResponse(
-            message="Maximum 3 images allowed",
-            errors={'message_bn': 'সর্বোচ্চ ৩টি ছবি দেওয়া যাবে', 'message_en': 'Maximum 3 images allowed'},
+            message=f"Maximum {MAX_IMAGES} images allowed",
+            errors={'message_bn': f'সর্বোচ্চ {MAX_IMAGES}টি ছবি দেওয়া যাবে', 'message_en': f'Maximum {MAX_IMAGES} images allowed'},
             status_code=400,
         )
-    if 'image' not in request.FILES:
-        return ApiResponse(message="No image provided", errors="image is required", status_code=422)
 
-    img = ProductImage.objects.create(
-        product=product,
-        image=request.FILES['image'],
-        alt_bn=request.data.get('alt_bn', ''),
-        alt_en=request.data.get('alt_en', ''),
-        order=product.images.count(),
-    )
+    files = files[:slots]
+    created = []
+    for i, file in enumerate(files):
+        img = ProductImage.objects.create(
+            product=product,
+            image=file,
+            alt_bn=request.data.get('alt_bn', ''),
+            alt_en=request.data.get('alt_en', ''),
+            order=current_count + i,
+        )
+        created.append(img)
+
     return ApiResponse(
-        message="Image uploaded",
-        data=ProductImageSerializer(img, context=_ctx(request)).data,
+        message=f"{len(created)} image(s) uploaded",
+        data=ProductImageSerializer(created, many=True, context=_ctx(request)).data,
         status_code=201,
     )
 
