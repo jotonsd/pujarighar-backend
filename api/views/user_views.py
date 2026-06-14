@@ -1,4 +1,6 @@
 import logging
+from django.conf import settings
+from django.core.files.storage import default_storage
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -232,8 +234,12 @@ def update_me(request):
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
-        _svc.update_profile(request.user, {**serializer.validated_data,
-                                            'preferred_language': request.data.get('preferred_language')})
+        profile_data = {**serializer.validated_data, 'preferred_language': request.data.get('preferred_language')}
+        avatar_file = request.FILES.get('avatar')
+        if avatar_file:
+            path = default_storage.save(f'avatars/{avatar_file.name}', avatar_file)
+            profile_data['avatar'] = settings.BACKEND_URL + settings.MEDIA_URL + path
+        _svc.update_profile(request.user, profile_data)
         data = UserSerializer(request.user, context={'request': request}).data
         data['nav_menu'] = _build_nav_menu(request.user.role)
         return ApiResponse(message="Profile updated", data=data)

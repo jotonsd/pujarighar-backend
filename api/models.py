@@ -89,7 +89,7 @@ class Profile(models.Model):
     user         = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     full_name_bn = models.CharField(max_length=200, blank=True)
     full_name_en = models.CharField(max_length=200, blank=True)
-    avatar       = models.ImageField(upload_to='avatars/', null=True, blank=True)
+    avatar       = models.CharField(max_length=500, blank=True)
     address_bn   = models.TextField(blank=True)
     address_en   = models.TextField(blank=True)
     district     = models.CharField(max_length=100, blank=True)
