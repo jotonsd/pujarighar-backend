@@ -19,7 +19,7 @@ _svc = OrderService()
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def pos_create_order(request):
     serializer = GuestCheckoutSerializer(data=request.data)
     if not serializer.is_valid():
@@ -34,6 +34,7 @@ def pos_create_order(request):
             except UserModel.DoesNotExist:
                 pass
         order = GuestCheckoutService().checkout(serializer.validated_data, customer=customer)
+        order = _svc.confirm(order, request.user)
         return ApiResponse(
             message="POS order created",
             data=SalesOrderSerializer(order, context={'request': request}).data,
@@ -68,8 +69,8 @@ def get_order(request, pk):
         role  = request.user.role
         if role == 'CUSTOMER' and order.customer != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
-        if role == 'WAREHOUSE' and order.status not in ('CONFIRMED', 'PACKED'):
-            return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+        if role == 'WAREHOUSE':
+            pass
         if role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         return ApiResponse(message="Order retrieved", data=SalesOrderSerializer(order, context={'request': request}).data)
@@ -126,7 +127,7 @@ def get_order_status_log(request, pk):
             if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
                 return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         if role == 'WAREHOUSE':
-            return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+            pass
         logs = OrderStatusLog.objects.filter(order=order).order_by('changed_at')
         return ApiResponse(message="Status log retrieved", data=OrderStatusLogSerializer(logs, many=True).data)
     except SalesOrder.DoesNotExist:
@@ -134,7 +135,7 @@ def get_order_status_log(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def confirm_order(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -158,7 +159,7 @@ def pack_order(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def assign_delivery(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -250,7 +251,7 @@ def cancel_order(request, pk):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         if order.status != 'PENDING':
             return ApiResponse(message="Only pending orders can be cancelled", errors="Invalid status", status_code=400)
-    elif role != 'ADMIN':
+    elif role not in ('ADMIN', 'WAREHOUSE'):
         return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
 
     serializer = OrderCancelSerializer(data=request.data)

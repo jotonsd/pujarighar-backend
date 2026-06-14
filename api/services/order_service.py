@@ -22,7 +22,7 @@ class OrderService:
         if role == 'CUSTOMER':
             qs = qs.filter(customer=user)
         elif role == 'WAREHOUSE':
-            qs = qs.filter(status__in=['CONFIRMED', 'PACKED'])
+            pass
         elif role == 'DELIVERY':
             qs = qs.filter(delivery__delivery_person=user)
 

@@ -490,9 +490,22 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
     if Decimal(str(order.tax_amount)) > 0:
         totals_html += f'<div class="tot-row"><span>{t("কর","Tax")}</span><span>৳ {_fmt(order.tax_amount)}</span></div>'
 
+    if Decimal(str(getattr(order, 'cashback_used', 0) or 0)) > 0:
+        totals_html += f'<div class="tot-row disc"><span>{t("ক্যাশব্যাক ব্যবহৃত","Cashback Used")}</span><span>− ৳ {_fmt(order.cashback_used)}</span></div>'
+
     paid_html = ''
     if order.payment_status == 'PAID':
         paid_html = f'<div class="tot-row"><span>{t("পরিশোধিত","Paid")}</span><span>৳ {_fmt(order.grand_total)}</span></div>'
+
+    msg_parts = []
+    if discount_amount > 0:
+        msg_parts.append(f'<div class="msg-savings">✓ {t(f"আপনি মোট ৳{_fmt(discount_amount)} সাশ্রয় করেছেন এই অর্ডারে।", f"You saved ৳{_fmt(discount_amount)} on this order.")}</div>')
+
+    cb = Decimal(str(getattr(order, 'cashback_amount', 0) or 0))
+    if cb > 0 and not order.is_guest:
+        msg_parts.append(f'<div class="msg-cashback">★ {t(f"এই অর্ডারে ৳{_fmt(cb)} ক্যাশব্যাক অর্জিত।", f"৳{_fmt(cb)} cashback earned on this order.")}</div>')
+
+    messages_html = '<hr class="sep">' + ''.join(msg_parts) if msg_parts else ''
 
     return f"""<!DOCTYPE html>
 <html lang="{lang}">
@@ -527,7 +540,9 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
   .tot-row   {{ display: flex; justify-content: space-between; font-size: 7.5pt; margin: 0.8mm 0; }}
   .disc      {{ color: #166534; font-weight: 600; }}
   .grand     {{ font-weight: bold; font-size: 10pt; margin: 1.5mm 0 0.5mm; }}
-  .thank     {{ font-size: 7.5pt; font-style: italic; color: #555; }}
+  .thank        {{ font-size: 7.5pt; font-style: italic; color: #555; }}
+  .msg-savings  {{ font-size: 7.5pt; color: #166534; font-weight: 600; margin: 0.8mm 0; text-align: center; }}
+  .msg-cashback {{ font-size: 7.5pt; color: #92400e; margin: 0.8mm 0; text-align: center; }}
 </style>
 </head>
 <body>
@@ -554,6 +569,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
 <div class="tot-row grand"><span>{t("সর্বমোট","Total")}</span><span>৳ {_fmt(order.grand_total)}</span></div>
 {paid_html}
 
+{messages_html}
 
 </body>
 </html>"""

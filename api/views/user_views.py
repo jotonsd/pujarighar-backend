@@ -12,7 +12,7 @@ from api.serializers.user_serializers import (
 from api.services.user_service import UserService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin
+from api.permissions import IsAdmin, IsAdminOrWarehouse
 
 logger = logging.getLogger(__name__)
 _svc = UserService()
@@ -255,14 +255,14 @@ def change_password(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def list_delivery_persons(request):
     persons = _svc.list_delivery_persons()
     return ApiResponse(message="Delivery persons retrieved", data=UserSerializer(persons, many=True, context={'request': request}).data)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def lookup_user_by_phone(request):
     phone = request.query_params.get('phone', '').strip()
     if not phone:
