@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny
 from api.serializers.guest_serializers import GuestCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
 from api.services.sslcommerz_service import SSLCommerzService
+from api.services import mail_service
 from django.conf import settings as django_settings
 from api.utils.response import ApiResponse
 
@@ -24,6 +25,7 @@ def guest_checkout(request):
         )
     try:
         order = _svc.checkout(serializer.validated_data)
+        mail_service.send_order_created(order)
         data  = {
             'order_number': order.order_number,
             'order_id':     str(order.id),

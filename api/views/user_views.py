@@ -247,7 +247,7 @@ def update_me(request):
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
-@api_view(['PATCH'])
+@api_view(['POST', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def change_password(request):
     serializer = ChangePasswordSerializer(data=request.data, context={'request': request})

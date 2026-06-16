@@ -109,7 +109,9 @@ class ProductService:
                 Q(discounts__start_date__isnull=True) | Q(discounts__start_date__lte=today),
                 Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
             ).distinct()
-        if ordering in ('price_asc', 'price_desc'):
+        if ordering == 'newest':
+            qs = qs.order_by('-created_at')
+        elif ordering in ('price_asc', 'price_desc'):
             disc_type = Subquery(
                 Discount.objects.filter(product=OuterRef('pk'), is_active=True)
                 .values('discount_type')[:1]
@@ -133,6 +135,31 @@ class ProductService:
                 )
             )
             qs = qs.order_by('_effective_price' if ordering == 'price_asc' else '-_effective_price')
+        elif ordering in ('discount_asc', 'discount_desc'):
+            disc_type = Subquery(
+                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+                .values('discount_type')[:1]
+            )
+            disc_val = Subquery(
+                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+                .values('discount_value')[:1]
+            )
+            qs = qs.annotate(_disc_type=disc_type, _disc_val=disc_val).annotate(
+                _disc_amount=Case(
+                    When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
+                        F('unit_price') * F('_disc_val') / Value(Decimal('100')),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )),
+                    When(_disc_type='FLAT', then=ExpressionWrapper(
+                        F('_disc_val'),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )),
+                    default=Value(Decimal('0')),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                )
+            ).order_by(
+                '_disc_amount' if ordering == 'discount_asc' else '-_disc_amount',
+            )
         return qs
 
     def get_product(self, pk: str) -> Product:

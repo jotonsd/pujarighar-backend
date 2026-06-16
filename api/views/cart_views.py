@@ -8,6 +8,7 @@ from api.serializers.cart_serializers import CartSerializer, AddToCartSerializer
 from api.services.cart_service import CartService
 from api.services.checkout_service import CheckoutService
 from api.services.sslcommerz_service import SSLCommerzService
+from api.services import mail_service
 from django.conf import settings as django_settings
 from api.serializers.order_serializers import SalesOrderSerializer
 from api.utils.response import ApiResponse
@@ -91,6 +92,7 @@ def checkout(request):
             shipping_address_id=shipping_address_id,
             delivery_zone=delivery_zone,
         )
+        mail_service.send_order_created(order)
         data  = SalesOrderSerializer(order).data
 
         if payment_method == 'ONLINE':

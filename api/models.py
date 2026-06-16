@@ -803,6 +803,13 @@ class SiteSetting(models.Model):
     address_en        = models.TextField(blank=True, default='')
     logo              = models.ImageField(upload_to='site/', null=True, blank=True)
     favicon           = models.ImageField(upload_to='site/', null=True, blank=True)
+    # Mail / SMTP
+    email_host        = models.CharField(max_length=255, blank=True, default='')
+    email_port        = models.PositiveIntegerField(default=587)
+    email_host_user   = models.CharField(max_length=255, blank=True, default='')
+    email_host_password = models.CharField(max_length=255, blank=True, default='')
+    email_use_tls     = models.BooleanField(default=True)
+    email_default_from = models.EmailField(blank=True, default='')
 
     class Meta:
         verbose_name = 'Site Setting'

@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User
 
@@ -72,10 +73,12 @@ class DeliveryAssignmentSerializer(serializers.ModelSerializer):
 
     def get_delivery_person_avatar(self, obj):
         p = getattr(obj.delivery_person, 'profile', None)
-        if p and p.avatar:
-            request = self.context.get('request')
-            return request.build_absolute_uri(p.avatar.url) if request else p.avatar.url
-        return None
+        if not p or not p.avatar:
+            return None
+        avatar = p.avatar
+        if avatar.startswith('http'):
+            return avatar
+        return f"{settings.BACKEND_URL}{settings.MEDIA_URL}{avatar}"
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):

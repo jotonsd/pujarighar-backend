@@ -10,6 +10,7 @@ from api.serializers.order_serializers import (
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
 )
 from api.services.order_service import OrderService
+from api.services import mail_service
 from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
 from api.permissions import IsAdmin, IsAdminOrWarehouse, IsAdminOrDelivery, IsDelivery
@@ -35,6 +36,7 @@ def pos_create_order(request):
                 pass
         order = GuestCheckoutService().checkout(serializer.validated_data, customer=customer)
         order = _svc.confirm(order, request.user)
+        mail_service.send_order_created(order)
         return ApiResponse(
             message="POS order created",
             data=SalesOrderSerializer(order, context={'request': request}).data,
@@ -196,7 +198,9 @@ def deliver_order(request, pk):
         order = _svc.get_order(pk)
         if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
-        return ApiResponse(message="Order delivered", data=SalesOrderSerializer(_svc.deliver(order, request.user), context={'request': request}).data)
+        delivered = _svc.deliver(order, request.user)
+        mail_service.send_order_delivered(delivered)
+        return ApiResponse(message="Order delivered", data=SalesOrderSerializer(delivered, context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -261,6 +265,7 @@ def cancel_order(request, pk):
         updated = _svc.cancel(order, request.user,
                               serializer.validated_data['note_bn'],
                               serializer.validated_data['note_en'])
+        mail_service.send_order_cancelled(updated)
         return ApiResponse(message="Order cancelled", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f"Cancel order error: {e}", exc_info=True)
