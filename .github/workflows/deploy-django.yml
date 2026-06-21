@@ -31,6 +31,8 @@ jobs:
             --exclude='.env' \
             --exclude='venv' \
             --exclude='tmp' \
+            --exclude='media' \
+            --exclude='staticfiles' \
             -e "ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
             ./ \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/dev-api.pujarighar.com/
