@@ -14,9 +14,14 @@ DATABASES = {
         'PORT':     config('DB_PORT',     default='3306'),
         'OPTIONS': {
             'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
         },
     }
 }
 
-CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'https://dev.pujarighar.com/']
+CORS_ALLOWED_ORIGINS = [
+    origin.strip().rstrip('/')
+    for origin in config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000').split(',')
+    if origin.strip()
+]
 CORS_ALLOW_CREDENTIALS = True
