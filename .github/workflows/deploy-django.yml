@@ -1,0 +1,56 @@
+name: Deploy Django Backend to cPanel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy via rsync
+        run: |
+          rsync -avz --delete \
+            --exclude='.htaccess' \
+            --exclude='.git*' \
+            --exclude='passenger_wsgi.pyc' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='venv' \
+            --exclude='tmp' \
+            -e "ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+            ./ \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/dev-api.pujarighar.com/
+
+      - name: Install dependencies and migrate
+        run: |
+          ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+            "source ${{ secrets.PYTHON_VENV_PATH }}/bin/activate && \
+             cd ~/dev-api.pujarighar.com && \
+             pip install -r requirements.txt && \
+             python manage.py migrate --noinput && \
+             python manage.py collectstatic --noinput"
+
+      - name: Restart app via cPanel
+        run: |
+          ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+            "mkdir -p ~/dev-api.pujarighar.com/tmp && touch ~/dev-api.pujarighar.com/tmp/restart.txt"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
