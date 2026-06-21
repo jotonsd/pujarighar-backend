@@ -1,14 +1,21 @@
 import logging
 import requests
+from django.conf import settings as django_settings
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from api.models import SalesOrder, User
-from api.serializers.auth_serializers import RegisterSerializer, LoginSerializer
+from api.serializers.auth_serializers import (
+    RegisterSerializer, LoginSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
+)
 from api.serializers.user_serializers import UserSerializer
 from api.services.auth_service import AuthService
+from api.services import mail_service
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -68,6 +75,60 @@ def login(request):
     except Exception as e:
         logger.error(f"Login error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    serializer = ForgotPasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+
+    email = serializer.validated_data['email'].strip().lower()
+    locale = request.data.get('locale') if request.data.get('locale') in ('bn', 'en') else 'bn'
+    generic_message = "If that email is registered, a reset link has been sent."
+
+    try:
+        user = User.objects.get(email=email, is_active=True)
+    except User.DoesNotExist:
+        # Don't reveal whether the email exists
+        return ApiResponse(message=generic_message)
+
+    uid   = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    reset_link = f"{django_settings.FRONTEND_URL}/{locale}/auth/reset-password?uid={uid}&token={token}"
+    mail_service.send_password_reset(user, reset_link)
+    return ApiResponse(message=generic_message)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    serializer = ResetPasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+
+    try:
+        uid  = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+        user = User.objects.get(pk=uid)
+    except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+        return ApiResponse(
+            message="Invalid reset link",
+            errors={'message_bn': 'লিংকটি অবৈধ', 'message_en': 'Invalid reset link'},
+            status_code=400,
+        )
+
+    if not default_token_generator.check_token(user, serializer.validated_data['token']):
+        return ApiResponse(
+            message="Invalid or expired reset link",
+            errors={'message_bn': 'লিংকটির মেয়াদ শেষ হয়ে গেছে', 'message_en': 'This reset link has expired'},
+            status_code=400,
+        )
+
+    user.set_password(serializer.validated_data['new_password'])
+    user.save(update_fields=['password'])
+    logger.info(f"Password reset for user: {user.email}")
+    return ApiResponse(message="Password reset successful")
 
 
 @api_view(['POST'])

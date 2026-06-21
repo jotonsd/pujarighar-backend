@@ -1,6 +1,9 @@
 import logging
+import re
 import threading
-from django.core.mail import EmailMessage, get_connection
+from email.utils import formataddr
+
+from django.core.mail import EmailMultiAlternatives, get_connection
 
 from api.models import SiteSetting, User
 
@@ -11,16 +14,21 @@ def _get_connection():
     s = SiteSetting.get()
     if not s.email_host or not s.email_host_user:
         return None, None
+    # Port 465 is implicit-SSL; STARTTLS (use_tls) only applies to 587/25.
+    use_ssl = s.email_port == 465
     conn = get_connection(
         backend='django.core.mail.backends.smtp.EmailBackend',
         host=s.email_host,
         port=s.email_port,
         username=s.email_host_user,
         password=s.email_host_password,
-        use_tls=s.email_use_tls,
+        use_tls=s.email_use_tls and not use_ssl,
+        use_ssl=use_ssl,
         fail_silently=False,
     )
-    from_email = s.email_default_from or s.email_host_user
+    address  = s.email_default_from or s.email_host_user
+    sender_name = f"{s.company_name_bn} | {s.company_name_en}" if s.company_name_bn or s.company_name_en else "PujariGhar"
+    from_email = formataddr((sender_name, address))
     return conn, from_email
 
 
@@ -32,14 +40,30 @@ def _admin_emails():
     )
 
 
-def _send_async(subject, body, recipients):
+def _html_to_text(html: str) -> str:
+    text = re.sub(r'<br\s*/?>|</tr>|</p>|</h\d>', '\n', html)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\n\s*\n+', '\n\n', text)
+    return text.strip()
+
+
+def _send_async(subject, html_body, recipients):
     def _send():
         try:
             conn, from_email = _get_connection()
             if not conn or not recipients:
                 return
-            msg = EmailMessage(subject, body, from_email, recipients, connection=conn)
-            msg.content_subtype = 'html'
+            s = SiteSetting.get()
+            reply_to = [s.email_default_from or s.email_host_user]
+            msg = EmailMultiAlternatives(
+                subject,
+                _html_to_text(html_body),
+                from_email,
+                recipients,
+                reply_to=reply_to,
+                connection=conn,
+            )
+            msg.attach_alternative(html_body, 'text/html')
             msg.send()
         except Exception as e:
             logger.error(f"Mail send error: {e}", exc_info=True)
@@ -99,6 +123,28 @@ def _base_html(title, body_content):
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
+def send_password_reset(user, reset_link: str):
+    if not user.email:
+        return
+    body = _base_html(
+        "পাসওয়ার্ড রিসেট করুন — Reset Your Password",
+        f"""
+        <p>আপনি আপনার পাসওয়ার্ড রিসেট করার অনুরোধ করেছেন।<br>
+        We received a request to reset your password.</p>
+        <p style='text-align:center;margin:24px 0'>
+          <a href='{reset_link}' style='display:inline-block;padding:12px 28px;background:#f59e0b;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold'>
+            পাসওয়ার্ড রিসেট করুন / Reset Password
+          </a>
+        </p>
+        <p style='color:#6b7280;font-size:12px;margin-top:16px'>
+        এই লিংকটি ৩০ মিনিটের জন্য বৈধ। যদি আপনি এই অনুরোধ না করেন, এই ইমেইলটি উপেক্ষা করুন।<br>
+        This link is valid for 30 minutes. If you didn't request this, you can safely ignore this email.
+        </p>
+        """
+    )
+    _send_async("[PujariGhar] Reset Your Password", body, [user.email])
+
 
 def send_order_created(order):
     customer_email = _customer_email(order)

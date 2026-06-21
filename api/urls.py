@@ -8,6 +8,8 @@ urlpatterns = [
     path('auth/logout/',         views.logout,        name='auth-logout'),
     path('auth/token/refresh/',  views.token_refresh, name='auth-token-refresh'),
     path('auth/google/',          views.google_login,  name='auth-google'),
+    path('auth/forgot-password/', views.forgot_password, name='auth-forgot-password'),
+    path('auth/reset-password/',  views.reset_password,  name='auth-reset-password'),
 
     # ─── Users ────────────────────────────────────────────────────────────────
     path('users/',                         views.list_users,           name='user-list'),

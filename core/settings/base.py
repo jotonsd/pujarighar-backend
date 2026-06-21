@@ -99,6 +99,9 @@ LANGUAGES = [('bn', 'বাংলা'), ('en', 'English')]
 BACKEND_URL  = config('BACKEND_URL',  default='http://localhost:8000')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
+# ─── Password reset ────────────────────────────────────────────────────────────
+PASSWORD_RESET_TIMEOUT = 1800  # 30 minutes
+
 # ─── Google OAuth ─────────────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 
