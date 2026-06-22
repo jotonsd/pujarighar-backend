@@ -14,6 +14,51 @@ IS_PRODUCTION = ENVIRONMENT == 'production'
 # ─── Maintenance mode ──────────────────────────────────────────────────────────
 MAINTENANCE_MODE = config('MAINTENANCE_MODE', default=False, cast=bool)
 
+# ─── Database engine ───────────────────────────────────────────────────────────
+# DB_ENGINE='mysql' (default) or 'postgresql', set per-environment in .env
+_DB_ENGINES = {
+    'mysql': {
+        'ENGINE': 'django.db.backends.mysql',
+        'PORT_DEFAULT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
+    },
+    'postgresql': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'PORT_DEFAULT': '5432',
+    },
+}
+
+
+def build_database_config(defaults=None):
+    """Build DATABASES['default'] from DB_ENGINE/DB_* env vars.
+
+    `defaults` supplies fallback values for dev; omit a key (e.g. in prod)
+    to make that env var required and fail loudly if it's missing.
+    """
+    defaults = defaults or {}
+    engine_key = config('DB_ENGINE', default='mysql').lower()
+    if engine_key not in _DB_ENGINES:
+        raise ValueError(f"Unsupported DB_ENGINE '{engine_key}', expected 'mysql' or 'postgresql'")
+    engine = _DB_ENGINES[engine_key]
+
+    def field(env_key, default_key):
+        return config(env_key, default=defaults[default_key]) if default_key in defaults else config(env_key)
+
+    db_config = {
+        'ENGINE':   engine['ENGINE'],
+        'NAME':     field('DB_NAME', 'NAME'),
+        'USER':     field('DB_USER', 'USER'),
+        'PASSWORD': field('DB_PASSWORD', 'PASSWORD'),
+        'HOST':     config('DB_HOST', default=defaults.get('HOST', 'localhost')),
+        'PORT':     config('DB_PORT', default=engine['PORT_DEFAULT']),
+    }
+    if 'OPTIONS' in engine:
+        db_config['OPTIONS'] = engine['OPTIONS']
+    return db_config
+
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.auth',
