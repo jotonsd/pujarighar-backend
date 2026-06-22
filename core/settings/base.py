@@ -6,6 +6,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='local-dev-secret-key')
 
+# ─── Environment ───────────────────────────────────────────────────────────────
+# 'development' or 'production' — set explicitly per-server in .env
+ENVIRONMENT = config('ENVIRONMENT', default='development')
+IS_PRODUCTION = ENVIRONMENT == 'production'
+
+# ─── Maintenance mode ──────────────────────────────────────────────────────────
+MAINTENANCE_MODE = config('MAINTENANCE_MODE', default=False, cast=bool)
+
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.auth',
@@ -26,6 +34,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'api.middleware.MaintenanceModeMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

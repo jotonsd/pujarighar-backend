@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - production
 
 jobs:
   deploy:
@@ -12,6 +13,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set environment variables
+        run: |
+          if [ "${{ github.ref_name }}" == "production" ]; then
+            echo "DEPLOY_PATH=~/api.pujarighar.com" >> $GITHUB_ENV
+            echo "VENV_PATH=${{ secrets.PROD_VENV_PATH }}" >> $GITHUB_ENV
+          else
+            echo "DEPLOY_PATH=~/dev-api.pujarighar.com" >> $GITHUB_ENV
+            echo "VENV_PATH=${{ secrets.DEV_VENV_PATH }}" >> $GITHUB_ENV
+          fi
 
       - name: Setup SSH
         run: |
@@ -35,14 +46,14 @@ jobs:
             --exclude='staticfiles' \
             -e "ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
             ./ \
-            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/dev-api.pujarighar.com/
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ env.DEPLOY_PATH }}/
 
       - name: Install dependencies and migrate
         run: |
           ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "source ${{ secrets.PYTHON_VENV_PATH }}/bin/activate && \
-             cd ~/dev-api.pujarighar.com && \
+            "source ${{ env.VENV_PATH }}/bin/activate && \
+             cd ${{ env.DEPLOY_PATH }} && \
              pip install -r requirements.txt && \
              python manage.py migrate --noinput && \
              python manage.py collectstatic --noinput"
@@ -51,7 +62,7 @@ jobs:
         run: |
           ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "mkdir -p ~/dev-api.pujarighar.com/tmp && touch ~/dev-api.pujarighar.com/tmp/restart.txt"
+            "mkdir -p ${{ env.DEPLOY_PATH }}/tmp && touch ${{ env.DEPLOY_PATH }}/tmp/restart.txt"
 
       - name: Cleanup
         if: always()

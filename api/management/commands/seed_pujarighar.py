@@ -1,5 +1,6 @@
 import random
 from decimal import Decimal
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -7,14 +8,28 @@ from django.db import transaction
 class Command(BaseCommand):
     help = 'Seed PujariGhar with chart of accounts, categories, products, and users'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--with-demo-products', action='store_true',
+            help='Force-seed the demo product catalog even in production (ENVIRONMENT=production).',
+        )
+
     @transaction.atomic
     def handle(self, *args, **options):
         self._seed_accounts()
         self._seed_categories()
         self._seed_brands()
-        self._seed_products()
-        self._seed_users()
-        self._seed_images()
+
+        if not settings.IS_PRODUCTION or options['with_demo_products']:
+            self._seed_products()
+            self._seed_users()
+            self._seed_images()
+        else:
+            self.stdout.write(self.style.WARNING(
+                '  – Skipped demo products/users/images (ENVIRONMENT=production). '
+                'Pass --with-demo-products to force.'
+            ))
+
         self.stdout.write(self.style.SUCCESS('✓ Seed completed successfully'))
 
     def _seed_accounts(self):
