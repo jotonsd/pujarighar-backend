@@ -10,7 +10,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 from weasyprint import HTML as WeasyHTML
-from weasyprint.text.fonts import FontConfiguration
+from weasyprint.fonts import FontConfiguration
 
 from api.models import SalesOrder, SiteSetting
 from api.utils.response import ApiResponse
@@ -65,7 +65,7 @@ THERMAL_BODY_CSS = """
     .items-table { font-size: 8pt; }
     .items-table thead th { font-size: 7pt; }
     .totals-wrap { flex-direction: column; align-items: flex-start; gap: 2mm; }
-    .totals-table { width: 100%; }
+    .totals-table-wrap { width: 100%; }
     .totals-qr img { width: 18mm; height: 18mm; }
     .footer { flex-direction: column; gap: 1mm; font-size: 7.5pt; }
 """
@@ -175,11 +175,11 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     # ── Below-totals messages ─────────────────────────────────────────────────
     msg_parts = []
     if has_order_discount:
-        msg_parts.append(f'<span class="msg-savings">✓ {t(f"আপনি মোট ৳{_fmt(order.discount_amount)} সাশ্রয় করেছেন এই অর্ডারে।", f"You saved ৳{_fmt(order.discount_amount)} on this order.")}</span>')
+        msg_parts.append(f'<div class="msg-savings">✓ {t(f"আপনি মোট ৳{_fmt(order.discount_amount)} সাশ্রয় করেছেন এই অর্ডারে।", f"You saved ৳{_fmt(order.discount_amount)} on this order.")}</div>')
 
     cb = Decimal(str(getattr(order, 'cashback_amount', 0) or 0))
     if cb > 0 and show_cashback:
-        msg_parts.append(f'<span class="msg-cashback">★ {t(f"এই অর্ডারে ৳{_fmt(cb)} ক্যাশব্যাক অর্জিত — পরবর্তী অর্ডারে প্রযোজ্য।", f"৳{_fmt(cb)} cashback earned on this order — redeemable on next purchase.")}</span>')
+        msg_parts.append(f'<div class="msg-cashback">★ {t(f"এই অর্ডারে ৳{_fmt(cb)} ক্যাশব্যাক অর্জিত — পরবর্তী অর্ডারে প্রযোজ্য।", f"৳{_fmt(cb)} cashback earned on this order — redeemable on next purchase.")}</div>')
 
     messages_html = ''
     if msg_parts:
@@ -302,8 +302,9 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
   }}
   .totals-qr img {{ width: 22mm; height: 22mm; display: block; }}
   .totals-qr p   {{ font-size: 7pt; color: #aaa; text-align: center; margin-top: 1mm; }}
+  .totals-table-wrap {{ width: 72mm; }}
   .totals-table {{
-    width: 72mm;
+    width: 100%;
     border-collapse: collapse;
     font-size: 9.5pt;
   }}
@@ -324,13 +325,9 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     text-align: center;
     border-top: 0.25mm dotted #ccc;
     padding-top: 2.5mm;
-    display: flex;
-    flex-direction: column;
-    gap: 1mm;
-    align-items: center;
   }}
-  .msg-savings  {{ font-size: 8.5pt; color: #166534; font-weight: 600; }}
-  .msg-cashback {{ font-size: 8.5pt; color: #92400e; }}
+  .msg-savings  {{ font-size: 8.5pt; color: #166534; font-weight: 600; margin: 1mm 0; }}
+  .msg-cashback {{ font-size: 8.5pt; color: #92400e; margin: 1mm 0; }}
 
   /* ── Notes ── */
   .note-block {{
@@ -417,11 +414,13 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     <img src="{qr_uri}" alt="QR">
     <p>pujarighar.com</p>
   </div>
-  <table class="totals-table">
-    <tbody>
-      {totals_html}
-    </tbody>
-  </table>
+  <div class="totals-table-wrap">
+    <table class="totals-table">
+      <tbody>
+        {totals_html}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {messages_html}

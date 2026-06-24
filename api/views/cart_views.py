@@ -83,8 +83,8 @@ def checkout(request):
     payment_method      = request.data.get('payment_method', 'COD')
     shipping_address_id = request.data.get('shipping_address_id') or None
     delivery_zone       = request.data.get('delivery_zone') or None
-    if payment_method not in ('COD', 'ONLINE'):
-        return ApiResponse(message="Invalid payment method", errors="Use COD or ONLINE", status_code=422)
+    if payment_method != 'COD':
+        return ApiResponse(message="Invalid payment method", errors="Only COD is available right now", status_code=422)
     try:
         order = _checkout_svc.checkout(
             request.user,
