@@ -1,4 +1,5 @@
 import logging
+import re
 from django.conf import settings
 from django.core.files.storage import default_storage
 from rest_framework import status
@@ -230,15 +231,66 @@ def get_me(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_me(request):
-    data = request.data.copy()
+    # Plain dict (not QueryDict.copy()/deepcopy) — deepcopy chokes on the file
+    # handle of large uploads (TemporaryUploadedFile is unpicklable).
+    data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
     data.pop('avatar', None)
+
+    phone = request.data.get('phone')
+    if phone:
+        phone = phone.strip()
+        if not re.fullmatch(r'01\d{9}', phone):
+            return ApiResponse(
+                message="Validation failed",
+                errors={'phone': {
+                    'message_bn': 'সঠিক ১১ ডিজিটের ফোন নম্বর দিন (যেমনঃ 01XXXXXXXXX)',
+                    'message_en': 'Enter a valid 11-digit phone number (e.g. 01XXXXXXXXX)',
+                }},
+                status_code=422,
+            )
+        if User.objects.exclude(pk=request.user.pk).filter(phone=phone).exists():
+            return ApiResponse(
+                message="Validation failed",
+                errors={'phone': {
+                    'message_bn': 'এই ফোন নম্বরটি ইতিমধ্যে ব্যবহৃত হচ্ছে',
+                    'message_en': 'This phone number is already in use',
+                }},
+                status_code=422,
+            )
+
+    avatar_file = request.FILES.get('avatar')
+    if avatar_file:
+        ALLOWED_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+        MAX_SIZE = 5 * 1024 * 1024  # 5MB
+        if avatar_file.content_type not in ALLOWED_TYPES:
+            return ApiResponse(
+                message="Validation failed",
+                errors={'avatar': {
+                    'message_bn': 'শুধুমাত্র JPG, PNG, WEBP বা GIF ছবি আপলোড করা যাবে',
+                    'message_en': 'Only JPG, PNG, WEBP, or GIF images are allowed',
+                }},
+                status_code=422,
+            )
+        if avatar_file.size > MAX_SIZE:
+            return ApiResponse(
+                message="Validation failed",
+                errors={'avatar': {
+                    'message_bn': 'ছবির আকার ৫ এমবি-এর বেশি হতে পারবে না',
+                    'message_en': 'Image size must not exceed 5MB',
+                }},
+                status_code=422,
+            )
+
     serializer = ProfileSerializer(request.user.profile, data=data, partial=True,
                                    context={'request': request})
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
-        profile_data = {**serializer.validated_data, 'preferred_language': request.data.get('preferred_language')}
-        avatar_file = request.FILES.get('avatar')
+        profile_data = {
+            **serializer.validated_data,
+            'preferred_language': request.data.get('preferred_language'),
+            'phone': phone,
+        }
         if avatar_file:
             path = default_storage.save(f'avatars/{avatar_file.name}', avatar_file)
             profile_data['avatar'] = settings.BACKEND_URL + settings.MEDIA_URL + path

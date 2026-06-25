@@ -52,12 +52,19 @@ class UserService:
     def update_profile(self, user: User, validated_data: dict) -> User:
         profile: Profile = user.profile
         preferred_language = validated_data.pop('preferred_language', None)
+        phone = validated_data.pop('phone', None)
         for attr, value in validated_data.items():
             setattr(profile, attr, value)
         profile.save()
+        update_fields = []
         if preferred_language:
             user.preferred_language = preferred_language
-            user.save(update_fields=['preferred_language'])
+            update_fields.append('preferred_language')
+        if phone:
+            user.phone = phone
+            update_fields.append('phone')
+        if update_fields:
+            user.save(update_fields=update_fields)
         return user
 
     def change_password(self, user: User, new_password: str) -> None:
