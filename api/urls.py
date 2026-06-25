@@ -156,6 +156,11 @@ urlpatterns = [
     path('hero-slides/<uuid:pk>/update/', views.update_hero_slide,    name='hero-slide-update'),
     path('hero-slides/<uuid:pk>/delete/', views.delete_hero_slide,    name='hero-slide-delete'),
 
+    # ─── Promo Emails ─────────────────────────────────────────────────────────
+    path('promo-emails/',          views.list_promo_emails,    name='promo-email-list'),
+    path('promo-emails/audience/', views.promo_email_audience, name='promo-email-audience'),
+    path('promo-emails/create/',   views.create_promo_email,   name='promo-email-create'),
+
     # ─── Delivery Charges ─────────────────────────────────────────────────────
     path('delivery-charges/',        views.get_delivery_charges,    name='delivery-charges-get'),
     path('delivery-charges/update/', views.update_delivery_charges, name='delivery-charges-update'),
