@@ -260,7 +260,8 @@ _PROMO_PREF_FIELD = {
 }
 
 
-def promo_recipients(email_type: str):
+def promo_recipients_by_language(email_type: str):
+    """Returns {'bn': [emails], 'en': [emails]} based on each user's preferred_language."""
     qs = (
         User.objects.filter(role='CUSTOMER', is_active=True, profile__notify_marketing=True)
         .exclude(email='')
@@ -268,16 +269,44 @@ def promo_recipients(email_type: str):
     field = _PROMO_PREF_FIELD.get(email_type)
     if field:
         qs = qs.filter(**{field: True})
-    return list(qs.values_list('email', flat=True).distinct())
+    qs = qs.values_list('email', 'preferred_language').distinct()
+
+    grouped = {'bn': [], 'en': []}
+    for email, lang in qs:
+        grouped['bn' if lang == 'bn' else 'en'].append(email)
+    return grouped
+
+
+def promo_recipients(email_type: str):
+    grouped = promo_recipients_by_language(email_type)
+    return grouped['bn'] + grouped['en']
+
+
+def _send_promo_batch(conn, from_email, subject, html, recipients):
+    BATCH_SIZE = 40  # BCC in batches: hides recipients from each other, stays under SMTP limits
+    for i in range(0, len(recipients), BATCH_SIZE):
+        batch = recipients[i:i + BATCH_SIZE]
+        msg = EmailMultiAlternatives(
+            subject,
+            _html_to_text(html),
+            from_email,
+            [from_email],
+            bcc=batch,
+            connection=conn,
+        )
+        msg.attach_alternative(html, 'text/html')
+        msg.send()
 
 
 def send_promo_email(promo):
-    """Sends a PromoEmail campaign in the background and updates its status when done."""
+    """Sends a PromoEmail campaign in the background, one single-language email per
+    recipient's preferred_language, and updates its status when done."""
     def _send():
         close_old_connections()
         try:
-            recipients = promo_recipients(promo.email_type)
-            if not recipients:
+            grouped = promo_recipients_by_language(promo.email_type)
+            total = len(grouped['bn']) + len(grouped['en'])
+            if not total:
                 promo.status = 'FAILED'
                 promo.recipient_count = 0
                 promo.save(update_fields=['status', 'recipient_count'])
@@ -286,36 +315,20 @@ def send_promo_email(promo):
             conn, from_email = _get_connection()
             if not conn:
                 promo.status = 'FAILED'
-                promo.recipient_count = len(recipients)
+                promo.recipient_count = total
                 promo.save(update_fields=['status', 'recipient_count'])
                 return
 
-            body = f"""
-            <p>{promo.message_bn.replace(chr(10), '<br>')}</p>
-            <hr style='border:none;border-top:1px solid #e5e7eb;margin:16px 0'>
-            <p>{promo.message_en.replace(chr(10), '<br>')}</p>
-            """
-            html = _base_html(promo.subject_bn, body)
-            subject = f"[PujariGhar] {promo.subject_en or promo.subject_bn}"
+            if grouped['bn']:
+                html = _base_html(promo.subject_bn, f"<p>{promo.message_bn.replace(chr(10), '<br>')}</p>")
+                _send_promo_batch(conn, from_email, f"[PujariGhar] {promo.subject_bn}", html, grouped['bn'])
 
-            # BCC in batches so recipients can't see each other's addresses
-            # and we stay under typical SMTP per-message recipient limits.
-            BATCH_SIZE = 40
-            for i in range(0, len(recipients), BATCH_SIZE):
-                batch = recipients[i:i + BATCH_SIZE]
-                msg = EmailMultiAlternatives(
-                    subject,
-                    _html_to_text(html),
-                    from_email,
-                    [from_email],
-                    bcc=batch,
-                    connection=conn,
-                )
-                msg.attach_alternative(html, 'text/html')
-                msg.send()
+            if grouped['en']:
+                html = _base_html(promo.subject_en, f"<p>{promo.message_en.replace(chr(10), '<br>')}</p>")
+                _send_promo_batch(conn, from_email, f"[PujariGhar] {promo.subject_en}", html, grouped['en'])
 
             promo.status = 'SENT'
-            promo.recipient_count = len(recipients)
+            promo.recipient_count = total
             promo.sent_at = timezone.now()
             promo.save(update_fields=['status', 'recipient_count', 'sent_at'])
         except Exception as e:
