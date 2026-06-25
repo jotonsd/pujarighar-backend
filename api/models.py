@@ -96,6 +96,12 @@ class Profile(models.Model):
     thana        = models.CharField(max_length=100, blank=True)
     post_code         = models.CharField(max_length=10, blank=True)
     cashback_balance  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    notify_marketing     = models.BooleanField(default=True)
+    notify_new_product   = models.BooleanField(default=True)
+    notify_new_package   = models.BooleanField(default=True)
+    notify_offers        = models.BooleanField(default=True)
+
     created_at        = models.DateTimeField(auto_now_add=True)
     updated_at        = models.DateTimeField(auto_now=True)
 
@@ -834,3 +840,35 @@ class ReferralBonus(models.Model):
 
     def __str__(self):
         return f'{self.referrer} ← {self.referred_user} ৳{self.amount}'
+
+
+# ─── Marketing ─────────────────────────────────────────────────────────────────
+
+class PromoEmail(BaseModel):
+    TYPE_CHOICES = [
+        ('NEW_PRODUCT', 'New Product'),
+        ('NEW_PACKAGE', 'New Package'),
+        ('OFFER',       'Offer'),
+        ('GENERAL',     'General'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('SENT',    'Sent'),
+        ('FAILED',  'Failed'),
+    ]
+
+    email_type      = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    subject_bn      = models.CharField(max_length=200)
+    subject_en      = models.CharField(max_length=200)
+    message_bn      = models.TextField()
+    message_en      = models.TextField()
+    status          = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    recipient_count = models.PositiveIntegerField(default=0)
+    sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='promo_emails_sent')
+    sent_at         = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_email_type_display()} — {self.subject_en}'

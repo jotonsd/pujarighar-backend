@@ -12,6 +12,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             'address_bn', 'address_en',
             'district', 'thana', 'post_code',
             'cashback_balance',
+            'notify_marketing', 'notify_new_product', 'notify_new_package', 'notify_offers',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['cashback_balance', 'created_at', 'updated_at']
