@@ -58,3 +58,30 @@ def create_promo_email(request):
     except Exception as e:
         logger.error(f"Create promo email error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def resend_promo_email(request, pk):
+    try:
+        original = PromoEmail.objects.get(pk=pk)
+    except PromoEmail.DoesNotExist:
+        return ApiResponse(message="Not found", errors="Not found", status_code=404)
+    try:
+        promo = PromoEmail.objects.create(
+            email_type=original.email_type,
+            subject_bn=original.subject_bn,
+            subject_en=original.subject_en,
+            message_bn=original.message_bn,
+            message_en=original.message_en,
+            sent_by=request.user,
+        )
+        send_promo_email(promo)
+        return ApiResponse(
+            message="Promo email queued for resending",
+            data=PromoEmailSerializer(promo, context={'request': request}).data,
+            status_code=201,
+        )
+    except Exception as e:
+        logger.error(f"Resend promo email error: {e}", exc_info=True)
+        return ApiResponse(message=str(e), errors=str(e), status_code=400)
