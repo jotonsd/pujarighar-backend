@@ -229,7 +229,9 @@ def get_me(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_me(request):
-    serializer = ProfileSerializer(request.user.profile, data=request.data, partial=True,
+    data = request.data.copy()
+    data.pop('avatar', None)
+    serializer = ProfileSerializer(request.user.profile, data=data, partial=True,
                                    context={'request': request})
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
