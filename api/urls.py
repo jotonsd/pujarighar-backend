@@ -157,9 +157,10 @@ urlpatterns = [
     path('hero-slides/<uuid:pk>/delete/', views.delete_hero_slide,    name='hero-slide-delete'),
 
     # ─── Promo Emails ─────────────────────────────────────────────────────────
-    path('promo-emails/',          views.list_promo_emails,    name='promo-email-list'),
-    path('promo-emails/audience/', views.promo_email_audience, name='promo-email-audience'),
-    path('promo-emails/create/',   views.create_promo_email,   name='promo-email-create'),
+    path('promo-emails/',                views.list_promo_emails,    name='promo-email-list'),
+    path('promo-emails/audience/',       views.promo_email_audience, name='promo-email-audience'),
+    path('promo-emails/create/',         views.create_promo_email,   name='promo-email-create'),
+    path('promo-emails/<uuid:pk>/resend/', views.resend_promo_email, name='promo-email-resend'),
 
     # ─── Delivery Charges ─────────────────────────────────────────────────────
     path('delivery-charges/',        views.get_delivery_charges,    name='delivery-charges-get'),
@@ -179,7 +180,8 @@ urlpatterns = [
     path('discounts/<uuid:pk>/delete/',     views.delete_discount,  name='discount-delete'),
 
     # ─── Notifications ────────────────────────────────────────────────────────
-    path('notifications/',                      views.list_notifications, name='notification-list'),
+    path('notifications/',                      views.list_notifications,     name='notification-list'),
+    path('notifications/all/',                  views.list_all_notifications, name='notification-list-all'),
     path('notifications/mark-all-read/',        views.mark_all_read,      name='notification-mark-all'),
     path('notifications/<uuid:pk>/mark-read/',  views.mark_one_read,      name='notification-mark-one'),
 
