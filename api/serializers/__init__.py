@@ -4,3 +4,4 @@ from .product_serializers import CategorySerializer, ProductSerializer, ProductI
 from .cart_serializers import CartItemSerializer, CartSerializer, AddToCartSerializer, UpdateCartItemSerializer
 from .order_serializers import SalesOrderItemSerializer, SalesOrderSerializer, OrderStatusLogSerializer, DeliveryAssignmentSerializer, OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer
 from .accounting_serializers import AccountSerializer, JournalLineSerializer, JournalEntrySerializer
+from .promo_email_serializers import PromoEmailSerializer, PromoEmailCreateSerializer

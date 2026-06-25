@@ -57,8 +57,9 @@ def _build_nav_menu(role: str) -> list:
                 item('/admin/settings/loans',            '💰', 'ঋণ বিনিয়োগকারী',  'Loan Investors'),
             ]),
             group('🎨', 'মার্কেটিং', 'Marketing', [
-                item('/admin/slides',  '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),
-                item('/admin/banners', '🎯', 'ব্যানার',         'Banners'),
+                item('/admin/slides',          '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),
+                item('/admin/banners',         '🎯', 'ব্যানার',         'Banners'),
+                item('/admin/marketing/promo-emails', '📧', 'প্রোমো ইমেইল',  'Promo Emails'),
             ]),
             group('📒', 'হিসাব', 'Accounting', [
                 item('/admin/accounting/journal',       '📓', 'জার্নাল',          'Journal'),

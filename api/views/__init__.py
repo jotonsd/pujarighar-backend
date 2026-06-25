@@ -67,3 +67,4 @@ from .loan_views import (
     list_loan_payments, create_loan_payment, delete_loan_payment,
 )
 from .settings_views import get_site_settings, update_site_settings
+from .promo_email_views import list_promo_emails, promo_email_audience, create_promo_email
