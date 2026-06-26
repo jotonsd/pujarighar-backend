@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+from decimal import Decimal
 from email.utils import formataddr
 
 from django.core.mail import EmailMultiAlternatives, get_connection
@@ -86,26 +87,42 @@ def _customer_email(order) -> str | None:
     return email.strip() if email and email.strip() else None
 
 
-def _order_summary_html(order):
+def _customer_lang(order) -> str:
+    if order.customer and order.customer.preferred_language:
+        return order.customer.preferred_language
+    return 'bn'
+
+
+def _fmt(value) -> str:
+    try:
+        return f'{Decimal(str(value)):,.2f}'
+    except Exception:
+        return '0.00'
+
+
+def _order_summary_html(order, is_bn: bool):
+    name = (lambda p: p.name_bn) if is_bn else (lambda p: p.name_en)
     items_html = ''.join(
-        f"<tr><td style='padding:4px 8px'>{item.product.name_bn}<br><span style='font-size:11px;color:#6b7280'>{item.product.name_en}</span></td>"
+        f"<tr><td style='padding:4px 8px'>{name(item.product)}</td>"
         f"<td style='padding:4px 8px;text-align:center'>{int(item.quantity)}</td>"
-        f"<td style='padding:4px 8px;text-align:right'>৳{item.line_total}</td></tr>"
+        f"<td style='padding:4px 8px;text-align:right'>৳{_fmt(item.line_total)}</td></tr>"
         for item in order.items.select_related('product').all()
     )
+    headers = ('পণ্য', 'পরিমাণ', 'মোট') if is_bn else ('Product', 'Qty', 'Total')
+    grand_label = 'সর্বমোট' if is_bn else 'Grand Total'
     return f"""
     <table style='width:100%;border-collapse:collapse;font-size:13px'>
       <thead>
         <tr style='background:#fef3c7'>
-          <th style='padding:6px 8px;text-align:left'>Product</th>
-          <th style='padding:6px 8px'>Qty</th>
-          <th style='padding:6px 8px;text-align:right'>Total</th>
+          <th style='padding:6px 8px;text-align:left'>{headers[0]}</th>
+          <th style='padding:6px 8px'>{headers[1]}</th>
+          <th style='padding:6px 8px;text-align:right'>{headers[2]}</th>
         </tr>
       </thead>
       <tbody>{items_html}</tbody>
       <tfoot>
         <tr><td colspan='3' style='padding:8px;text-align:right;font-weight:bold;border-top:1px solid #e5e7eb'>
-          Grand Total: ৳{order.grand_total}
+          {grand_label}: ৳{_fmt(order.grand_total)}
         </td></tr>
       </tfoot>
     </table>
@@ -156,21 +173,26 @@ def send_password_reset(user, reset_link: str):
 def send_order_created(order):
     customer_email = _customer_email(order)
     admins = _admin_emails()
+    is_bn = _customer_lang(order) == 'bn'
 
-    # Customer mail
+    # Customer mail — single language, based on customer's preferred_language
     if customer_email:
+        if is_bn:
+            title = f"অর্ডার নিশ্চিত হয়েছে — Order Confirmed #{order.order_number}"
+            intro = "আপনার অর্ডার সফলভাবে গ্রহণ করা হয়েছে।"
+            outro = "আপনার অর্ডার শীঘ্রই প্রস্তুত করা হবে। ধন্যবাদ!"
+        else:
+            title = f"Order Confirmed #{order.order_number}"
+            intro = "Your order has been placed successfully."
+            outro = "Your order will be prepared shortly. Thank you!"
         body = _base_html(
-            f"অর্ডার নিশ্চিত হয়েছে — Order Confirmed #{order.order_number}",
+            title,
             f"""
-            <p>আপনার অর্ডার সফলভাবে গ্রহণ করা হয়েছে।<br>
-            Your order has been placed successfully.</p>
+            <p>{intro}</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
             <strong>Payment:</strong> {order.payment_method} — {order.payment_status}</p>
-            {_order_summary_html(order)}
-            <p style='color:#6b7280;font-size:12px;margin-top:16px'>
-            আপনার অর্ডার শীঘ্রই প্রস্তুত করা হবে। ধন্যবাদ!<br>
-            Your order will be prepared shortly. Thank you!
-            </p>
+            {_order_summary_html(order, is_bn)}
+            <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Confirmed", body, [customer_email])
@@ -184,7 +206,7 @@ def send_order_created(order):
             <p><strong>Order #:</strong> {order.order_number}<br>
             <strong>Customer:</strong> {customer_email or 'Guest'}<br>
             <strong>Payment:</strong> {order.payment_method} — {order.payment_status}</p>
-            {_order_summary_html(order)}
+            {_order_summary_html(order, False)}
             """
         )
         _send_async(f"[PujariGhar] New Order #{order.order_number}", body, admins)
@@ -193,19 +215,24 @@ def send_order_created(order):
 def send_order_cancelled(order):
     customer_email = _customer_email(order)
     admins = _admin_emails()
+    is_bn = _customer_lang(order) == 'bn'
 
     if customer_email:
+        if is_bn:
+            title = f"অর্ডার বাতিল হয়েছে — Order Cancelled #{order.order_number}"
+            intro = "আপনার অর্ডার বাতিল করা হয়েছে।"
+            outro = "কোনো সমস্যা হলে আমাদের সাথে যোগাযোগ করুন।"
+        else:
+            title = f"Order Cancelled #{order.order_number}"
+            intro = "Your order has been cancelled."
+            outro = "If you have any questions, please contact us."
         body = _base_html(
-            f"অর্ডার বাতিল হয়েছে — Order Cancelled #{order.order_number}",
+            title,
             f"""
-            <p>আপনার অর্ডার বাতিল করা হয়েছে।<br>
-            Your order has been cancelled.</p>
+            <p>{intro}</p>
             <p><strong>Order #:</strong> {order.order_number}</p>
-            {_order_summary_html(order)}
-            <p style='color:#6b7280;font-size:12px;margin-top:16px'>
-            কোনো সমস্যা হলে আমাদের সাথে যোগাযোগ করুন।<br>
-            If you have any questions, please contact us.
-            </p>
+            {_order_summary_html(order, is_bn)}
+            <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Cancelled", body, [customer_email])
@@ -217,7 +244,7 @@ def send_order_cancelled(order):
             <p>An order has been cancelled.</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
             <strong>Customer:</strong> {customer_email or 'Guest'}</p>
-            {_order_summary_html(order)}
+            {_order_summary_html(order, False)}
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Cancelled", body, admins)
@@ -226,19 +253,24 @@ def send_order_cancelled(order):
 def send_order_delivered(order):
     customer_email = _customer_email(order)
     admins = _admin_emails()
+    is_bn = _customer_lang(order) == 'bn'
 
     if customer_email:
+        if is_bn:
+            title = f"অর্ডার ডেলিভারি হয়েছে — Order Delivered #{order.order_number}"
+            intro = "আপনার অর্ডার সফলভাবে ডেলিভারি হয়েছে। ধন্যবাদ!"
+            outro = "আমাদের পণ্য পেয়ে আপনি সন্তুষ্ট হলে রিভিউ দিন।"
+        else:
+            title = f"Order Delivered #{order.order_number}"
+            intro = "Your order has been delivered successfully. Thank you!"
+            outro = "We'd love to hear your feedback — please leave a review!"
         body = _base_html(
-            f"অর্ডার ডেলিভারি হয়েছে — Order Delivered #{order.order_number}",
+            title,
             f"""
-            <p>আপনার অর্ডার সফলভাবে ডেলিভারি হয়েছে। ধন্যবাদ!<br>
-            Your order has been delivered successfully. Thank you!</p>
+            <p>{intro}</p>
             <p><strong>Order #:</strong> {order.order_number}</p>
-            {_order_summary_html(order)}
-            <p style='color:#6b7280;font-size:12px;margin-top:16px'>
-            আমাদের পণ্য পেয়ে আপনি সন্তুষ্ট হলে রিভিউ দিন।<br>
-            We'd love to hear your feedback — please leave a review!
-            </p>
+            {_order_summary_html(order, is_bn)}
+            <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Delivered", body, [customer_email])
