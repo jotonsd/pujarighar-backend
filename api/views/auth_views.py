@@ -146,6 +146,38 @@ def logout(request):
 token_refresh = TokenRefreshView.as_view()
 
 
+def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: str):
+    """Shared get-or-create + sign-in logic for social login providers. Returns
+    the User, or None if the provider didn't give us an email to key on."""
+    email = (email or '').lower()
+    if not email:
+        return None
+
+    user, created = User.objects.get_or_create(
+        email=email,
+        defaults={'is_active': True},
+    )
+
+    if created:
+        user.set_unusable_password()
+        user.save()
+        profile = user.profile
+        profile.full_name_en = name
+        if picture:
+            profile.avatar = picture
+        profile.save()
+        _link_guest_orders(user)
+        logger.info(f"New user created via {provider_label} OAuth: {email}")
+    else:
+        profile = user.profile
+        if picture and not profile.avatar:
+            profile.avatar = picture
+            profile.save(update_fields=['avatar'])
+        logger.info(f"Existing user signed in via {provider_label} OAuth: {email}")
+
+    return user
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_login(request):
@@ -174,37 +206,62 @@ def google_login(request):
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
-    email   = data.get('email', '').lower()
-    name    = data.get('name', '')
-    picture = data.get('picture', '')
-
-    if not email:
+    user = _oauth_login_or_create(data.get('email', ''), data.get('name', ''), data.get('picture', ''), 'Google')
+    if not user:
         return ApiResponse(
             message="Google account has no email",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    user, created = User.objects.get_or_create(
-        email=email,
-        defaults={'is_active': True},
+    tokens = _auth.login(user)
+    return ApiResponse(
+        message="Login successful",
+        data={'user': UserSerializer(user).data, **tokens},
+        status_code=status.HTTP_200_OK,
     )
 
-    if created:
-        user.set_unusable_password()
-        user.save()
-        profile = user.profile
-        profile.full_name_en = name
-        if picture:
-            profile.avatar = picture
-        profile.save()
-        _link_guest_orders(user)
-        logger.info(f"New user created via Google OAuth: {email}")
-    else:
-        profile = user.profile
-        if picture and not profile.avatar:
-            profile.avatar = picture
-            profile.save(update_fields=['avatar'])
-        logger.info(f"Existing user signed in via Google OAuth: {email}")
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def facebook_login(request):
+    access_token = request.data.get('access_token', '')
+    if not access_token:
+        return ApiResponse(
+            message="Missing access_token",
+            errors={"access_token": "This field is required"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resp = requests.get(
+            'https://graph.facebook.com/me',
+            params={'fields': 'id,name,email,picture.type(large)', 'access_token': access_token},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            raise ValueError('Invalid Facebook access token')
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"Facebook userinfo request failed: {e}")
+        return ApiResponse(
+            message="Invalid Facebook token",
+            errors=str(e),
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    picture = (data.get('picture') or {}).get('data', {}).get('url', '')
+    user = _oauth_login_or_create(data.get('email', ''), data.get('name', ''), picture, 'Facebook')
+    if not user:
+        # Facebook only returns an email if the account has one verified and the
+        # user granted the `email` permission — neither is guaranteed.
+        return ApiResponse(
+            message="Facebook account has no email",
+            errors={
+                'message_bn': 'আপনার ফেসবুক অ্যাকাউন্টে কোনো যাচাইকৃত ইমেইল নেই। অনুগ্রহ করে অন্য পদ্ধতিতে লগইন করুন।',
+                'message_en': "Your Facebook account doesn't have a verified email. Please use another login method.",
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     tokens = _auth.login(user)
     return ApiResponse(

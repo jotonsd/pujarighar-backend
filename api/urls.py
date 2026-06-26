@@ -7,7 +7,8 @@ urlpatterns = [
     path('auth/login/',          views.login,         name='auth-login'),
     path('auth/logout/',         views.logout,        name='auth-logout'),
     path('auth/token/refresh/',  views.token_refresh, name='auth-token-refresh'),
-    path('auth/google/',          views.google_login,  name='auth-google'),
+    path('auth/google/',          views.google_login,   name='auth-google'),
+    path('auth/facebook/',        views.facebook_login, name='auth-facebook'),
     path('auth/forgot-password/', views.forgot_password, name='auth-forgot-password'),
     path('auth/reset-password/',  views.reset_password,  name='auth-reset-password'),
 
