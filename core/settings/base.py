@@ -164,3 +164,60 @@ SSLCOMMERZ_STORE_ID      = config('SSLCOMMERZ_STORE_ID',      default='')
 SSLCOMMERZ_STORE_PASS    = config('SSLCOMMERZ_STORE_PASS',    default='')
 SSLCOMMERZ_API_URL       = config('SSLCOMMERZ_API_URL',       default='https://sandbox.sslcommerz.com/gwprocess/v4/api.php')
 SSLCOMMERZ_VALIDATION_URL = config('SSLCOMMERZ_VALIDATION_URL', default='https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php')
+
+# ─── Logging ───────────────────────────────────────────────────────────────────
+# Rotates daily at midnight, keeping 7 days of history. Email-sending logs go to
+# their own file (mail.log) so delivery issues are easy to find without digging
+# through general app noise.
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            '()': 'api.utils.logging_formatters.RelativePathFormatter',
+            'format': '{asctime} {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'app_file': {
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': LOG_DIR / 'app.log',
+            'when': 'midnight',
+            'backupCount': 7,
+            'encoding': 'utf-8',
+            'formatter': 'verbose',
+        },
+        'mail_file': {
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': LOG_DIR / 'mail.log',
+            'when': 'midnight',
+            'backupCount': 7,
+            'encoding': 'utf-8',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'app_file'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'app_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'api.services.mail_service': {
+            'handlers': ['console', 'mail_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

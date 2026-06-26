@@ -53,7 +53,11 @@ def _send_async(subject, html_body, recipients):
     def _send():
         try:
             conn, from_email = _get_connection()
-            if not conn or not recipients:
+            if not conn:
+                logger.warning(f"Mail skipped (no SMTP configured): subject={subject!r} recipients={recipients}")
+                return
+            if not recipients:
+                logger.warning(f"Mail skipped (no recipients): subject={subject!r}")
                 return
             s = SiteSetting.get()
             reply_to = [s.email_default_from or s.email_host_user]
@@ -67,8 +71,9 @@ def _send_async(subject, html_body, recipients):
             )
             msg.attach_alternative(html_body, 'text/html')
             msg.send()
+            logger.info(f"Mail sent: subject={subject!r} recipients={recipients}")
         except Exception as e:
-            logger.error(f"Mail send error: {e}", exc_info=True)
+            logger.error(f"Mail send error: subject={subject!r} recipients={recipients} error={e}", exc_info=True)
     threading.Thread(target=_send, daemon=True).start()
 
 
@@ -296,6 +301,7 @@ def _send_promo_batch(conn, from_email, subject, html, recipients):
         )
         msg.attach_alternative(html, 'text/html')
         msg.send()
+        logger.info(f"Promo mail batch sent: subject={subject!r} batch_size={len(batch)}")
 
 
 def send_promo_email(promo):
@@ -306,7 +312,9 @@ def send_promo_email(promo):
         try:
             grouped = promo_recipients_by_language(promo.email_type)
             total = len(grouped['bn']) + len(grouped['en'])
+            logger.info(f"Promo mail queued: id={promo.id} type={promo.email_type} recipients={total}")
             if not total:
+                logger.warning(f"Promo mail failed (no recipients): id={promo.id} type={promo.email_type}")
                 promo.status = 'FAILED'
                 promo.recipient_count = 0
                 promo.save(update_fields=['status', 'recipient_count'])
@@ -314,6 +322,7 @@ def send_promo_email(promo):
 
             conn, from_email = _get_connection()
             if not conn:
+                logger.warning(f"Promo mail failed (no SMTP configured): id={promo.id}")
                 promo.status = 'FAILED'
                 promo.recipient_count = total
                 promo.save(update_fields=['status', 'recipient_count'])
@@ -331,8 +340,9 @@ def send_promo_email(promo):
             promo.recipient_count = total
             promo.sent_at = timezone.now()
             promo.save(update_fields=['status', 'recipient_count', 'sent_at'])
+            logger.info(f"Promo mail sent: id={promo.id} type={promo.email_type} recipients={total}")
         except Exception as e:
-            logger.error(f"Promo mail send error: {e}", exc_info=True)
+            logger.error(f"Promo mail send error: id={promo.id} error={e}", exc_info=True)
             promo.status = 'FAILED'
             promo.save(update_fields=['status'])
     threading.Thread(target=_send, daemon=True).start()
