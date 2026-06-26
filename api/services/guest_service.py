@@ -1,4 +1,5 @@
 import logging
+import math
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
@@ -176,7 +177,7 @@ class GuestCheckoutService:
 
     def _notify_admins(self, order: SalesOrder) -> None:
         admins  = User.objects.filter(role='ADMIN', is_active=True)
-        amount  = f'৳{int(order.grand_total):,}'
+        amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'
         is_guest = order.is_guest
