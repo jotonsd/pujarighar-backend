@@ -1,8 +1,8 @@
 import logging
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
-from django.db.models import Count, DecimalField, ExpressionWrapper, Sum
-from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
+from django.db.models import DecimalField, ExpressionWrapper, Sum
 from django.utils import timezone
 from django.db.models import F, Q
 from api.models import (
@@ -10,6 +10,7 @@ from api.models import (
     SalesOrder, SalesOrderItem, User, Product, Partner, PartnerProfitPayment,
     StockMovement, SupplierPayment, LoanInvestor, LoanPayment,
 )
+from api.utils.dates import local_day_start, local_day_end_exclusive, local_period_bucket, to_local
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ class AccountingService:
     def list_journal_entries(self, params: dict):
         qs = JournalEntry.objects.prefetch_related('lines__account')
         if params.get('from'):
-            qs = qs.filter(created_at__date__gte=params['from'])
+            qs = qs.filter(created_at__gte=local_day_start(params['from']))
         if params.get('to'):
-            qs = qs.filter(created_at__date__lte=params['to'])
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
         if params.get('reference_type'):
             qs = qs.filter(reference_type=params['reference_type'])
         if params.get('reference_id'):
@@ -42,17 +43,17 @@ class AccountingService:
         lines_qs = JournalLine.objects.filter(account=account).select_related('journal_entry').order_by('journal_entry__created_at')
 
         if from_date:
-            opening_lines   = lines_qs.filter(journal_entry__created_at__date__lt=from_date)
+            opening_lines   = lines_qs.filter(journal_entry__created_at__lt=local_day_start(from_date))
             opening_balance = (
                 (opening_lines.aggregate(d=Sum('debit'))['d']  or Decimal('0')) -
                 (opening_lines.aggregate(c=Sum('credit'))['c'] or Decimal('0'))
             )
-            lines_qs = lines_qs.filter(journal_entry__created_at__date__gte=from_date)
+            lines_qs = lines_qs.filter(journal_entry__created_at__gte=local_day_start(from_date))
         else:
             opening_balance = Decimal('0')
 
         if to_date:
-            lines_qs = lines_qs.filter(journal_entry__created_at__date__lte=to_date)
+            lines_qs = lines_qs.filter(journal_entry__created_at__lt=local_day_end_exclusive(to_date))
 
         running   = opening_balance
         line_data = []
@@ -78,7 +79,7 @@ class AccountingService:
     def get_trial_balance(self, as_of: str) -> dict:
         lines_qs = JournalLine.objects.select_related('account')
         if as_of:
-            lines_qs = lines_qs.filter(journal_entry__created_at__date__lte=as_of)
+            lines_qs = lines_qs.filter(journal_entry__created_at__lt=local_day_end_exclusive(as_of))
 
         rows: dict = {}
         for line in lines_qs:
@@ -94,9 +95,9 @@ class AccountingService:
             account__account_type__in=['REVENUE', 'EXPENSE']
         )
         if from_date:
-            lines_qs = lines_qs.filter(journal_entry__created_at__date__gte=from_date)
+            lines_qs = lines_qs.filter(journal_entry__created_at__gte=local_day_start(from_date))
         if to_date:
-            lines_qs = lines_qs.filter(journal_entry__created_at__date__lte=to_date)
+            lines_qs = lines_qs.filter(journal_entry__created_at__lt=local_day_end_exclusive(to_date))
 
         revenue = Decimal('0')
         expense = Decimal('0')
@@ -128,17 +129,21 @@ class AccountingService:
     def get_sales_summary(self, from_date: str, to_date: str, group_by: str) -> dict:
         qs = SalesOrder.objects.filter(payment_status='PAID')
         if from_date:
-            qs = qs.filter(created_at__date__gte=from_date)
+            qs = qs.filter(created_at__gte=local_day_start(from_date))
         if to_date:
-            qs = qs.filter(created_at__date__lte=to_date)
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(to_date))
 
-        trunc = {'day': TruncDay, 'week': TruncWeek, 'month': TruncMonth}.get(group_by, TruncDay)
-        rows = list(
-            qs.annotate(period=trunc('created_at'))
-              .values('period')
-              .annotate(total_revenue=Sum('grand_total'), order_count=Count('id'))
-              .order_by('period')
-        )
+        # Group by local (Asia/Dhaka) calendar day/week/month in Python — see
+        # api/utils/dates.py for why we avoid the DB-side Trunc functions.
+        buckets: dict = defaultdict(lambda: {'total_revenue': Decimal('0'), 'order_count': 0})
+        for created_at, grand_total in qs.values_list('created_at', 'grand_total'):
+            period = local_period_bucket(created_at, group_by)
+            buckets[period]['total_revenue'] += grand_total
+            buckets[period]['order_count'] += 1
+        rows = [
+            {'period': period, **data}
+            for period, data in sorted(buckets.items())
+        ]
 
         total_revenue = qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
         total_orders  = qs.count()
@@ -152,31 +157,32 @@ class AccountingService:
         }
 
     def get_dashboard_summary(self) -> dict:
-        today = timezone.now().date()
+        today = to_local(timezone.now()).date()
 
-        # Build full 12-month spine for current year
+        # Build full 12-month spine for current (local) year
         current_year = today.year
         all_months = [date(current_year, m, 1) for m in range(1, 13)]
+        year_start = local_day_start(date(current_year, 1, 1))
+        year_end   = local_day_end_exclusive(date(current_year, 12, 31))
 
-        # Monthly revenue from account 4000 credits (current year) — includes all paid orders
-        revenue_qs = (
-            JournalLine.objects
-            .filter(account__code='4000', journal_entry__created_at__year=current_year)
-            .annotate(month=TruncMonth('journal_entry__created_at'))
-            .values('month')
-            .annotate(revenue=Sum('credit'))
-        )
-        revenue_map = {row['month'].date().replace(day=1): row['revenue'] or Decimal('0') for row in revenue_qs}
+        # Monthly revenue from account 4000 credits (current year) — includes all paid
+        # orders. Bucketed by local month in Python (see api/utils/dates.py).
+        revenue_map: dict = defaultdict(lambda: Decimal('0'))
+        for created_at, credit in JournalLine.objects.filter(
+            account__code='4000',
+            journal_entry__created_at__gte=year_start,
+            journal_entry__created_at__lt=year_end,
+        ).values_list('journal_entry__created_at', 'credit'):
+            revenue_map[local_period_bucket(created_at, 'month')] += credit
 
         # Monthly expense from journal lines (current year)
-        expense_qs = (
-            JournalLine.objects
-            .filter(account__account_type='EXPENSE', journal_entry__created_at__year=current_year)
-            .annotate(month=TruncMonth('journal_entry__created_at'))
-            .values('month')
-            .annotate(expense=Sum('debit'))
-        )
-        expense_map = {row['month'].date().replace(day=1): row['expense'] or Decimal('0') for row in expense_qs}
+        expense_map: dict = defaultdict(lambda: Decimal('0'))
+        for created_at, debit in JournalLine.objects.filter(
+            account__account_type='EXPENSE',
+            journal_entry__created_at__gte=year_start,
+            journal_entry__created_at__lt=year_end,
+        ).values_list('journal_entry__created_at', 'debit'):
+            expense_map[local_period_bucket(created_at, 'month')] += debit
 
         monthly_chart = [
             {
@@ -209,15 +215,15 @@ class AccountingService:
             # and COD-paid orders regardless of delivery status
             return JournalLine.objects.filter(
                 account__code='4000',
-                journal_entry__created_at__date__gte=date_from,
-                journal_entry__created_at__date__lte=date_to,
+                journal_entry__created_at__gte=local_day_start(date_from),
+                journal_entry__created_at__lt=local_day_end_exclusive(date_to),
             ).aggregate(t=Sum('credit'))['t'] or Decimal('0')
 
         def _exp(date_from, date_to):
             return JournalLine.objects.filter(
                 account__account_type='EXPENSE',
-                journal_entry__created_at__date__gte=date_from,
-                journal_entry__created_at__date__lte=date_to,
+                journal_entry__created_at__gte=local_day_start(date_from),
+                journal_entry__created_at__lt=local_day_end_exclusive(date_to),
             ).aggregate(t=Sum('debit'))['t'] or Decimal('0')
 
         this_month_rev  = _rev(month_start, today)
@@ -284,8 +290,8 @@ class AccountingService:
 
         return {
             # existing
-            'today_orders':          SalesOrder.objects.filter(created_at__date=today).count(),
-            'today_revenue':         str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__date=today).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
+            'today_orders':          SalesOrder.objects.filter(created_at__gte=local_day_start(today), created_at__lt=local_day_end_exclusive(today)).count(),
+            'today_revenue':         str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(today), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
             'pending_orders':        SalesOrder.objects.filter(status='PENDING').count(),
             'low_stock_count':       low_stock_count,
             'total_customers':       User.objects.filter(role='CUSTOMER', is_active=True).count(),
