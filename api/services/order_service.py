@@ -9,6 +9,7 @@ from api.models import (
     StockMovement, Account, JournalEntry, JournalLine, Notification,
     ReferralBonus,
 )
+from api.utils.dates import local_day_start, local_day_end_exclusive
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,9 @@ class OrderService:
         if params.get('customer') and role == 'ADMIN':
             qs = qs.filter(customer_id=params['customer'])
         if params.get('from'):
-            qs = qs.filter(created_at__date__gte=params['from'])
+            qs = qs.filter(created_at__gte=local_day_start(params['from']))
         if params.get('to'):
-            qs = qs.filter(created_at__date__lte=params['to'])
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
         return qs
 
     def get_order(self, pk: str) -> SalesOrder:
