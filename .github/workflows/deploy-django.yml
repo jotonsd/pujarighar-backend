@@ -1,4 +1,4 @@
-name: Deploy Django Backend to cPanel
+name: Deploy Django Backend to VPS
 
 on:
   push:
@@ -17,11 +17,13 @@ jobs:
       - name: Set environment variables
         run: |
           if [ "${{ github.ref_name }}" == "production" ]; then
-            echo "DEPLOY_PATH=~/api.pujarighar.com" >> $GITHUB_ENV
-            echo "VENV_PATH=${{ secrets.PROD_VENV_PATH }}" >> $GITHUB_ENV
+            echo "DEPLOY_PATH=/var/www/api.pujarighar.com" >> $GITHUB_ENV
+            echo "VENV_PATH=/var/www/api.pujarighar.com/venv" >> $GITHUB_ENV
+            echo "SERVICE_NAME=api-pujarighar" >> $GITHUB_ENV
           else
-            echo "DEPLOY_PATH=~/dev-api.pujarighar.com" >> $GITHUB_ENV
-            echo "VENV_PATH=${{ secrets.DEV_VENV_PATH }}" >> $GITHUB_ENV
+            echo "DEPLOY_PATH=/var/www/dev-api.pujarighar.com" >> $GITHUB_ENV
+            echo "VENV_PATH=/var/www/dev-api.pujarighar.com/venv" >> $GITHUB_ENV
+            echo "SERVICE_NAME=dev-api-pujarighar" >> $GITHUB_ENV
           fi
 
       - name: Setup SSH
@@ -44,6 +46,7 @@ jobs:
             --exclude='tmp' \
             --exclude='media' \
             --exclude='staticfiles' \
+            --exclude='logs' \
             -e "ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
             ./ \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ env.DEPLOY_PATH }}/
@@ -58,11 +61,11 @@ jobs:
              python manage.py migrate --noinput && \
              python manage.py collectstatic --noinput"
 
-      - name: Restart app via cPanel
+      - name: Restart Gunicorn service
         run: |
           ssh -p ${{ secrets.SSH_PORT }} -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "mkdir -p ${{ env.DEPLOY_PATH }}/tmp && touch ${{ env.DEPLOY_PATH }}/tmp/restart.txt"
+            "sudo systemctl restart ${{ env.SERVICE_NAME }}"
 
       - name: Cleanup
         if: always()
