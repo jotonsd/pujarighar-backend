@@ -198,4 +198,8 @@ urlpatterns = [
     # ─── Site Settings ─────────────────────────────────────────────────────────
     path('settings/',        views.get_site_settings,    name='site-settings'),
     path('settings/update/', views.update_site_settings, name='site-settings-update'),
+
+    # ─── Logs ──────────────────────────────────────────────────────────────────
+    path('logs/',              views.list_log_files, name='log-list'),
+    path('logs/<str:filename>/', views.get_log_file,  name='log-detail'),
 ]
