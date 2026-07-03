@@ -118,3 +118,31 @@ class LogFileListConsumer(AsyncJsonWebsocketConsumer):
                     await self.send_json({'type': 'files', 'files': current})
         except asyncio.CancelledError:
             pass
+
+
+class NotificationConsumer(AsyncJsonWebsocketConsumer):
+    """Pushes a user's own notifications the instant they're created —
+    replaces the notification bell's HTTP polling. Any authenticated user can
+    connect; they only ever receive notifications addressed to them (scoped
+    by the `notifications_<user_id>` group).
+    """
+
+    async def connect(self):
+        user = self.scope.get('user')
+        if not user or not user.is_authenticated:
+            await self.close(code=4401)
+            return
+
+        self.group_name = f'notifications_{user.id}'
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, code):
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive_json(self, content, **kwargs):
+        pass  # one-way stream
+
+    async def notify(self, event):
+        await self.send_json({'type': 'notification', 'notification': event['notification']})

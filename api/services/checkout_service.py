@@ -10,6 +10,7 @@ from api.models import (
     Account, JournalEntry, JournalLine,
     ShippingAddress, Notification, User,
 )
+from api.services.notification_ws import broadcast_notifications
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
@@ -209,3 +210,4 @@ class CheckoutService:
             for admin in admins
         ]
         Notification.objects.bulk_create(notifications)
+        broadcast_notifications(notifications)
