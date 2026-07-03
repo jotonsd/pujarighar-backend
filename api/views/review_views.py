@@ -6,6 +6,7 @@ from api.models import Notification, Product, ProductPackageItem, Review, SalesO
 from api.serializers.review_serializers import ReviewSerializer, ReviewCreateSerializer
 from api.utils.response import ApiResponse
 from api.permissions import IsAdmin
+from api.services.notification_ws import broadcast_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def create_review(request):
     product_name = product.name_bn or product.name_en
     reviewer_name = getattr(getattr(request.user, 'profile', None), 'full_name_bn', None) or request.user.email
     admins = User.objects.filter(role='ADMIN', is_active=True)
-    Notification.objects.bulk_create([
+    notifications = [
         Notification(
             user=admin,
             title_bn=f'নতুন রিভিউ — {product_name}',
@@ -69,7 +70,9 @@ def create_review(request):
             reference_id=review.id,
         )
         for admin in admins
-    ])
+    ]
+    Notification.objects.bulk_create(notifications)
+    broadcast_notifications(notifications)
 
     return ApiResponse(message='Review submitted', data=ReviewSerializer(review).data, status_code=201)
 

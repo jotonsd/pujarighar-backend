@@ -10,6 +10,7 @@ from api.models import (
     ReferralBonus,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
+from api.services.notification_ws import broadcast_notification
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +340,7 @@ class OrderService:
         label = STATUS_LABELS.get(to_status)
         if not label:
             return
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user_id=order.customer_id,
             title_bn=f'অর্ডার {label["bn"]} — {order.order_number}',
             title_en=f'Order {label["en"]} — {order.order_number}',
@@ -348,9 +349,10 @@ class OrderService:
             reference_type='STATUS_CHANGED',
             reference_id=order.id,
         )
+        broadcast_notification(notification)
 
     def _notify_delivery_person(self, order: SalesOrder, delivery_person: User) -> None:
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user=delivery_person,
             title_bn=f'নতুন ডেলিভারি এসাইন্ড — {order.order_number}',
             title_en=f'New Delivery Assigned — {order.order_number}',
@@ -359,3 +361,4 @@ class OrderService:
             reference_type='STATUS_CHANGED',
             reference_id=order.id,
         )
+        broadcast_notification(notification)
