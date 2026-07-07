@@ -308,9 +308,9 @@ class StockService:
                     journal_entry=entry, account=acct, debit=debit, credit=credit,
                 )
 
-    def get_purchase_report(self, supplier_id: str = '', product_id: str = '',
-                             from_date: str = '', to_date: str = '') -> dict:
-        qs = StockMovement.objects.filter(movement_type='PURCHASE').select_related('product', 'supplier')
+    def _get_movement_report(self, movement_type: str, supplier_id: str = '', product_id: str = '',
+                              from_date: str = '', to_date: str = '') -> dict:
+        qs = StockMovement.objects.filter(movement_type=movement_type).select_related('product', 'supplier')
 
         if supplier_id:
             qs = qs.filter(supplier_id=supplier_id)
@@ -331,23 +331,31 @@ class StockService:
                 'product_name_bn': m.product.name_bn,
                 'product_name_en': m.product.name_en,
                 'sku':             m.product.sku,
-                'quantity':        str(m.quantity),
+                'quantity':        str(abs(m.quantity)),
                 'unit_cost':       str(m.unit_cost),
-                'line_total':      str(m.unit_cost * m.quantity),
+                'line_total':      str(m.unit_cost * abs(m.quantity)),
                 'supplier_name':   (m.supplier.name_bn or m.supplier.name_en) if m.supplier else (m.supplier_name or ''),
                 'payment_method':  m.payment_method,
             }
             for m in qs
         ]
 
-        total_quantity = sum((m.quantity for m in qs), Decimal('0'))
-        total_amount   = sum((m.unit_cost * m.quantity for m in qs), Decimal('0'))
+        total_quantity = sum((abs(m.quantity) for m in qs), Decimal('0'))
+        total_amount   = sum((m.unit_cost * abs(m.quantity) for m in qs), Decimal('0'))
 
         return {
             'rows':           rows,
             'total_quantity': str(total_quantity),
             'total_amount':   str(total_amount),
         }
+
+    def get_purchase_report(self, supplier_id: str = '', product_id: str = '',
+                             from_date: str = '', to_date: str = '') -> dict:
+        return self._get_movement_report('PURCHASE', supplier_id, product_id, from_date, to_date)
+
+    def get_supplier_return_report(self, supplier_id: str = '', product_id: str = '',
+                                    from_date: str = '', to_date: str = '') -> dict:
+        return self._get_movement_report('SUPPLIER_RETURN', supplier_id, product_id, from_date, to_date)
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')
