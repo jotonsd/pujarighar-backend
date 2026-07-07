@@ -69,6 +69,9 @@ def _build_nav_menu(role: str) -> list:
                 item('/admin/accounting/trial-balance', '⚖️', 'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
                 item('/admin/accounting/sales-summary', '🛒', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
             ]),
+            group('📊', 'রিপোর্ট', 'Reports', [
+                item('/admin/reports/purchases', '🧾', 'ক্রয় রিপোর্ট', 'Purchase Report'),
+            ]),
         ]
 
     if role == 'WAREHOUSE':

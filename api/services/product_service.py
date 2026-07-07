@@ -5,6 +5,7 @@ from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, 
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement, Supplier
+from api.utils.dates import local_day_start, local_day_end_exclusive
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,47 @@ class StockService:
                 JournalLine.objects.create(
                     journal_entry=entry, account=acct, debit=debit, credit=credit,
                 )
+
+    def get_purchase_report(self, supplier_id: str = '', product_id: str = '',
+                             from_date: str = '', to_date: str = '') -> dict:
+        qs = StockMovement.objects.filter(movement_type='PURCHASE').select_related('product', 'supplier')
+
+        if supplier_id:
+            qs = qs.filter(supplier_id=supplier_id)
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+        if from_date:
+            qs = qs.filter(created_at__gte=local_day_start(from_date))
+        if to_date:
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(to_date))
+
+        qs = qs.order_by('-created_at')
+
+        rows = [
+            {
+                'id':              str(m.id),
+                'date':            m.created_at.isoformat(),
+                'product_id':      str(m.product_id),
+                'product_name_bn': m.product.name_bn,
+                'product_name_en': m.product.name_en,
+                'sku':             m.product.sku,
+                'quantity':        str(m.quantity),
+                'unit_cost':       str(m.unit_cost),
+                'line_total':      str(m.unit_cost * m.quantity),
+                'supplier_name':   (m.supplier.name_bn or m.supplier.name_en) if m.supplier else (m.supplier_name or ''),
+                'payment_method':  m.payment_method,
+            }
+            for m in qs
+        ]
+
+        total_quantity = sum((m.quantity for m in qs), Decimal('0'))
+        total_amount   = sum((m.unit_cost * m.quantity for m in qs), Decimal('0'))
+
+        return {
+            'rows':           rows,
+            'total_quantity': str(total_quantity),
+            'total_amount':   str(total_amount),
+        }
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')
