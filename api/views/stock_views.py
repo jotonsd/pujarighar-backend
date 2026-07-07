@@ -76,6 +76,18 @@ def get_purchase_report(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
+def get_supplier_return_report(request):
+    data = _svc.get_supplier_return_report(
+        supplier_id=request.query_params.get('supplier_id', ''),
+        product_id=request.query_params.get('product_id', ''),
+        from_date=request.query_params.get('from', ''),
+        to_date=request.query_params.get('to', ''),
+    )
+    return ApiResponse(message="Supplier return report retrieved", data=data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
 def list_package_items(_request, pk):
     try:
         product = Product.objects.get(pk=pk, is_package=True)

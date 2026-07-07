@@ -16,7 +16,7 @@ from .brand_views import (
     list_brands, create_brand, get_brand, update_brand, delete_brand,
 )
 from .stock_views import (
-    get_stock, adjust_stock, get_purchase_report,
+    get_stock, adjust_stock, get_purchase_report, get_supplier_return_report,
     list_package_items, add_package_item, delete_package_item,
 )
 from .cart_views import (
