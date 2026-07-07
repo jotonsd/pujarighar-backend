@@ -264,10 +264,11 @@ class ProductPackageItem(models.Model):
 
 class StockMovement(models.Model):
     MOVEMENT_TYPES = [
-        ('PURCHASE',   'ক্রয়'),
-        ('SALE',       'বিক্রয়'),
-        ('RETURN',     'ফেরত'),
-        ('ADJUSTMENT', 'সমন্বয়'),
+        ('PURCHASE',        'ক্রয়'),
+        ('SALE',            'বিক্রয়'),
+        ('RETURN',          'ফেরত'),
+        ('ADJUSTMENT',      'সমন্বয়'),
+        ('SUPPLIER_RETURN', 'সরবরাহকারীকে ফেরত'),
     ]
     PAYMENT_METHODS = [
         ('CASH',   'নগদ'),
