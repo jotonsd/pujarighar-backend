@@ -206,12 +206,17 @@ class StockService:
             except Supplier.DoesNotExist:
                 pass
 
+        # Stock going back to a supplier always reduces stock on hand, regardless
+        # of the sign the caller sent — the form only asks "how much".
+        if movement_type == 'SUPPLIER_RETURN':
+            quantity = -abs(quantity)
+
         movement = StockMovement(
             product=product, movement_type=movement_type,
             quantity=quantity, unit_cost=unit_cost,
             supplier=supplier,
             supplier_name=supplier_name if not supplier else (supplier.name_bn or supplier.name_en),
-            payment_method=payment_method if movement_type == 'PURCHASE' else 'CASH',
+            payment_method=payment_method if movement_type in ('PURCHASE', 'SUPPLIER_RETURN') else 'CASH',
             note_bn=note_bn, note_en=note_en, created_by=user,
         )
         movement.clean()
@@ -225,6 +230,8 @@ class StockService:
             else:
                 product.save(update_fields=['cost_price'])
             self._create_purchase_journal(product, quantity, unit_cost, movement, user, payment_method)
+        elif movement_type == 'SUPPLIER_RETURN' and unit_cost > 0:
+            self._create_supplier_return_journal(product, abs(quantity), unit_cost, movement, user, payment_method)
 
         logger.info(f"Stock adjusted: {product.sku} {movement_type} {quantity}")
         return movement
@@ -256,6 +263,43 @@ class StockService:
         for code, debit, credit in [
             ('1300',       total_cost,   Decimal('0')),  # Dr Inventory
             (credit_acct,  Decimal('0'), total_cost),    # Cr Cash or Accounts Payable
+        ]:
+            acct = _acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(
+                    journal_entry=entry, account=acct, debit=debit, credit=credit,
+                )
+
+    def _create_supplier_return_journal(self, product: Product, quantity: Decimal,
+                                         unit_cost: Decimal, movement: StockMovement, user,
+                                         payment_method: str = 'CASH') -> None:
+        """Mirror image of the purchase journal: stock leaves inventory, and we
+        either get cash back or owe the supplier less (Accounts Payable shrinks).
+        """
+        today        = timezone.now().date()
+        prefix       = f'JE-{today:%Y%m%d}-'
+        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
+        entry_number = f'{prefix}{last + 1:04d}'
+        total_value  = unit_cost * quantity
+        debit_acct   = '1000' if payment_method == 'CASH' else '2000'
+
+        entry = JournalEntry.objects.create(
+            entry_number=entry_number, reference_type='SUPPLIER_RETURN',
+            reference_id=movement.id,
+            description_bn=f'সরবরাহকারীকে স্টক ফেরত — {product.name_bn}',
+            description_en=f'Stock Returned to Supplier — {product.name_en}',
+            created_by=user, is_posted=True,
+        )
+
+        def _acct(code):
+            try:
+                return Account.objects.get(code=code)
+            except Account.DoesNotExist:
+                return None
+
+        for code, debit, credit in [
+            (debit_acct, total_value,   Decimal('0')),  # Dr Cash or Accounts Payable
+            ('1300',     Decimal('0'), total_value),    # Cr Inventory
         ]:
             acct = _acct(code)
             if acct and (debit or credit):

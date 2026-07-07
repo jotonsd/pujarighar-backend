@@ -120,7 +120,11 @@ class SupplierSerializer(serializers.ModelSerializer):
 
     def _totals(self, obj):
         if not hasattr(obj, '_sup_cache'):
-            movements    = obj.stockmovement_set.filter(movement_type='PURCHASE', payment_method='CREDIT')
+            # SUPPLIER_RETURN movements carry a negative quantity, so summing them
+            # alongside PURCHASE naturally nets a credit return against what's owed.
+            movements    = obj.stockmovement_set.filter(
+                movement_type__in=['PURCHASE', 'SUPPLIER_RETURN'], payment_method='CREDIT',
+            )
             total_credit = sum(m.unit_cost * m.quantity for m in movements)
             total_paid   = obj.payments.aggregate(t=Sum('amount'))['t'] or Decimal('0')
             obj._sup_cache = (Decimal(str(total_credit)), Decimal(str(total_paid)))
@@ -169,7 +173,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
 
 
 class StockAdjustSerializer(serializers.Serializer):
-    movement_type  = serializers.ChoiceField(choices=['PURCHASE', 'ADJUSTMENT'])
+    movement_type  = serializers.ChoiceField(choices=['PURCHASE', 'ADJUSTMENT', 'SUPPLIER_RETURN'])
     quantity       = serializers.DecimalField(max_digits=12, decimal_places=3)
     unit_cost      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'))
     unit_price     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, default=None)
@@ -185,6 +189,6 @@ class StockAdjustSerializer(serializers.Serializer):
         return value
 
     def validate(self, data):
-        if data['movement_type'] == 'PURCHASE' and data.get('unit_cost', Decimal('0')) <= 0:
-            raise serializers.ValidationError({'unit_cost': 'Buying price must be greater than zero for purchases'})
+        if data['movement_type'] in ('PURCHASE', 'SUPPLIER_RETURN') and data.get('unit_cost', Decimal('0')) <= 0:
+            raise serializers.ValidationError({'unit_cost': 'Buying price must be greater than zero for purchases and supplier returns'})
         return data
