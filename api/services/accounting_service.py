@@ -126,6 +126,57 @@ class AccountingService:
             'equity_shares': equity_shares,
         }
 
+    def _get_ledger_report(self, account_type: str, account_id: str = '',
+                            from_date: str = '', to_date: str = '') -> dict:
+        """Itemized income/expense lines (one row per journal line posted to a
+        REVENUE or EXPENSE account), with locale-agnostic amounts — the sign
+        convention (credit-debit for REVENUE, debit-credit for EXPENSE) is
+        applied here so the caller always sees a positive "amount owed to this
+        report's story" figure.
+        """
+        qs = JournalLine.objects.filter(account__account_type=account_type).select_related('account', 'journal_entry')
+
+        if account_id:
+            qs = qs.filter(account_id=account_id)
+        if from_date:
+            qs = qs.filter(journal_entry__created_at__gte=local_day_start(from_date))
+        if to_date:
+            qs = qs.filter(journal_entry__created_at__lt=local_day_end_exclusive(to_date))
+
+        qs = qs.order_by('-journal_entry__created_at')
+
+        def _amount(line):
+            return line.credit - line.debit if account_type == 'REVENUE' else line.debit - line.credit
+
+        rows = [
+            {
+                'id':             str(line.id),
+                'date':           line.journal_entry.created_at.isoformat(),
+                'entry_number':   line.journal_entry.entry_number,
+                'account_id':     str(line.account_id),
+                'account_name_bn': line.account.name_bn,
+                'account_name_en': line.account.name_en,
+                'description_bn': line.journal_entry.description_bn,
+                'description_en': line.journal_entry.description_en,
+                'reference_type': line.journal_entry.reference_type,
+                'amount':         str(_amount(line)),
+            }
+            for line in qs
+        ]
+
+        total_amount = sum((_amount(line) for line in qs), Decimal('0'))
+
+        return {
+            'rows':         rows,
+            'total_amount': str(total_amount),
+        }
+
+    def get_income_report(self, account_id: str = '', from_date: str = '', to_date: str = '') -> dict:
+        return self._get_ledger_report('REVENUE', account_id, from_date, to_date)
+
+    def get_expense_report(self, account_id: str = '', from_date: str = '', to_date: str = '') -> dict:
+        return self._get_ledger_report('EXPENSE', account_id, from_date, to_date)
+
     def get_sales_summary(self, from_date: str, to_date: str, group_by: str) -> dict:
         qs = SalesOrder.objects.filter(payment_status='PAID')
         if from_date:

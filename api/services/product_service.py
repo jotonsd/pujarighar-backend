@@ -308,9 +308,14 @@ class StockService:
                     journal_entry=entry, account=acct, debit=debit, credit=credit,
                 )
 
-    def _get_movement_report(self, movement_type: str, supplier_id: str = '', product_id: str = '',
+    def _get_movement_report(self, movement_type: str, request=None, supplier_id: str = '', product_id: str = '',
                               from_date: str = '', to_date: str = '') -> dict:
-        qs = StockMovement.objects.filter(movement_type=movement_type).select_related('product', 'supplier')
+        from django.db.models import Prefetch
+        from api.models import ProductImage
+
+        qs = StockMovement.objects.filter(movement_type=movement_type).select_related('product', 'supplier').prefetch_related(
+            Prefetch('product__images', queryset=ProductImage.objects.order_by('order')),
+        )
 
         if supplier_id:
             qs = qs.filter(supplier_id=supplier_id)
@@ -323,6 +328,13 @@ class StockService:
 
         qs = qs.order_by('-created_at')
 
+        def _image_url(product):
+            images = list(product.images.all())
+            if not images:
+                return None
+            url = images[0].image.url
+            return request.build_absolute_uri(url) if request else url
+
         rows = [
             {
                 'id':              str(m.id),
@@ -330,6 +342,7 @@ class StockService:
                 'product_id':      str(m.product_id),
                 'product_name_bn': m.product.name_bn,
                 'product_name_en': m.product.name_en,
+                'product_image':   _image_url(m.product),
                 'sku':             m.product.sku,
                 'quantity':        str(abs(m.quantity)),
                 'unit_cost':       str(m.unit_cost),
@@ -349,13 +362,13 @@ class StockService:
             'total_amount':   str(total_amount),
         }
 
-    def get_purchase_report(self, supplier_id: str = '', product_id: str = '',
+    def get_purchase_report(self, request=None, supplier_id: str = '', product_id: str = '',
                              from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('PURCHASE', supplier_id, product_id, from_date, to_date)
+        return self._get_movement_report('PURCHASE', request, supplier_id, product_id, from_date, to_date)
 
-    def get_supplier_return_report(self, supplier_id: str = '', product_id: str = '',
+    def get_supplier_return_report(self, request=None, supplier_id: str = '', product_id: str = '',
                                     from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('SUPPLIER_RETURN', supplier_id, product_id, from_date, to_date)
+        return self._get_movement_report('SUPPLIER_RETURN', request, supplier_id, product_id, from_date, to_date)
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')
