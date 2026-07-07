@@ -60,6 +60,10 @@ def build_database_config(defaults=None):
     return db_config
 
 INSTALLED_APPS = [
+    # Must come before django.contrib.staticfiles so `runserver` serves ASGI
+    # (needed for WebSocket support) instead of plain WSGI.
+    'daphne',
+
     'django.contrib.contenttypes',
     'django.contrib.auth',
     'django.contrib.sessions',
@@ -71,10 +75,21 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'channels',
 
     # Project app
     'api',
 ]
+
+ASGI_APPLICATION = 'core.asgi.application'
+
+# In-memory is fine for this single-process local-dev setup — swap for
+# channels_redis if this ever runs multi-process/multi-server.
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -188,7 +203,7 @@ LOGGING = {
             'formatter': 'verbose',
         },
         'app_file': {
-            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'class': 'api.utils.logging_handlers.DailyRotatingFileHandler',
             'filename': LOG_DIR / 'app.log',
             'when': 'midnight',
             'backupCount': 7,
@@ -196,7 +211,7 @@ LOGGING = {
             'formatter': 'verbose',
         },
         'mail_file': {
-            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'class': 'api.utils.logging_handlers.DailyRotatingFileHandler',
             'filename': LOG_DIR / 'mail.log',
             'when': 'midnight',
             'backupCount': 7,
