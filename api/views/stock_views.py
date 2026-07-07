@@ -66,6 +66,7 @@ def adjust_stock(request, pk):
 @permission_classes([IsAuthenticated, IsAdmin])
 def get_purchase_report(request):
     data = _svc.get_purchase_report(
+        request=request,
         supplier_id=request.query_params.get('supplier_id', ''),
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),
@@ -78,6 +79,7 @@ def get_purchase_report(request):
 @permission_classes([IsAuthenticated, IsAdmin])
 def get_supplier_return_report(request):
     data = _svc.get_supplier_return_report(
+        request=request,
         supplier_id=request.query_params.get('supplier_id', ''),
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),

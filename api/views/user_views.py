@@ -74,6 +74,8 @@ def _build_nav_menu(role: str) -> list:
                 item('/admin/reports/supplier-returns',      '↩️', 'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report'),
                 item('/admin/reports/supplier-outstanding',  '💳', 'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report'),
                 item('/admin/reports/product-stock',         '📦', 'পণ্য স্টক রিপোর্ট',         'Product Stock Report'),
+                item('/admin/reports/income',                '💵', 'আয় রিপোর্ট',                'Income Report'),
+                item('/admin/reports/expenses',              '💸', 'ব্যয় রিপোর্ট',              'Expense Report'),
             ]),
         ]
 

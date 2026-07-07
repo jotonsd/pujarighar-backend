@@ -102,6 +102,28 @@ def get_profit_loss(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
+def get_income_report(request):
+    data = _svc.get_income_report(
+        account_id=request.query_params.get('account_id', ''),
+        from_date=request.query_params.get('from', ''),
+        to_date=request.query_params.get('to', ''),
+    )
+    return ApiResponse(message="Income report retrieved", data=data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def get_expense_report(request):
+    data = _svc.get_expense_report(
+        account_id=request.query_params.get('account_id', ''),
+        from_date=request.query_params.get('from', ''),
+        to_date=request.query_params.get('to', ''),
+    )
+    return ApiResponse(message="Expense report retrieved", data=data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
 def get_sales_summary(request):
     try:
         data = _svc.get_sales_summary(
