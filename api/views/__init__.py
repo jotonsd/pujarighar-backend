@@ -45,6 +45,7 @@ from .accounting_views import (
     list_journal_entries, get_journal_entry,
     get_ledger,
     get_trial_balance, get_profit_loss, get_sales_summary,
+    get_income_report, get_expense_report,
     get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, list_all_notifications, mark_all_read, mark_one_read
