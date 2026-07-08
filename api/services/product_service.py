@@ -83,10 +83,12 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
-        if not include_inactive:
+        if is_active is not None:
+            qs = qs.filter(is_active=str(is_active).lower() == 'true')
+        elif not include_inactive:
             qs = qs.filter(is_active=True)
         if category:
             ids = [c.strip() for c in category.split(',') if c.strip()]

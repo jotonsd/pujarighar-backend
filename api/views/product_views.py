@@ -36,6 +36,7 @@ def list_products(request):
             include_inactive=include_inactive,
             ordering=request.query_params.get('ordering'),
             has_discount=request.query_params.get('has_discount', '').lower() == 'true',
+            is_active=request.query_params.get('is_active'),
         )
         page_data, pagination = paginate_queryset(qs, request)
         return ApiResponse(
