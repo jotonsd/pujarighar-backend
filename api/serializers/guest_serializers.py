@@ -34,3 +34,17 @@ class GuestCheckoutSerializer(serializers.Serializer):
     payment_method   = serializers.ChoiceField(choices=['COD'], default='COD')
     apply_delivery   = serializers.BooleanField(default=True)
     delivery_zone    = serializers.ChoiceField(choices=['inside', 'outside'], required=False, allow_null=True, default=None)
+
+
+class POSCheckoutSerializer(GuestCheckoutSerializer):
+    """POS-only: adds a staff-applied order discount on top of the guest
+    checkout fields. Never exposed on the public guest checkout endpoint —
+    only `pos_create_order` (admin/warehouse, authenticated) uses this.
+    """
+    discount_type  = serializers.ChoiceField(choices=['NONE', 'PERCENTAGE', 'FLAT'], required=False, default='NONE')
+    discount_value = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'), min_value=Decimal('0'))
+
+    def validate(self, data):
+        if data.get('discount_type') == 'PERCENTAGE' and data.get('discount_value', Decimal('0')) > 100:
+            raise serializers.ValidationError({'discount_value': 'Percentage discount cannot exceed 100'})
+        return data

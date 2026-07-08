@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 class GuestCheckoutService:
 
     @transaction.atomic
-    def checkout(self, validated_data: dict, customer: User | None = None) -> SalesOrder:
+    def checkout(self, validated_data: dict, customer: User | None = None,
+                 discount_type: str = 'NONE', discount_value: Decimal = Decimal('0')) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
@@ -45,6 +46,19 @@ class GuestCheckoutService:
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
         subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
+
+        # Optional staff-applied order discount (POS only) — layered on top of
+        # any product-level discount, clamped so revenue can't go negative.
+        # Not booked as its own ledger line: it just lowers the subtotal that
+        # gets credited to Sales Revenue, same as product-level discounts do.
+        extra_discount = Decimal('0')
+        if discount_type == 'PERCENTAGE' and discount_value > 0:
+            extra_discount = (subtotal * discount_value / 100).quantize(Decimal('0.01'))
+        elif discount_type == 'FLAT' and discount_value > 0:
+            extra_discount = discount_value
+        extra_discount = min(extra_discount, subtotal)
+        subtotal -= extra_discount
+
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')

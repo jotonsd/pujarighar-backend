@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import SalesOrder, OrderStatusLog
-from api.serializers.guest_serializers import GuestCheckoutSerializer
+from api.serializers.guest_serializers import POSCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
@@ -22,7 +22,7 @@ _svc = OrderService()
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdminOrWarehouse])
 def pos_create_order(request):
-    serializer = GuestCheckoutSerializer(data=request.data)
+    serializer = POSCheckoutSerializer(data=request.data)
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
@@ -34,7 +34,12 @@ def pos_create_order(request):
                 customer = UserModel.objects.get(pk=customer_id)
             except UserModel.DoesNotExist:
                 pass
-        order = GuestCheckoutService().checkout(serializer.validated_data, customer=customer)
+        d = serializer.validated_data
+        order = GuestCheckoutService().checkout(
+            d, customer=customer,
+            discount_type=d.get('discount_type', 'NONE'),
+            discount_value=d.get('discount_value', 0),
+        )
         order = _svc.confirm(order, request.user)
         mail_service.send_order_created(order)
         return ApiResponse(
