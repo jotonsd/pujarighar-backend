@@ -1,10 +1,12 @@
 import logging
+from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, StockMovement, Supplier
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, SearchLog, StockMovement, Supplier
 from api.utils.dates import local_day_start, local_day_end_exclusive
 
 logger = logging.getLogger(__name__)
@@ -164,6 +166,52 @@ class ProductService:
                 '_disc_amount' if ordering == 'discount_asc' else '-_disc_amount',
             )
         return qs
+
+    def get_recommended_products(self, user, guest_id: str, limit: int = 12):
+        """Personalized picks for this visitor: rank categories by a weighted
+        score of their own product views (strong signal) and searches whose
+        text matches a category name (weaker signal), then return products
+        from the top categories. Returns an empty queryset for visitors with
+        no history yet — the frontend simply hides the section in that case.
+        """
+        if not user and not guest_id:
+            return Product.objects.none()
+
+        identity = Q(user=user) if user else Q(guest_id=guest_id)
+        since = timezone.now() - timedelta(days=90)
+
+        cat_weight = defaultdict(int)
+
+        views = ProductView.objects.filter(identity, created_at__gte=since).select_related('product')
+        for v in views:
+            if v.product and v.product.category_id:
+                cat_weight[v.product.category_id] += 2
+
+        categories = list(Category.objects.filter(is_active=True).only('id', 'name_bn', 'name_en'))
+        searches = SearchLog.objects.filter(identity, created_at__gte=since)
+        for s in searches:
+            q = s.query.strip().lower()
+            if not q:
+                continue
+            for c in categories:
+                if q in c.name_bn.lower() or q in c.name_en.lower() or c.name_bn.lower() in q or (c.name_en and c.name_en.lower() in q):
+                    cat_weight[c.id] += 1
+
+        if not cat_weight:
+            return Product.objects.none()
+
+        top_category_ids = [cid for cid, _ in sorted(cat_weight.items(), key=lambda kv: -kv[1])]
+        rank = Case(
+            *[When(category_id=cid, then=Value(i)) for i, cid in enumerate(top_category_ids)],
+            default=Value(len(top_category_ids)),
+            output_field=IntegerField(),
+        )
+
+        qs = Product.objects.filter(
+            is_active=True, is_package=False, category_id__in=top_category_ids,
+        ).select_related('category', 'brand').prefetch_related('images', 'package_items')
+        qs = self._with_ratings(qs)
+        return qs.annotate(_cat_rank=rank).order_by('_cat_rank', '-created_at')[:limit]
 
     def get_product(self, pk: str) -> Product:
         return self._with_ratings(

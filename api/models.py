@@ -873,3 +873,36 @@ class PromoEmail(BaseModel):
 
     def __str__(self):
         return f'{self.get_email_type_display()} — {self.subject_en}'
+
+
+# ─── Personalization ────────────────────────────────────────────────────────
+# Powers per-visitor product recommendations (home page / products page).
+# `guest_id` is a frontend-issued cookie UUID, used when `user` is None so
+# anonymous visitors still get personalized results.
+
+class ProductView(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='product_views')
+    guest_id   = models.CharField(max_length=64, blank=True)
+    product    = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='view_logs')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['guest_id', 'created_at']),
+        ]
+
+
+class SearchLog(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='search_logs')
+    guest_id   = models.CharField(max_length=64, blank=True)
+    query      = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['guest_id', 'created_at']),
+        ]
