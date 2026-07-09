@@ -8,7 +8,7 @@ from api.models import Brand, Category, Product, ProductImage, ProductPackageIte
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model  = Category
-        fields = ['id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'is_active', 'created_at']
+        fields = ['id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'order', 'is_active', 'created_at']
 
 
 class BrandSerializer(serializers.ModelSerializer):
