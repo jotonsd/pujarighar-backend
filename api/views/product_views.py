@@ -6,11 +6,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
 from django.db.models.functions import Coalesce
 
-from api.models import Product, ProductImage, Category, SalesOrderItem
+from api.models import Product, ProductImage, Category, SalesOrderItem, ProductView, SearchLog
 from api.serializers.product_serializers import ProductSerializer, ProductImageSerializer, CategorySerializer
 from api.services.product_service import ProductService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
+from api.utils.visitor import get_visitor
 from api.permissions import IsAdmin
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,13 @@ def list_products(request):
             is_active=request.query_params.get('is_active'),
         )
         page_data, pagination = paginate_queryset(qs, request)
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            user, guest_id = get_visitor(request)
+            if user or guest_id:
+                SearchLog.objects.create(user=user, guest_id=guest_id, query=search[:200])
+
         return ApiResponse(
             message="Products retrieved successfully",
             data=ProductSerializer(page_data, many=True, context=_ctx(request)).data,
@@ -69,9 +77,27 @@ def create_product(request):
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+def get_recommended_products(request):
+    user, guest_id = get_visitor(request)
+    try:
+        limit = int(request.query_params.get('limit', 12))
+    except ValueError:
+        limit = 12
+    products = _svc.get_recommended_products(user, guest_id, limit=limit)
+    return ApiResponse(
+        message="Recommended products retrieved",
+        data=ProductSerializer(products, many=True, context=_ctx(request)).data,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def get_product(request, pk):
     try:
         product = _svc.get_product(pk)
+        user, guest_id = get_visitor(request)
+        if user or guest_id:
+            ProductView.objects.create(user=user, guest_id=guest_id, product=product)
         return ApiResponse(
             message="Product retrieved",
             data=ProductSerializer(product, context=_ctx(request)).data,
