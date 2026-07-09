@@ -123,6 +123,13 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
+# ─── CORS ─────────────────────────────────────────────────────────────────────
+# Extend (not replace) the package defaults with our custom headers — X-Guest-Id
+# identifies anonymous visitors for personalized recommendations.
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + ['x-guest-id']
+
 AUTH_USER_MODEL = 'api.User'
 
 AUTH_PASSWORD_VALIDATORS = [
