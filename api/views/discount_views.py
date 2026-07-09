@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import Discount, Product
 from api.permissions import IsAdmin
 from api.utils.response import ApiResponse
+from api.utils.pagination import paginate_queryset
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,15 @@ class DiscountSerializer(drf_serializers.ModelSerializer):
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_discounts(request):
     product_id = request.query_params.get('product')
-    qs = Discount.objects.select_related('product').prefetch_related('product__images')
+    qs = Discount.objects.select_related('product').prefetch_related('product__images').order_by('-created_at')
     if product_id:
         qs = qs.filter(product_id=product_id)
-    return ApiResponse(message="Discounts retrieved", data=DiscountSerializer(qs, many=True, context={'request': request}).data)
+    page_data, pagination = paginate_queryset(qs, request)
+    return ApiResponse(
+        message="Discounts retrieved",
+        data=DiscountSerializer(page_data, many=True, context={'request': request}).data,
+        pagination=pagination,
+    )
 
 
 @api_view(['POST'])
