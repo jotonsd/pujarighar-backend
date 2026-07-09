@@ -181,11 +181,13 @@ class ProductService:
         since = timezone.now() - timedelta(days=90)
 
         cat_weight = defaultdict(int)
+        product_views = defaultdict(int)  # this visitor's own view count per product
 
         views = ProductView.objects.filter(identity, created_at__gte=since).select_related('product')
         for v in views:
             if v.product and v.product.category_id:
                 cat_weight[v.product.category_id] += 2
+                product_views[v.product_id] += 1
 
         categories = list(Category.objects.filter(is_active=True).only('id', 'name_bn', 'name_en'))
         searches = SearchLog.objects.filter(identity, created_at__gte=since)
@@ -207,11 +209,19 @@ class ProductService:
             output_field=IntegerField(),
         )
 
+        # Most-visited-by-this-visitor-first within each category, not just newest.
+        view_rank = Case(
+            *[When(id=pid, then=Value(n)) for pid, n in product_views.items()],
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+
         qs = Product.objects.filter(
             is_active=True, is_package=False, category_id__in=top_category_ids,
         ).select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
-        return qs.annotate(_cat_rank=rank).order_by('_cat_rank', '-created_at')[:limit]
+        qs = qs.annotate(_cat_rank=rank, _own_views=view_rank)
+        return qs.order_by('_cat_rank', '-_own_views', '-created_at')[:limit]
 
     def get_product(self, pk: str) -> Product:
         return self._with_ratings(
