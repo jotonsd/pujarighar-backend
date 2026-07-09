@@ -205,7 +205,7 @@ def popular_by_category(request):
             output_field=DecimalField(max_digits=12, decimal_places=2),
         )
 
-        categories = Category.objects.filter(is_active=True).order_by('name_bn')
+        categories = Category.objects.filter(is_active=True).order_by('order', 'name_bn')
         result = []
         for cat in categories:
             products = list(
