@@ -117,10 +117,11 @@ class Category(BaseModel):
     slug      = models.SlugField(unique=True)
     parent    = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children')
     icon      = models.CharField(max_length=100, blank=True)
+    order     = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ['name_bn']
+        ordering = ['order', 'name_bn']
 
     def __str__(self):
         return self.name_bn or self.name_en
