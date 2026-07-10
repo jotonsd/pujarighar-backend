@@ -47,6 +47,7 @@ urlpatterns = [
     path('products/popular-by-category/',      views.popular_by_category,   name='popular-by-category'),
     path('products/recommended/',              views.get_recommended_products, name='product-recommended'),
     path('products/<uuid:pk>/',                views.get_product,           name='product-detail'),
+    path('products/slug/<slug:slug>/',         views.get_product_by_slug,   name='product-detail-by-slug'),
     path('products/<uuid:pk>/update/', views.update_product, name='product-update'),
     path('products/<uuid:pk>/delete/', views.delete_product, name='product-delete'),
     path('products/<uuid:pk>/images/', views.add_product_image, name='product-image-add'),

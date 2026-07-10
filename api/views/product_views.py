@@ -106,6 +106,22 @@ def get_product(request, pk):
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_product_by_slug(request, slug):
+    try:
+        product = _svc.get_product_by_slug(slug)
+        user, guest_id = get_visitor(request)
+        if user or guest_id:
+            ProductView.objects.create(user=user, guest_id=guest_id, product=product)
+        return ApiResponse(
+            message="Product retrieved",
+            data=ProductSerializer(product, context=_ctx(request)).data,
+        )
+    except Product.DoesNotExist:
+        return ApiResponse(message="Product not found", errors="Not found", status_code=404)
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def update_product(request, pk):

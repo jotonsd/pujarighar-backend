@@ -227,6 +227,11 @@ class ProductService:
             Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         ).get(pk=pk)
 
+    def get_product_by_slug(self, slug: str) -> Product:
+        return self._with_ratings(
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+        ).get(slug=slug, is_active=True)
+
     def create_product(self, validated_data: dict) -> Product:
         product = Product.objects.create(**validated_data)
         logger.info(f"Product created: {product.sku}")
