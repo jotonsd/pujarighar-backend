@@ -158,6 +158,7 @@ class Supplier(BaseModel):
 class Product(BaseModel):
     name_bn        = models.CharField(max_length=300)
     name_en        = models.CharField(max_length=300)
+    slug           = models.SlugField(max_length=320, unique=True, null=True, blank=True)
     description_bn = models.TextField(blank=True)
     description_en = models.TextField(blank=True)
     sku            = models.CharField(max_length=100, unique=True)
@@ -181,6 +182,18 @@ class Product(BaseModel):
 
     def __str__(self):
         return f'{self.name_bn} ({self.sku})'
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from django.utils.text import slugify
+            base = slugify(self.name_en) or slugify(self.name_bn, allow_unicode=True) or 'product'
+            slug = base
+            n = 1
+            while Product.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                n += 1
+                slug = f'{base}-{n}'
+            self.slug = slug
+        super().save(*args, **kwargs)
 
     @property
     def effective_price(self) -> Decimal:
