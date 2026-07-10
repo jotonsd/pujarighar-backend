@@ -6,7 +6,7 @@ from .user_views import (
     list_delivery_persons, lookup_user_by_phone,
 )
 from .product_views import (
-    list_products, create_product, get_product, update_product, delete_product,
+    list_products, create_product, get_product, get_product_by_slug, update_product, delete_product,
     add_product_image, delete_product_image, popular_by_category, get_recommended_products,
 )
 from .category_views import (
