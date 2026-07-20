@@ -124,13 +124,22 @@ def seo_metrics(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def pagespeed_seo(request):
-    strategy = request.query_params.get('strategy', 'MOBILE').upper()
-    if strategy not in ('MOBILE', 'DESKTOP'):
-        strategy = 'MOBILE'
     try:
-        return ApiResponse(message='PageSpeed SEO score retrieved', data=_svc.get_pagespeed_seo(strategy=strategy))
+        return ApiResponse(message='PageSpeed scores retrieved', data=_svc.get_pagespeed_seo())
     except GoogleNotConnectedError as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
     except Exception as e:
-        logger.exception('Failed to fetch PageSpeed Insights SEO score')
+        logger.exception('Failed to fetch PageSpeed Insights scores')
         return ApiResponse(message='Failed to fetch SEO score', errors=str(e), status_code=502)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def pagespeed_seo_refresh(request):
+    try:
+        return ApiResponse(message='PageSpeed scores refreshed', data=_svc.get_pagespeed_seo(force=True))
+    except GoogleNotConnectedError as e:
+        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+    except Exception as e:
+        logger.exception('Failed to refresh PageSpeed Insights scores')
+        return ApiResponse(message='Failed to refresh SEO score', errors=str(e), status_code=502)
