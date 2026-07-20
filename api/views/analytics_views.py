@@ -124,8 +124,11 @@ def seo_metrics(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def pagespeed_seo(request):
+    strategy = request.query_params.get('strategy', 'MOBILE').upper()
+    if strategy not in ('MOBILE', 'DESKTOP'):
+        strategy = 'MOBILE'
     try:
-        return ApiResponse(message='PageSpeed SEO score retrieved', data=_svc.get_pagespeed_seo())
+        return ApiResponse(message='PageSpeed SEO score retrieved', data=_svc.get_pagespeed_seo(strategy=strategy))
     except GoogleNotConnectedError as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
     except Exception as e:
