@@ -38,8 +38,10 @@ def _build_nav_menu(role: str) -> list:
             link('/admin/orders/new',  '🧾', 'নতুন অর্ডার',    'New Order'),
             link('/admin/orders',      '🛍️', 'অর্ডার',          'Orders'),
             link('/admin/users',       '👥', 'ব্যবহারকারী',     'Users'),
-            link('/admin/dashboard',   '📊', 'ড্যাশবোর্ড',      'Dashboard'),
-            link('/admin/analytics',  '📈', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
+            group('📊', 'ড্যাশবোর্ড', 'Dashboard', [
+                item('/admin/dashboard',  '📊', 'ওভারভিউ',              'Overview'),
+                item('/admin/analytics',  '📈', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
+            ]),
             group('📦', 'পণ্য', 'Catalog', [
                 item('/admin/products',         '📦', 'পণ্য',          'Products'),
                 item('/admin/packages',         '🎁', 'প্যাকেজ',       'Packages'),
