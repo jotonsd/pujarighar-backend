@@ -239,6 +239,20 @@ class GoogleAnalyticsService:
                 'sessions': int(row.metric_values[0].value),
             } for row in sources.rows]
 
+            countries = self._run_ga4_report(
+                integration.ga4_property_id, creds,
+                dimensions=[Dimension(name='country')],
+                metrics=[Metric(name='sessions')],
+                date_ranges=date_range,
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name='sessions'), desc=True)],
+                limit=5,
+            )
+            country_rows = [(row.dimension_values[0].value, int(row.metric_values[0].value)) for row in countries.rows]
+            country_breakdown = [{'country': c, 'sessions': s} for c, s in country_rows]
+            other_sessions = sessions_total - sum(s for _, s in country_rows)
+            if other_sessions > 0:
+                country_breakdown.append({'country': 'Other', 'sessions': other_sessions})
+
             return {
                 'sessions_total': sessions_total,
                 'users_total': users_total,
@@ -246,6 +260,7 @@ class GoogleAnalyticsService:
                 'returning_users_total': returning_users_total,
                 'daily': daily_rows,
                 'top_traffic_sources': top_sources,
+                'country_breakdown': country_breakdown,
             }
 
         return self._cached(f'ga4:traffic:{integration.ga4_property_id}:{start_date}:{end_date}', fetch)
