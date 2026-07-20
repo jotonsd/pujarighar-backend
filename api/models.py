@@ -920,3 +920,33 @@ class SearchLog(models.Model):
             models.Index(fields=['user', 'created_at']),
             models.Index(fields=['guest_id', 'created_at']),
         ]
+
+
+# ─── Google Analytics / Search Console Integration ────────────────────────────
+# Singleton row holding the OAuth connection used to pull GA4 + Search Console
+# data into the admin dashboard. Tokens are stored encrypted (see api/utils/crypto.py)
+# since a leaked refresh token grants standing read access to the connected Google account.
+
+class GoogleIntegration(models.Model):
+    is_connected           = models.BooleanField(default=False)
+    connected_by           = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    connected_at           = models.DateTimeField(null=True, blank=True)
+    refresh_token_encrypted = models.TextField(blank=True, default='')
+    access_token           = models.TextField(blank=True, default='')
+    token_expiry           = models.DateTimeField(null=True, blank=True)
+    scopes                 = models.TextField(blank=True, default='')
+    ga4_property_id        = models.CharField(max_length=64, blank=True, default='')
+    ga4_property_name      = models.CharField(max_length=255, blank=True, default='')
+    gsc_site_url           = models.CharField(max_length=500, blank=True, default='')
+    updated_at             = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Google Integration'
+
+    @classmethod
+    def get(cls) -> 'GoogleIntegration':
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f'Google Integration — {"connected" if self.is_connected else "not connected"}'
