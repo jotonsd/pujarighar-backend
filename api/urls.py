@@ -208,4 +208,15 @@ urlpatterns = [
     # ─── Logs ──────────────────────────────────────────────────────────────────
     path('logs/',              views.list_log_files, name='log-list'),
     path('logs/<str:filename>/', views.get_log_file,  name='log-detail'),
+
+    # ─── Google Analytics / Search Console Integration ────────────────────────
+    path('analytics/google/connect-url/', views.google_connect_url, name='analytics-google-connect-url'),
+    path('analytics/google/callback/',    views.google_callback,    name='analytics-google-callback'),
+    path('analytics/google/status/',      views.google_status,      name='analytics-google-status'),
+    path('analytics/google/properties/',  views.google_properties,  name='analytics-google-properties'),
+    path('analytics/google/select/',      views.google_select,      name='analytics-google-select'),
+    path('analytics/google/disconnect/',  views.google_disconnect,  name='analytics-google-disconnect'),
+    path('analytics/traffic/',            views.traffic_metrics,    name='analytics-traffic'),
+    path('analytics/sales/',              views.sales_metrics,      name='analytics-sales'),
+    path('analytics/seo/',                views.seo_metrics,        name='analytics-seo'),
 ]

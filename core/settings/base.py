@@ -181,6 +181,16 @@ PASSWORD_RESET_TIMEOUT = 1800  # 30 minutes
 # ─── Google OAuth ─────────────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 
+# ─── Google Analytics / Search Console integration ─────────────────────────────
+# Separate OAuth client from GOOGLE_CLIENT_ID above — that one is the client-side,
+# no-refresh-token flow used for customer login. This needs a server-side
+# authorization-code flow with a stored refresh token to pull GA4/GSC data on demand.
+GOOGLE_ANALYTICS_CLIENT_ID     = config('GOOGLE_ANALYTICS_CLIENT_ID', default='')
+GOOGLE_ANALYTICS_CLIENT_SECRET = config('GOOGLE_ANALYTICS_CLIENT_SECRET', default='')
+GOOGLE_ANALYTICS_REDIRECT_URI  = config('GOOGLE_ANALYTICS_REDIRECT_URI', default=f'{BACKEND_URL}/api/analytics/google/callback/')
+FIELD_ENCRYPTION_KEY           = config('FIELD_ENCRYPTION_KEY', default='')
+CRUX_API_KEY                   = config('CRUX_API_KEY', default='')
+
 # ─── SSLCommerz ───────────────────────────────────────────────────────────────
 SSLCOMMERZ_STORE_ID      = config('SSLCOMMERZ_STORE_ID',      default='')
 SSLCOMMERZ_STORE_PASS    = config('SSLCOMMERZ_STORE_PASS',    default='')
