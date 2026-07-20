@@ -442,16 +442,23 @@ class GoogleAnalyticsService:
             'cumulative_layout_shift': bucket_pct('cumulative_layout_shift'),
         }
 
-    # ─── SEO Score (PageSpeed Insights / Lighthouse) ───────────────────────
+    # ─── PageSpeed Insights / Lighthouse (Performance, Accessibility, Best Practices, SEO) ──
+
+    PSI_CATEGORIES = ['PERFORMANCE', 'ACCESSIBILITY', 'BEST_PRACTICES', 'SEO']
+    PSI_LAB_METRICS = [
+        'first-contentful-paint', 'largest-contentful-paint',
+        'total-blocking-time', 'cumulative-layout-shift', 'speed-index',
+    ]
 
     def get_pagespeed_seo(self, strategy: str = 'MOBILE') -> dict:
-        """Lighthouse's SEO category score + failing checks, via the public PageSpeed
-        Insights API. Unlike the sitemap-based indexed-page estimate, this is real,
-        actionable data available for any site regardless of traffic volume."""
+        """All 4 Lighthouse category scores (Performance/Accessibility/Best Practices/SEO)
+        + failing checks + key lab metrics, via the public PageSpeed Insights API. Unlike
+        the sitemap-based indexed-page estimate, this is real, actionable data available
+        for any site regardless of traffic volume."""
         integration = self._require_selection()
         url = self._normalize_origin(integration.gsc_site_url) + '/'
         return self._cached(
-            f'psi:seo:{url}:{strategy}',
+            f'psi:v2:{url}:{strategy}',
             lambda: self._fetch_pagespeed_seo(url, strategy),
             timeout=PSI_CACHE_TIMEOUT,
         )
@@ -464,7 +471,8 @@ class GoogleAnalyticsService:
         try:
             resp = requests.get(
                 'https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed',
-                params={'url': url, 'key': api_key, 'category': 'SEO', 'strategy': strategy},
+                params=[('url', url), ('key', api_key), ('strategy', strategy)]
+                       + [('category', c) for c in self.PSI_CATEGORIES],
                 timeout=30,
             )
         except requests.RequestException as e:
@@ -476,28 +484,38 @@ class GoogleAnalyticsService:
             return {'available': False, 'reason': 'api_error'}
 
         lighthouse = resp.json().get('lighthouseResult', {})
-        seo_category = lighthouse.get('categories', {}).get('seo', {})
+        categories = lighthouse.get('categories', {})
         audits = lighthouse.get('audits', {})
 
-        score = seo_category.get('score')
-        if score is None:
+        scores = {}
+        failing_issues = {}
+        for key, cat_id in [('performance', 'performance'), ('accessibility', 'accessibility'),
+                             ('best_practices', 'best-practices'), ('seo', 'seo')]:
+            category = categories.get(cat_id, {})
+            score = category.get('score')
+            scores[key] = round(score * 100) if score is not None else None
+
+            issues = []
+            for ref in category.get('auditRefs', []):
+                audit = audits.get(ref['id'], {})
+                if audit.get('scoreDisplayMode') != 'binary' or audit.get('score') == 1:
+                    continue
+                issues.append({'title': audit.get('title', ref['id']), 'description': audit.get('description', '')})
+            failing_issues[key] = issues[:10]
+
+        if scores['seo'] is None:
             return {'available': False, 'reason': 'no_score_returned'}
 
-        failing_issues = []
-        for ref in seo_category.get('auditRefs', []):
-            audit = audits.get(ref['id'], {})
-            if audit.get('scoreDisplayMode') != 'binary':
-                continue
-            if audit.get('score') == 1:
-                continue
-            failing_issues.append({
-                'title': audit.get('title', ref['id']),
-                'description': audit.get('description', ''),
-            })
+        lab_metrics = {
+            metric_id: audits[metric_id]['displayValue']
+            for metric_id in self.PSI_LAB_METRICS
+            if metric_id in audits and 'displayValue' in audits[metric_id]
+        }
 
         return {
             'available': True,
-            'score': round(score * 100),
             'strategy': strategy,
-            'failing_issues': failing_issues[:10],
+            'scores': scores,
+            'failing_issues': failing_issues,
+            'lab_metrics': lab_metrics,
         }
