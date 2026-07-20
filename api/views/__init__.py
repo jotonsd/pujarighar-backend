@@ -70,3 +70,7 @@ from .loan_views import (
 from .settings_views import get_site_settings, update_site_settings
 from .promo_email_views import list_promo_emails, promo_email_audience, create_promo_email, resend_promo_email
 from .log_views import list_log_files, get_log_file
+from .analytics_views import (
+    google_connect_url, google_callback, google_status, google_properties,
+    google_select, google_disconnect, traffic_metrics, sales_metrics, seo_metrics,
+)
