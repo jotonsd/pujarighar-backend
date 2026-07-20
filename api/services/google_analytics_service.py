@@ -1,5 +1,12 @@
 import logging
+import os
 from datetime import datetime, timedelta
+
+# Google always folds in previously-granted scopes (email/profile/openid from the
+# existing login flow) alongside the ones we request here, since both flows share
+# the same OAuth client. oauthlib treats "granted scopes != requested scopes" as
+# fatal by default — relax that check, since a superset of granted scopes is fine.
+os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE', '1')
 
 import requests
 from django.conf import settings

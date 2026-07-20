@@ -35,8 +35,8 @@ def google_callback(request):
         return redirect(f'{settings.FRONTEND_URL}/admin/analytics?error=1')
     try:
         _svc.exchange_code_for_tokens(code, request.user if request.user.is_authenticated else None)
-    except Exception as e:
-        logger.warning(f'Google OAuth token exchange failed: {e}')
+    except Exception:
+        logger.exception('Google OAuth token exchange failed')
         return redirect(f'{settings.FRONTEND_URL}/admin/analytics?error=1')
     return redirect(f'{settings.FRONTEND_URL}/admin/analytics?connected=1')
 
