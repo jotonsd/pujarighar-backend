@@ -450,18 +450,25 @@ class GoogleAnalyticsService:
         'total-blocking-time', 'cumulative-layout-shift', 'speed-index',
     ]
 
-    def get_pagespeed_seo(self, strategy: str = 'MOBILE') -> dict:
-        """All 4 Lighthouse category scores (Performance/Accessibility/Best Practices/SEO)
-        + failing checks + key lab metrics, via the public PageSpeed Insights API. Unlike
-        the sitemap-based indexed-page estimate, this is real, actionable data available
-        for any site regardless of traffic volume."""
+    def get_pagespeed_seo(self, force: bool = False) -> dict:
+        """Both Mobile and Desktop Lighthouse results (Performance/Accessibility/Best
+        Practices/SEO scores + failing checks + key lab metrics), via the public
+        PageSpeed Insights API. Unlike the sitemap-based indexed-page estimate, this is
+        real, actionable data available for any site regardless of traffic volume.
+        `force=True` bypasses the 24h cache and re-runs Lighthouse fresh (used by the
+        manual Refresh action) — the fresh result then replaces the cached value, so
+        subsequent normal loads pick it up too."""
         integration = self._require_selection()
         url = self._normalize_origin(integration.gsc_site_url) + '/'
-        return self._cached(
-            f'psi:v2:{url}:{strategy}',
-            lambda: self._fetch_pagespeed_seo(url, strategy),
-            timeout=PSI_CACHE_TIMEOUT,
-        )
+        result = {}
+        for strategy in ('MOBILE', 'DESKTOP'):
+            key = f'psi:v2:{url}:{strategy}'
+            if force:
+                cache.delete(key)
+            result[strategy.lower()] = self._cached(
+                key, lambda s=strategy: self._fetch_pagespeed_seo(url, s), timeout=PSI_CACHE_TIMEOUT,
+            )
+        return result
 
     def _fetch_pagespeed_seo(self, url: str, strategy: str) -> dict:
         api_key = settings.CRUX_API_KEY
