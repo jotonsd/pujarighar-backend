@@ -173,6 +173,11 @@ class GoogleAnalyticsService:
         cache.set(key, value, timeout)
         return value
 
+    def _ga4_date_to_iso(self, ga4_date: str) -> str:
+        """GA4's `date` dimension returns 'YYYYMMDD' with no separators — convert
+        to ISO 'YYYY-MM-DD' so the frontend's `new Date(...)` parsing doesn't choke."""
+        return f'{ga4_date[0:4]}-{ga4_date[4:6]}-{ga4_date[6:8]}'
+
     def _run_ga4_report(self, property_id: str, creds, **kwargs) -> RunReportRequest:
         client = BetaAnalyticsDataClient(credentials=creds)
         request = RunReportRequest(property=f'properties/{property_id}', **kwargs)
@@ -203,7 +208,7 @@ class GoogleAnalyticsService:
                 order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name='date'))],
             )
             daily_rows = [{
-                'date': row.dimension_values[0].value,
+                'date': self._ga4_date_to_iso(row.dimension_values[0].value),
                 'sessions': int(row.metric_values[0].value),
                 'total_users': int(row.metric_values[1].value),
                 'new_users': int(row.metric_values[2].value),
