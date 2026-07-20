@@ -219,4 +219,5 @@ urlpatterns = [
     path('analytics/traffic/',            views.traffic_metrics,    name='analytics-traffic'),
     path('analytics/sales/',              views.sales_metrics,      name='analytics-sales'),
     path('analytics/seo/',                views.seo_metrics,        name='analytics-seo'),
+    path('analytics/seo/pagespeed/',       views.pagespeed_seo,      name='analytics-seo-pagespeed'),
 ]

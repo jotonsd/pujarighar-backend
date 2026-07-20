@@ -73,4 +73,5 @@ from .log_views import list_log_files, get_log_file
 from .analytics_views import (
     google_connect_url, google_callback, google_status, google_properties,
     google_select, google_disconnect, traffic_metrics, sales_metrics, seo_metrics,
+    pagespeed_seo,
 )

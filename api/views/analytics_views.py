@@ -35,8 +35,8 @@ def google_callback(request):
         return redirect(f'{settings.FRONTEND_URL}/admin/analytics?error=1')
     try:
         _svc.exchange_code_for_tokens(code, request.user if request.user.is_authenticated else None)
-    except Exception as e:
-        logger.warning(f'Google OAuth token exchange failed: {e}')
+    except Exception:
+        logger.exception('Google OAuth token exchange failed')
         return redirect(f'{settings.FRONTEND_URL}/admin/analytics?error=1')
     return redirect(f'{settings.FRONTEND_URL}/admin/analytics?connected=1')
 
@@ -119,3 +119,15 @@ def seo_metrics(request):
     except Exception as e:
         logger.exception('Failed to fetch Search Console metrics')
         return ApiResponse(message='Failed to fetch SEO metrics', errors=str(e), status_code=502)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def pagespeed_seo(request):
+    try:
+        return ApiResponse(message='PageSpeed SEO score retrieved', data=_svc.get_pagespeed_seo())
+    except GoogleNotConnectedError as e:
+        return ApiResponse(message=str(e), errors=str(e), status_code=400)
+    except Exception as e:
+        logger.exception('Failed to fetch PageSpeed Insights SEO score')
+        return ApiResponse(message='Failed to fetch SEO score', errors=str(e), status_code=502)
