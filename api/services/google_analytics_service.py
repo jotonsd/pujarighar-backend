@@ -477,11 +477,11 @@ class GoogleAnalyticsService:
             for strategy in ('MOBILE', 'DESKTOP')
         }
 
-    # Worst case per strategy ≈ 2 x 45s timeout + 2s delay ≈ 92s. Mobile/desktop run
-    # concurrently (see get_pagespeed_seo), so overall worst case stays ~92s, not
-    # additive — keep this comfortably under whatever gunicorn/nginx timeout is
-    # configured on the server (must be raised above the old 30s default).
-    PSI_MAX_ATTEMPTS = 2
+    # No retry — a single failed attempt just returns available=False (shown as an
+    # empty/error state in the UI, not a 0 score). Worst case per strategy ≈ 45s;
+    # refresh_pagespeed_seo runs mobile then desktop sequentially, so ~90s total —
+    # keep the server's request/worker timeout comfortably above that.
+    PSI_MAX_ATTEMPTS = 1
     PSI_RETRY_DELAY_SECONDS = 2
 
     def _request_psi(self, url: str, api_key: str, strategy: str):
