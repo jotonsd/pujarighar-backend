@@ -191,6 +191,22 @@ GOOGLE_ANALYTICS_REDIRECT_URI  = config('GOOGLE_ANALYTICS_REDIRECT_URI', default
 FIELD_ENCRYPTION_KEY           = config('FIELD_ENCRYPTION_KEY', default='')
 CRUX_API_KEY                   = config('CRUX_API_KEY', default='')
 
+# ─── Cache ─────────────────────────────────────────────────────────────────────
+# Django's default (no CACHES set) is a per-process LocMemCache — harmless with a
+# single dev server, but silently broken behind multiple Gunicorn workers (each
+# worker gets its own disconnected cache, so a cache "hit" only happens if you land
+# on the same worker twice). Point REDIS_URL at a real Redis instance in production
+# so all workers share one cache; falls back to locmem when unset (local dev).
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': REDIS_URL,
+            'OPTIONS': {'CLIENT_CLASS': 'django_redis.client.DefaultClient'},
+        }
+    }
+
 # ─── SSLCommerz ───────────────────────────────────────────────────────────────
 SSLCOMMERZ_STORE_ID      = config('SSLCOMMERZ_STORE_ID',      default='')
 SSLCOMMERZ_STORE_PASS    = config('SSLCOMMERZ_STORE_PASS',    default='')
