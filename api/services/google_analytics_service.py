@@ -451,27 +451,37 @@ class GoogleAnalyticsService:
         'total-blocking-time', 'cumulative-layout-shift', 'speed-index',
     ]
 
-    def get_pagespeed_seo(self, force: bool = False) -> dict:
-        """Both Mobile and Desktop Lighthouse results (Performance/Accessibility/Best
-        Practices/SEO scores + failing checks + key lab metrics), via the public
-        PageSpeed Insights API. Unlike the sitemap-based indexed-page estimate, this is
-        real, actionable data available for any site regardless of traffic volume.
-        `force=True` bypasses the 24h cache and re-runs Lighthouse fresh (used by the
-        manual Refresh action) — the fresh result then replaces the cached value, so
-        subsequent normal loads pick it up too."""
+    def _get_pagespeed_for_strategy(self, strategy: str, force: bool = False) -> dict:
         integration = self._require_selection()
         url = self._normalize_origin(integration.gsc_site_url) + '/'
-        result = {}
-        for strategy in ('MOBILE', 'DESKTOP'):
-            key = f'psi:v2:{url}:{strategy}'
-            if force:
-                cache.delete(key)
-            result[strategy.lower()] = self._cached(
-                key, lambda s=strategy: self._fetch_pagespeed_seo(url, s), timeout=PSI_CACHE_TIMEOUT,
-            )
-        return result
+        key = f'psi:v2:{url}:{strategy}'
+        if force:
+            cache.delete(key)
+        return self._cached(key, lambda: self._fetch_pagespeed_seo(url, strategy), timeout=PSI_CACHE_TIMEOUT)
 
-    PSI_MAX_ATTEMPTS = 3
+    def get_pagespeed_seo(self, strategy: str) -> dict:
+        """Single-strategy Lighthouse result (Performance/Accessibility/Best Practices/
+        SEO scores + failing checks + key lab metrics), via the public PageSpeed Insights
+        API — cached 24h, so a normal page load only pays for this once a day. Kept as a
+        separate call per strategy (rather than always fetching both) so switching tabs
+        or loading the page doesn't force a second slow Lighthouse run you didn't ask for."""
+        return self._get_pagespeed_for_strategy(strategy, force=False)
+
+    def refresh_pagespeed_seo(self) -> dict:
+        """Force-refresh BOTH Mobile and Desktop, bypassing the cache — used by the
+        manual Refresh button. Runs sequentially (Mobile first, then Desktop) — note
+        this roughly doubles worst-case request time vs. running them concurrently, so
+        the server's request/worker timeout must be generous enough to cover both."""
+        return {
+            strategy.lower(): self._get_pagespeed_for_strategy(strategy, True)
+            for strategy in ('MOBILE', 'DESKTOP')
+        }
+
+    # Worst case per strategy ≈ 2 x 45s timeout + 2s delay ≈ 92s. Mobile/desktop run
+    # concurrently (see get_pagespeed_seo), so overall worst case stays ~92s, not
+    # additive — keep this comfortably under whatever gunicorn/nginx timeout is
+    # configured on the server (must be raised above the old 30s default).
+    PSI_MAX_ATTEMPTS = 2
     PSI_RETRY_DELAY_SECONDS = 2
 
     def _request_psi(self, url: str, api_key: str, strategy: str):
