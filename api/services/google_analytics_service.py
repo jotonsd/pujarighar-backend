@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
 # Google always folds in previously-granted scopes (email/profile/openid from the
@@ -470,25 +471,44 @@ class GoogleAnalyticsService:
             )
         return result
 
+    PSI_MAX_ATTEMPTS = 3
+    PSI_RETRY_DELAY_SECONDS = 2
+
+    def _request_psi(self, url: str, api_key: str, strategy: str):
+        """PageSpeed Insights' Lighthouse runner intermittently returns transient
+        5xx errors, especially on a cold/uncached URL — retry a couple of times
+        before giving up, rather than surfacing a one-off blip as a hard failure."""
+        last_error = None
+        for attempt in range(1, self.PSI_MAX_ATTEMPTS + 1):
+            try:
+                resp = requests.get(
+                    'https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed',
+                    params=[('url', url), ('key', api_key), ('strategy', strategy)]
+                           + [('category', c) for c in self.PSI_CATEGORIES],
+                    timeout=45,
+                )
+            except requests.RequestException as e:
+                last_error = ('request_failed', str(e))
+                logger.warning(f'PageSpeed Insights request failed (attempt {attempt}/{self.PSI_MAX_ATTEMPTS}, {strategy}): {e}')
+            else:
+                if resp.status_code == 200:
+                    return resp, None
+                last_error = ('api_error', f'{resp.status_code}: {resp.text[:200]}')
+                logger.warning(f'PageSpeed Insights returned {resp.status_code} (attempt {attempt}/{self.PSI_MAX_ATTEMPTS}, {strategy}): {resp.text[:200]}')
+
+            if attempt < self.PSI_MAX_ATTEMPTS:
+                time.sleep(self.PSI_RETRY_DELAY_SECONDS)
+
+        return None, last_error[0]
+
     def _fetch_pagespeed_seo(self, url: str, strategy: str) -> dict:
         api_key = settings.CRUX_API_KEY
         if not api_key:
             return {'available': False, 'reason': 'CRUX_API_KEY not configured'}
 
-        try:
-            resp = requests.get(
-                'https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed',
-                params=[('url', url), ('key', api_key), ('strategy', strategy)]
-                       + [('category', c) for c in self.PSI_CATEGORIES],
-                timeout=30,
-            )
-        except requests.RequestException as e:
-            logger.warning(f'PageSpeed Insights request failed: {e}')
-            return {'available': False, 'reason': 'request_failed'}
-
-        if resp.status_code != 200:
-            logger.warning(f'PageSpeed Insights returned {resp.status_code}: {resp.text[:200]}')
-            return {'available': False, 'reason': 'api_error'}
+        resp, error_reason = self._request_psi(url, api_key, strategy)
+        if resp is None:
+            return {'available': False, 'reason': error_reason}
 
         lighthouse = resp.json().get('lighthouseResult', {})
         categories = lighthouse.get('categories', {})
