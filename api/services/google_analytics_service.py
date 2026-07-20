@@ -31,6 +31,7 @@ SCOPES = [
 ]
 
 CACHE_TIMEOUT = 900  # 15 minutes — Google Analytics/Search Console APIs are rate-limited
+PSI_CACHE_TIMEOUT = 86400  # 24 hours — a Lighthouse run is slow (~10-20s) and site SEO health doesn't change minute to minute
 
 
 class GoogleNotConnectedError(Exception):
@@ -163,12 +164,12 @@ class GoogleAnalyticsService:
 
     # ─── Shared helpers ─────────────────────────────────────────────────────
 
-    def _cached(self, key: str, fn):
+    def _cached(self, key: str, fn, timeout: int = CACHE_TIMEOUT):
         value = cache.get(key)
         if value is not None:
             return value
         value = fn()
-        cache.set(key, value, CACHE_TIMEOUT)
+        cache.set(key, value, timeout)
         return value
 
     def _run_ga4_report(self, property_id: str, creds, **kwargs) -> RunReportRequest:
@@ -389,6 +390,14 @@ class GoogleAnalyticsService:
                 indexed += int(content.get('indexed', 0))
         return {'available': True, 'indexed': indexed, 'submitted': submitted}
 
+    def _normalize_origin(self, site_url: str) -> str:
+        """GSC site URLs are either a real URL-prefix property or a 'sc-domain:example.com'
+        domain property — normalize either to a plain https:// origin/URL for other APIs."""
+        origin = site_url.rstrip('/')
+        if origin.startswith('sc-domain:'):
+            origin = f'https://{origin.split(":", 1)[1]}'
+        return origin
+
     def _get_core_web_vitals(self, site_url: str) -> dict:
         """Field data from the public Chrome UX Report API — Search Console's old
         'Mobile Usability' report was fully retired by Google in Dec 2023."""
@@ -396,9 +405,7 @@ class GoogleAnalyticsService:
         if not api_key:
             return {'available': False, 'reason': 'CRUX_API_KEY not configured'}
 
-        origin = site_url.rstrip('/')
-        if origin.startswith('sc-domain:'):
-            origin = f'https://{origin.split(":", 1)[1]}'
+        origin = self._normalize_origin(site_url)
 
         try:
             resp = requests.post(
@@ -433,4 +440,64 @@ class GoogleAnalyticsService:
             'largest_contentful_paint': bucket_pct('largest_contentful_paint'),
             'interaction_to_next_paint': bucket_pct('interaction_to_next_paint'),
             'cumulative_layout_shift': bucket_pct('cumulative_layout_shift'),
+        }
+
+    # ─── SEO Score (PageSpeed Insights / Lighthouse) ───────────────────────
+
+    def get_pagespeed_seo(self, strategy: str = 'MOBILE') -> dict:
+        """Lighthouse's SEO category score + failing checks, via the public PageSpeed
+        Insights API. Unlike the sitemap-based indexed-page estimate, this is real,
+        actionable data available for any site regardless of traffic volume."""
+        integration = self._require_selection()
+        url = self._normalize_origin(integration.gsc_site_url) + '/'
+        return self._cached(
+            f'psi:seo:{url}:{strategy}',
+            lambda: self._fetch_pagespeed_seo(url, strategy),
+            timeout=PSI_CACHE_TIMEOUT,
+        )
+
+    def _fetch_pagespeed_seo(self, url: str, strategy: str) -> dict:
+        api_key = settings.CRUX_API_KEY
+        if not api_key:
+            return {'available': False, 'reason': 'CRUX_API_KEY not configured'}
+
+        try:
+            resp = requests.get(
+                'https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed',
+                params={'url': url, 'key': api_key, 'category': 'SEO', 'strategy': strategy},
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            logger.warning(f'PageSpeed Insights request failed: {e}')
+            return {'available': False, 'reason': 'request_failed'}
+
+        if resp.status_code != 200:
+            logger.warning(f'PageSpeed Insights returned {resp.status_code}: {resp.text[:200]}')
+            return {'available': False, 'reason': 'api_error'}
+
+        lighthouse = resp.json().get('lighthouseResult', {})
+        seo_category = lighthouse.get('categories', {}).get('seo', {})
+        audits = lighthouse.get('audits', {})
+
+        score = seo_category.get('score')
+        if score is None:
+            return {'available': False, 'reason': 'no_score_returned'}
+
+        failing_issues = []
+        for ref in seo_category.get('auditRefs', []):
+            audit = audits.get(ref['id'], {})
+            if audit.get('scoreDisplayMode') != 'binary':
+                continue
+            if audit.get('score') == 1:
+                continue
+            failing_issues.append({
+                'title': audit.get('title', ref['id']),
+                'description': audit.get('description', ''),
+            })
+
+        return {
+            'available': True,
+            'score': round(score * 100),
+            'strategy': strategy,
+            'failing_issues': failing_issues[:10],
         }
