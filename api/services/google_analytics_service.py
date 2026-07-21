@@ -392,24 +392,37 @@ class GoogleAnalyticsService:
 
         return self._cached(f'gsc:seo:{integration.gsc_site_url}:{start_date}:{end_date}', fetch)
 
+    INDEXED_PAGES_LOOKBACK_DAYS = 480  # ~16 months — Search Console's max data retention
+
     def _get_indexed_pages_estimate(self, service, site_url: str) -> dict:
-        """Best-effort indexed-page count via the Sitemaps API — Search Console has
-        no public API for the exact 'Page indexing' total shown in its own UI."""
+        """Search Console has no public API for the exact 'Page indexing' report
+        total, and the Sitemaps API's own 'indexed' field is well-documented as
+        unreliable — it frequently stays at 0 or goes stale for long stretches even
+        when the real Page Indexing report shows a healthy count. Distinct pages
+        with at least one search impression over the max retention window is a far
+        more accurate proxy: a page cannot show impressions in Search unless Google
+        has actually indexed it. Not a literal 1:1 match with GSC's own count, but a
+        real, non-broken number instead of a field Google's own API rarely populates."""
+        end = timezone.localdate().isoformat()
+        start = (timezone.localdate() - timedelta(days=self.INDEXED_PAGES_LOOKBACK_DAYS)).isoformat()
+        try:
+            body = {'startDate': start, 'endDate': end, 'dimensions': ['page'], 'rowLimit': 25000}
+            rows = service.searchanalytics().query(siteUrl=site_url, body=body).execute().get('rows', [])
+            pages_with_impressions = len(rows)
+        except Exception as e:
+            logger.warning(f'Search Analytics page-count query failed: {e}')
+            return {'available': False, 'indexed': 0, 'submitted': 0}
+
+        submitted = 0
         try:
             sitemaps = service.sitemaps().list(siteUrl=site_url).execute().get('sitemap', [])
+            for sm in sitemaps:
+                for content in sm.get('contents', []):
+                    submitted += int(content.get('submitted', 0))
         except Exception as e:
             logger.warning(f'Sitemaps API call failed: {e}')
-            return {'available': False, 'indexed': 0, 'submitted': 0}
 
-        if not sitemaps:
-            return {'available': False, 'indexed': 0, 'submitted': 0}
-
-        indexed = submitted = 0
-        for sm in sitemaps:
-            for content in sm.get('contents', []):
-                submitted += int(content.get('submitted', 0))
-                indexed += int(content.get('indexed', 0))
-        return {'available': True, 'indexed': indexed, 'submitted': submitted}
+        return {'available': True, 'indexed': pages_with_impressions, 'submitted': submitted}
 
     def _normalize_origin(self, site_url: str) -> str:
         """GSC site URLs are either a real URL-prefix property or a 'sc-domain:example.com'
