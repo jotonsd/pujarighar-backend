@@ -282,7 +282,7 @@ def send_order_delivered(order):
             <p>An order has been delivered.</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
             <strong>Customer:</strong> {customer_email or 'Guest'}</p>
-            {_order_summary_html(order)}
+            {_order_summary_html(order, is_bn)}
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Delivered", body, admins)
