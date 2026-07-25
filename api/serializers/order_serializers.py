@@ -46,8 +46,8 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
 
 
 class DeliveryAssignmentSerializer(serializers.ModelSerializer):
-    delivery_person_email   = serializers.EmailField(source='delivery_person.email', read_only=True)
-    delivery_person_phone   = serializers.CharField(source='delivery_person.phone', read_only=True)
+    delivery_person_email   = serializers.SerializerMethodField()
+    delivery_person_phone   = serializers.SerializerMethodField()
     delivery_person_name    = serializers.SerializerMethodField()
     delivery_person_name_bn = serializers.SerializerMethodField()
     delivery_person_name_en = serializers.SerializerMethodField()
@@ -58,6 +58,12 @@ class DeliveryAssignmentSerializer(serializers.ModelSerializer):
         fields = ['id', 'delivery_person', 'delivery_person_email', 'delivery_person_phone',
                   'delivery_person_name', 'delivery_person_name_bn', 'delivery_person_name_en',
                   'delivery_person_avatar', 'assigned_at', 'picked_up_at', 'delivered_at', 'tracking_note']
+
+    def get_delivery_person_email(self, obj):
+        return obj.delivery_person.email if obj.delivery_person else ''
+
+    def get_delivery_person_phone(self, obj):
+        return obj.delivery_person.phone if obj.delivery_person else ''
 
     def get_delivery_person_name(self, obj):
         p = getattr(obj.delivery_person, 'profile', None)
@@ -159,7 +165,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
         return {
             'name_bn':      p.full_name_bn if p else '',
             'name_en':      p.full_name_en if p else '',
-            'phone':        d.delivery_person.phone,
+            'phone':        d.delivery_person.phone if d.delivery_person else '',
             'assigned_at':  d.assigned_at.isoformat() if d.assigned_at else None,
             'picked_up_at': d.picked_up_at.isoformat() if d.picked_up_at else None,
             'delivered_at': d.delivered_at.isoformat() if d.delivered_at else None,
@@ -170,9 +176,11 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
 
 
 class AssignDeliverySerializer(serializers.Serializer):
-    delivery_person_id = serializers.UUIDField()
+    delivery_person_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_delivery_person_id(self, value):
+        if value is None:
+            return value
         if not User.objects.filter(id=value, role='DELIVERY', is_active=True).exists():
             raise serializers.ValidationError({
                 'message_bn': 'ডেলিভারিম্যান পাওয়া যায়নি',

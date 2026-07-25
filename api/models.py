@@ -502,7 +502,7 @@ class PaymentTransaction(models.Model):
 class DeliveryAssignment(BaseModel):
     order           = models.OneToOneField(SalesOrder, on_delete=models.CASCADE, related_name='delivery')
     delivery_person = models.ForeignKey(
-        User, on_delete=models.PROTECT,
+        User, on_delete=models.PROTECT, null=True, blank=True,
         limit_choices_to={'role': 'DELIVERY'},
         related_name='deliveries',
     )

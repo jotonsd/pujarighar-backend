@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
@@ -13,7 +14,7 @@ from api.services.order_service import OrderService
 from api.services import mail_service
 from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin, IsAdminOrWarehouse, IsAdminOrDelivery, IsDelivery
+from api.permissions import IsAdmin, IsAdminOrWarehouse, IsAdminOrDelivery
 
 logger = logging.getLogger(__name__)
 _svc = OrderService()
@@ -176,18 +177,20 @@ def assign_delivery(request, pk):
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
-        updated = _svc.assign_delivery(order, str(serializer.validated_data['delivery_person_id']), request.user)
+        delivery_person_id = serializer.validated_data.get('delivery_person_id')
+        updated = _svc.assign_delivery(order, str(delivery_person_id) if delivery_person_id else None, request.user)
         return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         return api_error(e)
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsDelivery])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
 def dispatch_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
+        # Only the assigned delivery person is ownership-checked — admins can act on any order.
+        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         return ApiResponse(message="Order dispatched", data=SalesOrderSerializer(_svc.dispatch(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
@@ -197,11 +200,11 @@ def dispatch_order(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsDelivery])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
 def deliver_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
+        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         delivered = _svc.deliver(order, request.user)
         mail_service.send_order_delivered(delivered)
@@ -213,11 +216,11 @@ def deliver_order(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsDelivery])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
 def return_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        if not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user:
+        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         note_bn = request.data.get('note_bn', '')
         note_en = request.data.get('note_en', '')
@@ -243,6 +246,26 @@ def mark_cod_paid(request, pk):
         return ApiResponse(message='Payment recorded', data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f'Mark COD paid error: {e}', exc_info=True)
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def apply_discount(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+    try:
+        updated = _svc.apply_discount(
+            order,
+            request.data.get('discount_type', ''),
+            Decimal(str(request.data.get('discount_value', 0))),
+            request.user,
+        )
+        return ApiResponse(message='Discount applied', data=SalesOrderSerializer(updated, context={'request': request}).data)
+    except Exception as e:
+        logger.error(f'Apply discount error: {e}', exc_info=True)
         return api_error(e)
 
 

@@ -56,11 +56,16 @@ class OrderService:
         return self._transition(order, 'PACKED', user)
 
     @transaction.atomic
-    def assign_delivery(self, order: SalesOrder, delivery_person_id: str, user: User) -> SalesOrder:
-        delivery_person = User.objects.get(id=delivery_person_id, role='DELIVERY')
+    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User) -> SalesOrder:
+        delivery_person = None
+        if delivery_person_id:
+            delivery_person = User.objects.get(id=delivery_person_id, role='DELIVERY')
         DeliveryAssignment.objects.update_or_create(order=order, defaults={'delivery_person': delivery_person})
-        updated = self._transition(order, 'ASSIGNED', user)
-        self._notify_delivery_person(updated, delivery_person)
+        # Already ASSIGNED (e.g. assigned earlier without a delivery person) — just
+        # attaching/updating the delivery person now, no status transition needed.
+        updated = order if order.status == 'ASSIGNED' else self._transition(order, 'ASSIGNED', user)
+        if delivery_person:
+            self._notify_delivery_person(updated, delivery_person)
         return updated
 
     def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
@@ -107,6 +112,42 @@ class OrderService:
         if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
             self._create_payment_journal(order, user)
         logger.info(f'COD payment marked for order {order.order_number} by {user.email}')
+        return order
+
+    @transaction.atomic
+    def apply_discount(self, order: SalesOrder, discount_type: str, discount_value: Decimal, user: User) -> SalesOrder:
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারে ছাড় প্রয়োগ করা যায়',
+                'message_en': 'Discount can only be applied to pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারে ছাড় প্রয়োগ করা যাবে না',
+                'message_en': 'Discount cannot be applied to an already-paid order',
+            })
+        if discount_value <= 0 or (discount_type == 'PERCENTAGE' and discount_value > 100):
+            raise ValidationError({
+                'message_bn': 'সঠিক ছাড়ের পরিমাণ দিন',
+                'message_en': 'Enter a valid discount value',
+            })
+
+        # Same POS staff-discount calculation used at checkout (guest_service.py) —
+        # layered on top of whatever's already in subtotal/discount_amount, clamped
+        # so the order can't go negative.
+        extra_discount = Decimal('0')
+        if discount_type == 'PERCENTAGE':
+            extra_discount = (order.subtotal * discount_value / 100).quantize(Decimal('0.01'))
+        elif discount_type == 'FLAT':
+            extra_discount = discount_value
+        extra_discount = min(extra_discount, order.subtotal)
+
+        order.subtotal -= extra_discount
+        order.discount_amount += extra_discount
+        order.grand_total = order.subtotal + order.delivery_charge
+        order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
+
+        logger.info(f'Discount applied to order {order.order_number} by {user.email}: {discount_type} {discount_value} (৳{extra_discount})')
         return order
 
     @transaction.atomic
