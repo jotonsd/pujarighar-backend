@@ -129,6 +129,45 @@ def _order_summary_html(order, is_bn: bool):
     """
 
 
+def _cashback_note_html(order, is_bn: bool) -> str:
+    cb = Decimal(str(order.cashback_amount or 0))
+    if order.is_guest or not order.customer_id or cb <= 0:
+        return ''
+    if is_bn:
+        return f"""
+        <p style='background:#ecfdf5;border:1px solid #a7f3d0;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:16px'>
+          ★ এই অর্ডারে আপনি <strong>৳{_fmt(cb)}</strong> ক্যাশব্যাক অর্জন করেছেন — আপনার অ্যাকাউন্টে যোগ হয়েছে, পরবর্তী অর্ডারে ব্যবহার করুন।
+        </p>
+        """
+    return f"""
+    <p style='background:#ecfdf5;border:1px solid #a7f3d0;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:16px'>
+      ★ You earned <strong>৳{_fmt(cb)}</strong> cashback on this order — added to your account, redeemable on your next purchase.
+    </p>
+    """
+
+
+def _referral_share_block(code: str, is_bn: bool) -> str:
+    if not code:
+        return ''
+    if is_bn:
+        return f"""
+        <p style='background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:12px'>
+          🎁 আপনার রেফারেল কোড <strong>{code}</strong> বন্ধুদের সাথে শেয়ার করুন — তারা অর্ডার করলে আপনি রেফারেল বোনাস পাবেন!
+        </p>
+        """
+    return f"""
+    <p style='background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:12px'>
+      🎁 Share your referral code <strong>{code}</strong> with friends — you'll earn a referral bonus when they order!
+    </p>
+    """
+
+
+def _referral_share_html(order, is_bn: bool) -> str:
+    if order.is_guest or not order.customer_id:
+        return ''
+    return _referral_share_block(order.customer.referral_code, is_bn)
+
+
 def _base_html(title, body_content):
     return f"""
     <div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden'>
@@ -168,6 +207,31 @@ def send_password_reset(user, reset_link: str):
         """
     )
     _send_async("[PujariGhar] Reset Your Password", body, [user.email])
+
+
+def send_welcome(user):
+    if not user.email:
+        return
+    is_bn = user.preferred_language == 'bn'
+
+    if is_bn:
+        title = "পূজারিঘরে স্বাগতম! — Welcome to PujariGhar"
+        intro = "আপনার অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে। পূজারিঘরে আপনাকে স্বাগতম!"
+        outro = "কেনাকাটা শুরু করুন এবং পূজার সকল প্রয়োজনীয় সামগ্রী এক জায়গায় পান।"
+    else:
+        title = "Welcome to PujariGhar!"
+        intro = "Your account has been created successfully. Welcome to PujariGhar!"
+        outro = "Start shopping and get all your puja essentials in one place."
+
+    body = _base_html(
+        title,
+        f"""
+        <p>{intro}</p>
+        {_referral_share_block(user.referral_code, is_bn)}
+        <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
+        """
+    )
+    _send_async("[PujariGhar] Welcome to PujariGhar!", body, [user.email])
 
 
 def send_order_created(order):
@@ -270,6 +334,8 @@ def send_order_delivered(order):
             <p>{intro}</p>
             <p><strong>Order #:</strong> {order.order_number}</p>
             {_order_summary_html(order, is_bn)}
+            {_cashback_note_html(order, is_bn)}
+            {_referral_share_html(order, is_bn)}
             <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
             """
         )

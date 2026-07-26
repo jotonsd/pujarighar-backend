@@ -37,6 +37,7 @@ def register(request):
         tokens = _auth.register(user)
         # Link any guest orders placed with this phone number
         _link_guest_orders(user)
+        mail_service.send_welcome(user)
         return ApiResponse(
             message="Registration successful",
             data={'user': UserSerializer(user).data, **tokens},
@@ -167,6 +168,7 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
             profile.avatar = picture
         profile.save()
         _link_guest_orders(user)
+        mail_service.send_welcome(user)
         logger.info(f"New user created via {provider_label} OAuth: {email}")
     else:
         profile = user.profile
