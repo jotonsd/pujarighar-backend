@@ -35,7 +35,7 @@ def _build_nav_menu(role: str) -> list:
 
     if role == 'ADMIN':
         return [
-            link('/admin/orders/new',  '🧾', 'নতুন অর্ডার',    'New Order'),
+            link('/admin/orders/new',  '🧾', 'POS',            'POS'),
             link('/admin/orders',      '🛍️', 'অর্ডার',          'Orders'),
             link('/admin/users',       '👥', 'ব্যবহারকারী',     'Users'),
             group('📊', 'ড্যাশবোর্ড', 'Dashboard', [
@@ -84,7 +84,7 @@ def _build_nav_menu(role: str) -> list:
 
     if role == 'WAREHOUSE':
         return [
-            link('/admin/orders/new', '🧾', 'নতুন অর্ডার', 'New Order'),
+            link('/admin/orders/new', '🧾', 'POS',         'POS'),
             link('/admin/orders',     '🛍️', 'অর্ডার',       'Orders'),
             group('📦', 'পণ্য', 'Catalog', [
                 item('/admin/products',        '📦', 'পণ্য',      'Products'),
