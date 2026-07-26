@@ -541,7 +541,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
   .meta-label {{ color: #555; }}
   .meta-val   {{ color: #000; text-align: right; }}
   .item {{ margin: 1.5mm 0; }}
-  .item-name {{ font-weight: bold; font-size: 8pt; }}
+  .item-name {{ font-weight: normal; font-size: 8pt; }}
   .item-row  {{ display: flex; justify-content: space-between; font-size: 7.5pt; color: #333; margin-top: 0.3mm; }}
   .sub-item  {{ font-size: 6.5pt; color: #999; padding-left: 3mm; margin-top: 0.3mm; }}
   .tot-row   {{ display: flex; justify-content: space-between; font-size: 7.5pt; margin: 0.8mm 0; }}
