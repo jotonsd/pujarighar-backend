@@ -21,7 +21,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             return None
         return request.build_absolute_uri(f.url) if request else f.url
 
-    return {
+    data = {
         'invoice_page_size':   s.invoice_page_size,
         'company_name_bn':     s.company_name_bn,
         'company_name_en':     s.company_name_en,
@@ -31,13 +31,20 @@ def _serialize(s: SiteSetting, request=None) -> dict:
         'address_en':          s.address_en,
         'logo':                img_url('logo'),
         'favicon':             img_url('favicon'),
-        'email_host':          s.email_host,
-        'email_port':          s.email_port,
-        'email_host_user':     s.email_host_user,
-        'email_host_password': s.email_host_password,
-        'email_use_tls':       s.email_use_tls,
-        'email_default_from':  s.email_default_from,
     }
+
+    user = getattr(request, 'user', None) if request else None
+    if user and user.is_authenticated and getattr(user, 'role', None) == 'ADMIN':
+        data.update({
+            'email_host':               s.email_host,
+            'email_port':               s.email_port,
+            'email_host_user':          s.email_host_user,
+            'has_email_host_password':  bool(s.email_host_password),
+            'email_use_tls':            s.email_use_tls,
+            'email_default_from':       s.email_default_from,
+        })
+
+    return data
 
 
 @api_view(['GET'])
@@ -55,6 +62,8 @@ def update_site_settings(request):
         if field in request.data:
             if field == 'invoice_page_size' and request.data[field] not in PAGE_SIZE_CHOICES:
                 continue
+            if field == 'email_host_password' and not request.data[field]:
+                continue  # blank means "keep the currently stored password"
             setattr(s, field, request.data[field])
             updated.append(field)
     for field in INT_FIELDS:
