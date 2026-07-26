@@ -129,6 +129,42 @@ def _order_summary_html(order, is_bn: bool):
     """
 
 
+def _cashback_note_html(order, is_bn: bool) -> str:
+    cb = Decimal(str(order.cashback_amount or 0))
+    if order.is_guest or not order.customer_id or cb <= 0:
+        return ''
+    if is_bn:
+        return f"""
+        <p style='background:#ecfdf5;border:1px solid #a7f3d0;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:16px'>
+          ★ এই অর্ডারে আপনি <strong>৳{_fmt(cb)}</strong> ক্যাশব্যাক অর্জন করেছেন — আপনার অ্যাকাউন্টে যোগ হয়েছে, পরবর্তী অর্ডারে ব্যবহার করুন।
+        </p>
+        """
+    return f"""
+    <p style='background:#ecfdf5;border:1px solid #a7f3d0;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:16px'>
+      ★ You earned <strong>৳{_fmt(cb)}</strong> cashback on this order — added to your account, redeemable on your next purchase.
+    </p>
+    """
+
+
+def _referral_share_html(order, is_bn: bool) -> str:
+    if order.is_guest or not order.customer_id:
+        return ''
+    code = order.customer.referral_code
+    if not code:
+        return ''
+    if is_bn:
+        return f"""
+        <p style='background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:12px'>
+          🎁 আপনার রেফারেল কোড <strong>{code}</strong> বন্ধুদের সাথে শেয়ার করুন — তারা অর্ডার করলে আপনি রেফারেল বোনাস পাবেন!
+        </p>
+        """
+    return f"""
+    <p style='background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:12px'>
+      🎁 Share your referral code <strong>{code}</strong> with friends — you'll earn a referral bonus when they order!
+    </p>
+    """
+
+
 def _base_html(title, body_content):
     return f"""
     <div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden'>
@@ -270,6 +306,8 @@ def send_order_delivered(order):
             <p>{intro}</p>
             <p><strong>Order #:</strong> {order.order_number}</p>
             {_order_summary_html(order, is_bn)}
+            {_cashback_note_html(order, is_bn)}
+            {_referral_share_html(order, is_bn)}
             <p style='color:#6b7280;font-size:12px;margin-top:16px'>{outro}</p>
             """
         )
