@@ -35,78 +35,82 @@ def _build_nav_menu(role: str) -> list:
 
     if role == 'ADMIN':
         return [
-            link('/admin/orders/new',  '🧾', 'নতুন অর্ডার',    'New Order'),
-            link('/admin/orders',      '🛍️', 'অর্ডার',          'Orders'),
-            link('/admin/users',       '👥', 'ব্যবহারকারী',     'Users'),
-            group('📊', 'ড্যাশবোর্ড', 'Dashboard', [
-                item('/admin/dashboard',  '📊', 'ওভারভিউ',              'Overview'),
-                item('/admin/analytics',  '📈', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
+            link('/admin/orders/new',  'receipt',      'POS',            'POS'),
+            link('/admin/orders',      'shopping-bag', 'অর্ডার',          'Orders'),
+            group('layout-dashboard', 'ড্যাশবোর্ড', 'Dashboard', [
+                item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview'),
+                item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
             ]),
-            group('📦', 'পণ্য', 'Catalog', [
-                item('/admin/products',         '📦', 'পণ্য',          'Products'),
-                item('/admin/packages',         '🎁', 'প্যাকেজ',       'Packages'),
-                item('/admin/categories',       '🏷️', 'কেটাগরি',       'Categories'),
-                item('/admin/settings/brands',  '🔖', 'ব্র্যান্ড',     'Brands'),
-                item('/admin/discounts',        '💸', 'ডিসকাউন্ট',     'Discounts'),
+            group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
+                group('package', 'পণ্য', 'Catalog', [
+                    item('/admin/products',         'package',     'পণ্য',          'Products'),
+                    item('/admin/packages',         'gift',        'প্যাকেজ',       'Packages'),
+                    item('/admin/categories',       'tag',         'কেটাগরি',       'Categories'),
+                    item('/admin/settings/brands',  'badge-check', 'ব্র্যান্ড',     'Brands'),
+                    item('/admin/discounts',        'percent',     'ডিসকাউন্ট',     'Discounts'),
+                ]),
+                group('warehouse', 'গুদাম', 'Inventory', [
+                    item('/admin/inventory',           'clipboard-list', 'স্টক',         'Stock'),
+                    item('/admin/settings/suppliers',  'truck',          'সরবরাহকারী',   'Suppliers'),
+                ]),
             ]),
-            group('🏭', 'গুদাম', 'Inventory', [
-                item('/admin/inventory',           '📋', 'স্টক',         'Stock'),
-                item('/admin/settings/suppliers',  '🚛', 'সরবরাহকারী',   'Suppliers'),
+            group('users', 'ব্যবহারকারী', 'Users', [
+                item('/admin/users',             'users',      'ব্যবহারকারী',     'Users'),
+                item('/admin/settings/partners', 'handshake',  'অংশীদার',          'Partners'),
+                item('/admin/settings/loans',    'piggy-bank', 'ঋণ বিনিয়োগকারী', 'Loan Investors'),
             ]),
-            group('⚙️', 'সেটিংস', 'Settings', [
-                item('/admin/settings/delivery-charges', '🚚', 'ডেলিভারি চার্জ',   'Delivery Charges'),
-                item('/admin/settings/cashback',         '🎁', 'ক্যাশব্যাক',        'Cashback'),
-                item('/admin/settings/reviews',          '⭐', 'রিভিউ',             'Reviews'),
-                item('/admin/settings/partners',         '🤝', 'অংশীদার',           'Partners'),
-                item('/admin/settings/loans',            '💰', 'ঋণ বিনিয়োগকারী',  'Loan Investors'),
+            group('landmark', 'ফিন্যান্স', 'Finance', [
+                group('book-open', 'হিসাব', 'Accounting', [
+                    item('/admin/accounting/journal',       'notebook-pen',  'জার্নাল',          'Journal'),
+                    item('/admin/accounting/ledger',        'book-open',     'খাতা',              'Ledger'),
+                    item('/admin/accounting/profit-loss',   'trending-up',   'লাভ-ক্ষতি',        'Profit & Loss'),
+                    item('/admin/accounting/trial-balance', 'scale',         'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
+                    item('/admin/accounting/sales-summary', 'shopping-cart', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
+                ]),
+                item('/admin/settings/delivery-charges', 'truck', 'ডেলিভারি চার্জ', 'Delivery Charges'),
+                item('/admin/settings/cashback',         'gift',  'ক্যাশব্যাক',      'Cashback'),
             ]),
-            group('🎨', 'মার্কেটিং', 'Marketing', [
-                item('/admin/slides',          '🖼️', 'হিরো স্লাইডার', 'Hero Slider'),
-                item('/admin/banners',         '🎯', 'ব্যানার',         'Banners'),
-                item('/admin/marketing/promo-emails', '📧', 'প্রোমো ইমেইল',  'Promo Emails'),
+            group('file-bar-chart', 'রিপোর্ট', 'Reports', [
+                item('/admin/reports/purchases',            'receipt',       'ক্রয় রিপোর্ট',              'Purchase Report'),
+                item('/admin/reports/supplier-returns',      'undo',         'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report'),
+                item('/admin/reports/supplier-outstanding',  'credit-card',  'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report'),
+                item('/admin/reports/product-stock',         'package',      'পণ্য স্টক রিপোর্ট',         'Product Stock Report'),
+                item('/admin/reports/income',                'trending-up',  'আয় রিপোর্ট',                'Income Report'),
+                item('/admin/reports/expenses',              'trending-down','ব্যয় রিপোর্ট',              'Expense Report'),
             ]),
-            group('📒', 'হিসাব', 'Accounting', [
-                item('/admin/accounting/journal',       '📓', 'জার্নাল',          'Journal'),
-                item('/admin/accounting/ledger',        '📒', 'খাতা',              'Ledger'),
-                item('/admin/accounting/profit-loss',   '📈', 'লাভ-ক্ষতি',        'Profit & Loss'),
-                item('/admin/accounting/trial-balance', '⚖️', 'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
-                item('/admin/accounting/sales-summary', '🛒', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
-            ]),
-            group('📊', 'রিপোর্ট', 'Reports', [
-                item('/admin/reports/purchases',            '🧾', 'ক্রয় রিপোর্ট',              'Purchase Report'),
-                item('/admin/reports/supplier-returns',      '↩️', 'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report'),
-                item('/admin/reports/supplier-outstanding',  '💳', 'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report'),
-                item('/admin/reports/product-stock',         '📦', 'পণ্য স্টক রিপোর্ট',         'Product Stock Report'),
-                item('/admin/reports/income',                '💵', 'আয় রিপোর্ট',                'Income Report'),
-                item('/admin/reports/expenses',              '💸', 'ব্যয় রিপোর্ট',              'Expense Report'),
+            group('megaphone', 'মার্কেটিং', 'Marketing', [
+                item('/admin/slides',                 'gallery-horizontal', 'হিরো স্লাইডার', 'Hero Slider'),
+                item('/admin/banners',                'target',             'ব্যানার',         'Banners'),
+                item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails'),
+                item('/admin/settings/reviews',       'star',               'রিভিউ',           'Reviews'),
             ]),
         ]
 
     if role == 'WAREHOUSE':
         return [
-            link('/admin/orders/new', '🧾', 'নতুন অর্ডার', 'New Order'),
-            link('/admin/orders',     '🛍️', 'অর্ডার',       'Orders'),
-            group('📦', 'পণ্য', 'Catalog', [
-                item('/admin/products',        '📦', 'পণ্য',      'Products'),
-                item('/admin/packages',        '🎁', 'প্যাকেজ',   'Packages'),
-                item('/admin/categories',      '🏷️', 'কেটাগরি',   'Categories'),
-                item('/admin/settings/brands', '🔖', 'ব্র্যান্ড', 'Brands'),
+            link('/admin/orders/new', 'receipt',      'POS',         'POS'),
+            link('/admin/orders',     'shopping-bag', 'অর্ডার',       'Orders'),
+            group('package', 'পণ্য', 'Catalog', [
+                item('/admin/products',        'package',     'পণ্য',      'Products'),
+                item('/admin/packages',        'gift',        'প্যাকেজ',   'Packages'),
+                item('/admin/categories',      'tag',         'কেটাগরি',   'Categories'),
+                item('/admin/settings/brands', 'badge-check', 'ব্র্যান্ড', 'Brands'),
             ]),
-            link('/admin/inventory', '🏭', 'গুদাম', 'Inventory'),
+            link('/admin/inventory', 'warehouse', 'গুদাম', 'Inventory'),
         ]
 
     if role == 'DELIVERY':
         return [
-            link('/delivery/orders', '🚚', 'ডেলিভারি', 'My Deliveries'),
+            link('/delivery/orders', 'truck', 'ডেলিভারি', 'My Deliveries'),
         ]
 
     if role == 'CUSTOMER':
         return [
-            link('/',         '🏠', 'হোম',           'Home'),
-            link('/products', '🪔', 'পণ্য',           'Products'),
-            link('/packages', '🎁', 'প্যাকেজ',        'Packages'),
-            link('/track',    '📦', 'অর্ডার ট্র্যাক', 'Track Order'),
-            link('/orders',   '🛍️', 'আমার অর্ডার',   'My Orders'),
+            link('/',         'home',         'হোম',           'Home'),
+            link('/products', 'store',        'পণ্য',           'Products'),
+            link('/packages', 'gift',         'প্যাকেজ',        'Packages'),
+            link('/track',    'truck',        'অর্ডার ট্র্যাক', 'Track Order'),
+            link('/orders',   'shopping-bag', 'আমার অর্ডার',   'My Orders'),
         ]
 
     return []
