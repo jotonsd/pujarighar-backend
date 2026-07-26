@@ -132,17 +132,19 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
         </tr>"""
 
     # ── Totals rows ───────────────────────────────────────────────────────────
-    totals_html = f"""
-        <tr class="tot-row">
-            <td class="tot-label">{t('সাবটোটাল', 'Subtotal')}</td>
-            <td class="tot-val">৳ {_fmt(order.subtotal)}</td>
-        </tr>"""
+    totals_html = ""
 
     if has_order_discount:
         totals_html += f"""
         <tr class="tot-row disc-row">
             <td class="tot-label">{t('ছাড়', 'Discount')}</td>
             <td class="tot-val">− ৳ {_fmt(order.discount_amount)}</td>
+        </tr>"""
+
+    totals_html += f"""
+        <tr class="tot-row">
+            <td class="tot-label">{t('সাবটোটাল', 'Subtotal')}</td>
+            <td class="tot-val">৳ {_fmt(order.subtotal)}</td>
         </tr>"""
 
     if Decimal(str(order.delivery_charge)) > 0:
