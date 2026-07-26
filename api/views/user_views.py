@@ -67,6 +67,7 @@ def _build_nav_menu(role: str) -> list:
                     item('/admin/accounting/trial-balance', 'scale',         'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
                     item('/admin/accounting/sales-summary', 'shopping-cart', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
                 ]),
+                item('/admin/expenses',                  'plus-circle', 'খরচ যোগ করুন',   'Add Expense'),
                 item('/admin/settings/delivery-charges', 'truck', 'ডেলিভারি চার্জ', 'Delivery Charges'),
                 item('/admin/settings/cashback',         'gift',  'ক্যাশব্যাক',      'Cashback'),
             ]),
