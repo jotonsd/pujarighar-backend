@@ -23,6 +23,7 @@ _LOGO_URL = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), '.
 SHOP_NAME_BN = 'পূজারিঘর'
 SHOP_NAME_EN = 'PujariGhar'
 SHOP_PHONE   = '01978604807'
+SHOP_EMAIL   = 'pujarigharbd@gmail.com'
 SHOP_WEB     = 'pujarighar.com'
 SHOP_ADDRESS = 'Dhaka, Bangladesh'
 
@@ -66,7 +67,7 @@ THERMAL_BODY_CSS = """
     .items-table thead th { font-size: 7pt; }
     .totals-wrap { flex-direction: column; align-items: flex-start; gap: 2mm; }
     .totals-table-wrap { width: 100%; }
-    .totals-qr img { width: 18mm; height: 18mm; }
+    .totals-qr img { width: 15mm; height: 15mm; }
     .footer { flex-direction: column; gap: 1mm; font-size: 7.5pt; }
 """
 
@@ -135,6 +136,11 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     totals_html = ""
 
     if has_order_discount:
+        totals_html += f"""
+        <tr class="tot-row">
+            <td class="tot-label">{t('পণ্য মূল্য', 'Product Total')}</td>
+            <td class="tot-val">৳ {_fmt(order.subtotal + discount_amount)}</td>
+        </tr>"""
         totals_html += f"""
         <tr class="tot-row disc-row">
             <td class="tot-label">{t('ছাড়', 'Discount')}</td>
@@ -297,18 +303,18 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
   .totals-wrap {{
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
     border-top: 0.3mm dotted #aaa;
     padding-top: 2mm;
     margin-top: 0.5mm;
   }}
-  .totals-qr img {{ width: 22mm; height: 22mm; display: block; }}
+  .totals-qr img {{ width: 19mm; height: 19mm; display: block; }}
   .totals-qr p   {{ font-size: 7pt; color: #aaa; text-align: center; margin-top: 1mm; }}
   .totals-table-wrap {{ width: 72mm; }}
   .totals-table {{
     width: 100%;
     border-collapse: collapse;
-    font-size: 9.5pt;
+    font-size: 7pt;
   }}
   .tot-row td {{ padding: 1.2mm 3mm; border-bottom: 0.2mm dotted #ddd; }}
   .tot-label {{ color: #555; text-align: right; }}
@@ -319,7 +325,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     border-bottom: none;
     padding: 2mm 3mm;
   }}
-  .grand-val {{ font-weight: bold; font-size: 10.5pt; color: #1c1c1c; }}
+  .grand-val {{ font-weight: bold; font-size: 8pt; color: #1c1c1c; }}
 
   /* ── Messages ── */
   .msg-block {{
@@ -381,7 +387,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
   <div class="bill-col" style="text-align:left;">
     <div class="bc-lbl">{t('প্রেরক', 'From')}</div>
     <div class="bc-name">{SHOP_NAME_BN} <span style="font-size:9pt;font-weight:normal;color:#777;">/ {SHOP_NAME_EN}</span></div>
-    <div class="bc-info">{SHOP_WEB} &nbsp;·&nbsp; {SHOP_PHONE}</div>
+    <div class="bc-info">{SHOP_WEB} &nbsp;·&nbsp; {SHOP_EMAIL}</div>
     <div class="bc-info">{SHOP_ADDRESS}</div>
   </div>
   <div class="bill-divider"></div>
@@ -550,7 +556,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
 
 <div class="center">
   <div class="shop-name">{SHOP_NAME_EN}</div>
-  <div class="shop-info">{SHOP_ADDRESS}<br>{SHOP_PHONE}</div>
+  <div class="shop-info">{SHOP_ADDRESS}<br>{SHOP_EMAIL}</div>
 </div>
 
 <hr class="sep">
