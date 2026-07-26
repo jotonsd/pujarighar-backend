@@ -30,6 +30,7 @@ def list_log_files(request):
             'size': stat.st_size,
             'modified_at': stat.st_mtime,
         })
+    files.sort(key=lambda f: f['modified_at'], reverse=True)
     return ApiResponse(message='Log files retrieved', data=files)
 
 

@@ -16,9 +16,10 @@ def _valid_log_files():
 
 def _file_listing():
     files = []
-    for name in sorted(_valid_log_files()):
+    for name in _valid_log_files():
         stat = (settings.LOG_DIR / name).stat()
         files.append({'name': name, 'size': stat.st_size, 'modified_at': stat.st_mtime})
+    files.sort(key=lambda f: f['modified_at'], reverse=True)
     return files
 
 
