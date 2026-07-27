@@ -88,10 +88,11 @@ class DeliveryAssignmentSerializer(serializers.ModelSerializer):
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):
-    items          = SalesOrderItemSerializer(many=True, read_only=True)
-    delivery       = DeliveryAssignmentSerializer(read_only=True)
-    customer_email = serializers.EmailField(source='customer.email', read_only=True)
-    status_label   = serializers.SerializerMethodField()
+    items               = SalesOrderItemSerializer(many=True, read_only=True)
+    delivery            = DeliveryAssignmentSerializer(read_only=True)
+    customer_email      = serializers.EmailField(source='customer.email', read_only=True)
+    status_label        = serializers.SerializerMethodField()
+    courier_consignment = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
@@ -103,13 +104,18 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             'shipping_district', 'shipping_thana', 'shipping_post_code',
             'subtotal', 'discount_amount', 'tax_amount', 'delivery_charge', 'grand_total', 'cashback_amount', 'cashback_used',
             'notes_bn', 'notes_en',
-            'items', 'delivery',
+            'items', 'delivery', 'courier_consignment',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
 
     def get_status_label(self, obj):
         return dict(SalesOrder._meta.get_field('status').choices).get(obj.status, obj.status)
+
+    def get_courier_consignment(self, obj):
+        from api.serializers.courier_serializers import CourierConsignmentSerializer
+        consignment = getattr(obj, 'courier_consignment', None)
+        return CourierConsignmentSerializer(consignment).data if consignment else None
 
 
 STATUS_LABELS_BN = {
