@@ -104,6 +104,8 @@ urlpatterns = [
     path('orders/<uuid:pk>/cancel/',             views.cancel_order,       name='order-cancel'),
     path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),
     path('orders/<uuid:pk>/apply-discount/',     views.apply_discount,     name='order-apply-discount'),
+    path('orders/<uuid:pk>/courier/send/',       views.send_to_courier,    name='order-courier-send'),
+    path('orders/<uuid:pk>/courier/status/',     views.courier_status,     name='order-courier-status'),
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),
     path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
 
@@ -222,4 +224,18 @@ urlpatterns = [
     path('analytics/seo/',                views.seo_metrics,        name='analytics-seo'),
     path('analytics/seo/pagespeed/',          views.pagespeed_seo,         name='analytics-seo-pagespeed'),
     path('analytics/seo/pagespeed/refresh/',  views.pagespeed_seo_refresh, name='analytics-seo-pagespeed-refresh'),
+
+    # ─── Courier ────────────────────────────────────────────────────────────────
+    path('courier/providers/',                    views.providers,                 name='courier-providers'),
+    path('courier/providers/<int:pk>/update/',    views.update_provider,           name='courier-provider-update'),
+    path('courier/providers/<int:pk>/balance/',   views.provider_balance,          name='courier-provider-balance'),
+    path('courier/providers/<int:pk>/police-stations/', views.provider_police_stations, name='courier-provider-police-stations'),
+    path('courier/consignments/',                  views.list_consignments,        name='courier-consignment-list'),
+    path('courier/consignments/<uuid:pk>/',         views.get_consignment,          name='courier-consignment-detail'),
+    path('courier/return-requests/',                views.list_return_requests,     name='courier-return-request-list'),
+    path('courier/return-requests/create/',         views.create_return_request,    name='courier-return-request-create'),
+    path('courier/return-requests/<uuid:pk>/',      views.get_return_request,       name='courier-return-request-detail'),
+    path('courier/payments/',                       views.list_payments,            name='courier-payment-list'),
+    path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
+    path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
 ]

@@ -40,6 +40,7 @@ def _build_nav_menu(role: str) -> list:
             group('layout-dashboard', 'ড্যাশবোর্ড', 'Dashboard', [
                 item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview'),
                 item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
+                item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier'),
             ]),
             group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
                 group('package', 'পণ্য', 'Catalog', [
