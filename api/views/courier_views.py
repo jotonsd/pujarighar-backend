@@ -239,11 +239,16 @@ def get_payment(request, payment_id):
                              # token, not one of our JWTs, and would otherwise 401 first
 @permission_classes([AllowAny])
 def steadfast_webhook(request):
+    logger.info(f'Courier webhook received: {request.data}')
     auth_header = request.META.get('HTTP_AUTHORIZATION', '')
     token = auth_header.replace('Bearer ', '').strip()
 
     provider = CourierProvider.objects.filter(code='STEADFAST').first()
-    if not provider or not token or decrypt_token(provider.webhook_secret_encrypted) != token:
+    if not provider:
+        logger.warning('Courier webhook rejected: no STEADFAST provider configured')
+        return ApiResponse(message='Invalid or missing token', errors='Unauthorized', status_code=401)
+    if not token or decrypt_token(provider.webhook_secret_encrypted) != token:
+        logger.warning(f'Courier webhook rejected: token mismatch (got {token[:8] + "..." if token else "(empty)"})')
         return ApiResponse(message='Invalid or missing token', errors='Unauthorized', status_code=401)
 
     try:
