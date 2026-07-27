@@ -950,3 +950,67 @@ class GoogleIntegration(models.Model):
 
     def __str__(self):
         return f'Google Integration — {"connected" if self.is_connected else "not connected"}'
+
+
+# ─── Courier integrations ──────────────────────────────────────────────────────
+# Multi-provider by design: each row is one configured courier (Steadfast today,
+# Pathao/RedX later) — adding a provider is a new row + a new service class
+# (see api/services/courier/), not a schema change. Keys are stored encrypted
+# the same way GoogleIntegration's refresh token is (see api/utils/crypto.py).
+
+class CourierProvider(models.Model):
+    code                     = models.CharField(max_length=20, unique=True)
+    name                     = models.CharField(max_length=100)
+    base_url                 = models.CharField(max_length=255)
+    api_key_encrypted        = models.TextField(blank=True, default='')
+    secret_key_encrypted     = models.TextField(blank=True, default='')
+    webhook_secret_encrypted = models.TextField(blank=True, default='')
+    is_active                = models.BooleanField(default=False)
+    created_at               = models.DateTimeField(auto_now_add=True)
+    updated_at               = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class CourierConsignment(BaseModel):
+    order            = models.OneToOneField(SalesOrder, on_delete=models.CASCADE, related_name='courier_consignment')
+    provider         = models.ForeignKey(CourierProvider, on_delete=models.PROTECT, related_name='consignments')
+    consignment_id   = models.CharField(max_length=50, blank=True, default='')
+    tracking_code    = models.CharField(max_length=50, blank=True, default='')
+    status           = models.CharField(max_length=50, blank=True, default='')
+    cod_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    delivery_charge  = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    tracking_message = models.TextField(blank=True, default='')
+    raw_response     = models.JSONField(default=dict, blank=True)
+    created_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+    def __str__(self):
+        return f'{self.provider.code} — {self.tracking_code or self.consignment_id}'
+
+
+class CourierTrackingEvent(models.Model):
+    SOURCE_CHOICES = [('WEBHOOK', 'Webhook'), ('POLL', 'Poll')]
+
+    id           = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    consignment  = models.ForeignKey(CourierConsignment, on_delete=models.CASCADE, related_name='events')
+    status       = models.CharField(max_length=50, blank=True, default='')
+    message      = models.TextField(blank=True, default='')
+    source       = models.CharField(max_length=10, choices=SOURCE_CHOICES)
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class CourierReturnRequest(BaseModel):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'), ('approved', 'Approved'), ('processing', 'Processing'),
+        ('completed', 'Completed'), ('cancelled', 'Cancelled'),
+    ]
+
+    consignment         = models.ForeignKey(CourierConsignment, on_delete=models.CASCADE, related_name='return_requests')
+    provider_request_id = models.CharField(max_length=50, blank=True, default='')
+    reason               = models.TextField(blank=True, default='')
+    status               = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_by           = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)

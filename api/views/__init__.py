@@ -75,3 +75,9 @@ from .analytics_views import (
     google_select, google_disconnect, traffic_metrics, sales_metrics, seo_metrics,
     pagespeed_seo, pagespeed_seo_refresh,
 )
+from .courier_views import (
+    providers, update_provider, provider_balance, provider_police_stations,
+    send_to_courier, courier_status, list_consignments, get_consignment,
+    create_return_request, get_return_request, list_return_requests,
+    list_payments, get_payment, steadfast_webhook,
+)
