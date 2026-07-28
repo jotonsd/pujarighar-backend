@@ -83,6 +83,7 @@ def _build_nav_menu(role: str) -> list:
             group('megaphone', 'মার্কেটিং', 'Marketing', [
                 item('/admin/slides',                 'gallery-horizontal', 'হিরো স্লাইডার', 'Hero Slider'),
                 item('/admin/banners',                'target',             'ব্যানার',         'Banners'),
+                item('/admin/blog',                    'file-text',          'ব্লগ পোস্ট',       'Blog Posts'),
                 item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails'),
                 item('/admin/settings/reviews',       'star',               'রিভিউ',           'Reviews'),
             ]),
@@ -111,6 +112,7 @@ def _build_nav_menu(role: str) -> list:
             link('/',         'home',         'হোম',           'Home'),
             link('/products', 'store',        'পণ্য',           'Products'),
             link('/packages', 'gift',         'প্যাকেজ',        'Packages'),
+            link('/blog',     'file-text',    'ব্লগ',           'Blog'),
             link('/track',    'truck',        'অর্ডার ট্র্যাক', 'Track Order'),
             link('/orders',   'shopping-bag', 'আমার অর্ডার',   'My Orders'),
         ]
