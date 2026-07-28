@@ -8,7 +8,11 @@ from api.models import Brand, Category, Product, ProductImage, ProductPackageIte
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model  = Category
-        fields = ['id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'order', 'is_active', 'created_at']
+        fields = [
+            'id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'order', 'is_active', 'created_at',
+            'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
+            'description_bn', 'description_en',
+        ]
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -102,6 +106,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'is_package', 'discount_type', 'discount_value', 'is_active',
             'stock_on_hand', 'images', 'package_items',
             'average_rating', 'review_count',
+            'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
+            'focus_keyword', 'canonical_url',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'slug', 'cost_price', 'created_at', 'updated_at']

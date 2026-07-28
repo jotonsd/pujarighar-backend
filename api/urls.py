@@ -238,4 +238,13 @@ urlpatterns = [
     path('courier/payments/',                       views.list_payments,            name='courier-payment-list'),
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
+
+    # ─── Blog ───────────────────────────────────────────────────────────────────
+    path('blog/',                  views.list_blog_posts,      name='blog-list'),
+    path('blog/all/',              views.list_all_blog_posts,  name='blog-list-all'),
+    path('blog/create/',           views.create_blog_post,     name='blog-create'),
+    path('blog/slug/<slug:slug>/', views.get_blog_post_by_slug, name='blog-detail-by-slug'),
+    path('blog/<uuid:pk>/',        views.get_blog_post,        name='blog-detail'),
+    path('blog/<uuid:pk>/update/', views.update_blog_post,     name='blog-update'),
+    path('blog/<uuid:pk>/delete/', views.delete_blog_post,     name='blog-delete'),
 ]

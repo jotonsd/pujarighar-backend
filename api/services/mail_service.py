@@ -109,6 +109,30 @@ def _order_summary_html(order, is_bn: bool):
         for item in order.items.select_related('product').all()
     )
     headers = ('পণ্য', 'পরিমাণ', 'মোট') if is_bn else ('Product', 'Qty', 'Total')
+    discount_amount = Decimal(str(order.discount_amount or 0))
+    delivery_charge = Decimal(str(order.delivery_charge or 0))
+
+    totals_rows = ''
+    if discount_amount > 0:
+        product_total = Decimal(str(order.subtotal)) + discount_amount
+        totals_rows += (
+            f"<tr><td colspan='2' style='padding:4px 8px;text-align:right;color:#6b7280'>{'পণ্য মূল্য' if is_bn else 'Product Total'}</td>"
+            f"<td style='padding:4px 8px;text-align:right'>৳{_fmt(product_total)}</td></tr>"
+        )
+        totals_rows += (
+            f"<tr><td colspan='2' style='padding:4px 8px;text-align:right;color:#166534'>{'ছাড়' if is_bn else 'Discount'}</td>"
+            f"<td style='padding:4px 8px;text-align:right;color:#166534'>−৳{_fmt(discount_amount)}</td></tr>"
+        )
+        totals_rows += (
+            f"<tr><td colspan='2' style='padding:4px 8px;text-align:right;color:#6b7280'>{'সাবটোটাল' if is_bn else 'Subtotal'}</td>"
+            f"<td style='padding:4px 8px;text-align:right'>৳{_fmt(order.subtotal)}</td></tr>"
+        )
+    if delivery_charge > 0:
+        totals_rows += (
+            f"<tr><td colspan='2' style='padding:4px 8px;text-align:right;color:#6b7280'>{'ডেলিভারি চার্জ' if is_bn else 'Delivery Charge'}</td>"
+            f"<td style='padding:4px 8px;text-align:right'>৳{_fmt(delivery_charge)}</td></tr>"
+        )
+
     grand_label = 'সর্বমোট' if is_bn else 'Grand Total'
     return f"""
     <table style='width:100%;border-collapse:collapse;font-size:13px'>
@@ -121,6 +145,7 @@ def _order_summary_html(order, is_bn: bool):
       </thead>
       <tbody>{items_html}</tbody>
       <tfoot>
+        {totals_rows}
         <tr><td colspan='3' style='padding:8px;text-align:right;font-weight:bold;border-top:1px solid #e5e7eb'>
           {grand_label}: ৳{_fmt(order.grand_total)}
         </td></tr>
