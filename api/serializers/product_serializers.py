@@ -11,7 +11,7 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name_bn', 'name_en', 'slug', 'parent', 'icon', 'order', 'is_active', 'created_at',
             'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
-            'description_bn', 'description_en', 'faqs',
+            'description_bn', 'description_en',
         ]
 
 

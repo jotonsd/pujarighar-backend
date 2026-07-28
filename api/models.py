@@ -127,9 +127,6 @@ class Category(BaseModel):
     meta_description_en  = models.CharField(max_length=170, blank=True, default='')
     description_bn       = models.TextField(blank=True, default='')
     description_en       = models.TextField(blank=True, default='')
-    # List of {question_bn, question_en, answer_bn, answer_en} — simple display/schema
-    # content, not independently queried, so a JSON field is enough (no child model).
-    faqs                 = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ['order', 'name_bn']
