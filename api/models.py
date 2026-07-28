@@ -120,6 +120,17 @@ class Category(BaseModel):
     order     = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
+    # SEO / content
+    seo_title_bn        = models.CharField(max_length=70, blank=True, default='')
+    seo_title_en         = models.CharField(max_length=70, blank=True, default='')
+    meta_description_bn = models.CharField(max_length=170, blank=True, default='')
+    meta_description_en  = models.CharField(max_length=170, blank=True, default='')
+    description_bn       = models.TextField(blank=True, default='')
+    description_en       = models.TextField(blank=True, default='')
+    # List of {question_bn, question_en, answer_bn, answer_en} — simple display/schema
+    # content, not independently queried, so a JSON field is enough (no child model).
+    faqs                 = models.JSONField(default=list, blank=True)
+
     class Meta:
         ordering = ['order', 'name_bn']
 
@@ -176,6 +187,14 @@ class Product(BaseModel):
     )
     discount_value   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     is_active        = models.BooleanField(default=True)
+
+    # SEO
+    seo_title_bn         = models.CharField(max_length=70, blank=True, default='')
+    seo_title_en         = models.CharField(max_length=70, blank=True, default='')
+    meta_description_bn  = models.CharField(max_length=170, blank=True, default='')
+    meta_description_en  = models.CharField(max_length=170, blank=True, default='')
+    focus_keyword        = models.CharField(max_length=150, blank=True, default='')
+    canonical_url        = models.URLField(max_length=500, blank=True, default='')
 
     class Meta:
         ordering = ['name_bn']
@@ -1014,3 +1033,48 @@ class CourierReturnRequest(BaseModel):
     reason               = models.TextField(blank=True, default='')
     status               = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_by           = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+
+# ─── Blog ───────────────────────────────────────────────────────────────────────
+# Content-marketing pages (festival guides, buying guides, FAQs) — the guide's
+# "biggest opportunity" since this kind of content ranks easier than product pages.
+
+class BlogPost(BaseModel):
+    title_bn = models.CharField(max_length=300)
+    title_en = models.CharField(max_length=300)
+    slug     = models.SlugField(max_length=320, unique=True, null=True, blank=True)
+
+    # SEO
+    seo_title_bn        = models.CharField(max_length=70, blank=True, default='')
+    seo_title_en         = models.CharField(max_length=70, blank=True, default='')
+    meta_description_bn = models.CharField(max_length=170, blank=True, default='')
+    meta_description_en  = models.CharField(max_length=170, blank=True, default='')
+    focus_keyword        = models.CharField(max_length=150, blank=True, default='')
+    canonical_url        = models.URLField(max_length=500, blank=True, default='')
+
+    # Content — stores Tiptap's HTML output
+    body_bn      = models.TextField(blank=True, default='')
+    body_en      = models.TextField(blank=True, default='')
+    cover_image  = models.ImageField(upload_to='blog/', null=True, blank=True)
+
+    is_active     = models.BooleanField(default=True)
+    published_at  = models.DateTimeField(null=True, blank=True)
+    created_by    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        ordering = ['-published_at', '-created_at']
+
+    def __str__(self):
+        return self.title_bn or self.title_en
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from django.utils.text import slugify
+            base = slugify(self.title_en) or slugify(self.title_bn, allow_unicode=True) or 'post'
+            slug = base
+            n = 1
+            while BlogPost.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                n += 1
+                slug = f'{base}-{n}'
+            self.slug = slug
+        super().save(*args, **kwargs)
