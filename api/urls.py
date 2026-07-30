@@ -247,4 +247,11 @@ urlpatterns = [
     path('blog/<uuid:pk>/',        views.get_blog_post,        name='blog-detail'),
     path('blog/<uuid:pk>/update/', views.update_blog_post,     name='blog-update'),
     path('blog/<uuid:pk>/delete/', views.delete_blog_post,     name='blog-delete'),
+
+    # ─── Roles & Permissions ─────────────────────────────────────────────────────
+    path('roles/',                 views.list_roles,       name='roles-list'),
+    path('roles/create/',          views.create_role,      name='roles-create'),
+    path('roles/<uuid:pk>/update/', views.update_role,     name='roles-update'),
+    path('roles/<uuid:pk>/delete/', views.delete_role,     name='roles-delete'),
+    path('permissions/',           views.list_permissions, name='permissions-list'),
 ]

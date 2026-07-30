@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import BlogPost
 from api.serializers.blog_serializers import BlogPostSerializer
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.pagination import paginate_queryset
 from api.utils.response import ApiResponse
 
@@ -29,7 +29,7 @@ def list_blog_posts(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('blog', 'view')])
 def list_all_blog_posts(request):
     try:
         qs = BlogPost.objects.all().order_by('-created_at')
@@ -55,7 +55,7 @@ def get_blog_post_by_slug(request, slug):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('blog', 'view')])
 def get_blog_post(request, pk):
     try:
         post = BlogPost.objects.get(pk=pk)
@@ -65,7 +65,7 @@ def get_blog_post(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('blog', 'create')])
 def create_blog_post(request):
     serializer = BlogPostSerializer(data=request.data, context={'request': request})
     if not serializer.is_valid():
@@ -82,7 +82,7 @@ def create_blog_post(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('blog', 'edit')])
 def update_blog_post(request, pk):
     try:
         post = BlogPost.objects.get(pk=pk)
@@ -111,7 +111,7 @@ def update_blog_post(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('blog', 'delete')])
 def delete_blog_post(_request, pk):
     try:
         BlogPost.objects.get(pk=pk).delete()

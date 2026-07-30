@@ -10,21 +10,21 @@ from api.serializers.accounting_serializers import AccountSerializer, JournalEnt
 from api.services.accounting_service import AccountingService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 _svc = AccountingService()
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
 def list_accounts(_request):
     accounts = _svc.list_accounts()
     return ApiResponse(message="Accounts retrieved", data=AccountSerializer(accounts, many=True).data)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
 def get_account(_request, pk):
     try:
         return ApiResponse(message="Account retrieved", data=AccountSerializer(_svc.get_account(pk)).data)
@@ -33,7 +33,7 @@ def get_account(_request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
 def list_journal_entries(request):
     try:
         qs = _svc.list_journal_entries(request.query_params)
@@ -49,7 +49,7 @@ def list_journal_entries(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
 def get_journal_entry(_request, pk):
     try:
         return ApiResponse(message="Journal entry retrieved", data=JournalEntrySerializer(_svc.get_journal_entry(pk)).data)
@@ -58,7 +58,7 @@ def get_journal_entry(_request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_ledger', 'view')])
 def get_ledger(request, account_id):
     try:
         locale = request.META.get('HTTP_ACCEPT_LANGUAGE', 'bn')[:2]
@@ -80,7 +80,7 @@ def get_ledger(request, account_id):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_trial_balance', 'view')])
 def get_trial_balance(request):
     try:
         data = _svc.get_trial_balance(request.query_params.get('as_of', ''))
@@ -91,7 +91,7 @@ def get_trial_balance(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_profit_loss', 'view')])
 def get_profit_loss(request):
     try:
         data = _svc.get_profit_loss(request.query_params.get('from', ''), request.query_params.get('to', ''))
@@ -101,7 +101,7 @@ def get_profit_loss(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reports_income', 'view')])
 def get_income_report(request):
     data = _svc.get_income_report(
         account_id=request.query_params.get('account_id', ''),
@@ -112,7 +112,7 @@ def get_income_report(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reports_expenses', 'view')])
 def get_expense_report(request):
     data = _svc.get_expense_report(
         account_id=request.query_params.get('account_id', ''),
@@ -123,7 +123,7 @@ def get_expense_report(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_sales_summary', 'view')])
 def get_sales_summary(request):
     try:
         data = _svc.get_sales_summary(
@@ -137,7 +137,7 @@ def get_sales_summary(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('dashboard_overview', 'view')])
 def get_dashboard_summary(_request):
     try:
         return ApiResponse(message="Dashboard summary retrieved", data=_svc.get_dashboard_summary())
@@ -147,7 +147,7 @@ def get_dashboard_summary(_request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'create')])
 @transaction.atomic
 def create_manual_journal(request):
     """

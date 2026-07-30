@@ -6,7 +6,7 @@ from api.models import ShippingAddress
 from api.models import User as UserModel
 from api.serializers.shipping_serializers import ShippingAddressSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsCustomer, IsAdminOrWarehouse
+from api.permissions import IsCustomer, has_permission
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def set_default_shipping_address(request, pk):
 # ── Admin endpoints (POS use) ─────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('shipping_addresses', 'view')])
 def admin_list_user_addresses(request, user_id):
     try:
         user = UserModel.objects.get(pk=user_id)
@@ -108,7 +108,7 @@ def admin_list_user_addresses(request, user_id):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('shipping_addresses', 'edit')])
 def admin_update_user_address(request, user_id, pk):
     try:
         address = ShippingAddress.objects.get(pk=pk, user__id=user_id)
@@ -124,7 +124,7 @@ def admin_update_user_address(request, user_id, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('shipping_addresses', 'create')])
 def admin_create_user_address(request, user_id):
     try:
         user = UserModel.objects.get(pk=user_id)

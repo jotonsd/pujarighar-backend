@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import Account, JournalEntry, JournalLine, Partner, PartnerProfitPayment
 from api.serializers.partner_serializers import PartnerSerializer, PartnerProfitPaymentSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +102,14 @@ def _create_capital_journal(partner: Partner, user) -> None:
 # ─── Partners CRUD ────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'view')])
 def list_partners(_request):
     partners = Partner.objects.filter(is_active=True)
     return ApiResponse(message="Partners retrieved", data=PartnerSerializer(partners, many=True).data)
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'create')])
 def create_partner(request):
     serializer = PartnerSerializer(data=request.data)
     if not serializer.is_valid():
@@ -120,7 +120,7 @@ def create_partner(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'edit')])
 def update_partner(request, pk):
     try:
         partner = Partner.objects.get(pk=pk)
@@ -134,7 +134,7 @@ def update_partner(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'delete')])
 def delete_partner(_request, pk):
     try:
         partner = Partner.objects.get(pk=pk)
@@ -148,7 +148,7 @@ def delete_partner(_request, pk):
 # ─── Profit Payments ─────────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'view')])
 def list_partner_payments(_request, pk):
     try:
         partner = Partner.objects.get(pk=pk)
@@ -165,7 +165,7 @@ def list_partner_payments(_request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'create')])
 @transaction.atomic
 def create_partner_payment(request, pk):
     try:
@@ -195,7 +195,7 @@ def create_partner_payment(request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'edit')])
 @transaction.atomic
 def update_partner_payment(request, pk, payment_pk):
     try:
@@ -218,7 +218,7 @@ def update_partner_payment(request, pk, payment_pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('partners', 'delete')])
 @transaction.atomic
 def delete_partner_payment(_request, pk, payment_pk):
     try:

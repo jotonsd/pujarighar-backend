@@ -110,7 +110,7 @@ class Command(BaseCommand):
     def _seed_products(self):
         from api.models import Brand, Category, Product, StockMovement, User
 
-        admin  = User.objects.filter(role='ADMIN').first()
+        admin  = User.objects.filter(role__code='ADMIN').first()
         cat    = {c.slug: c for c in Category.objects.all()}
         brands = {b.slug: b for b in Brand.objects.all()}
 

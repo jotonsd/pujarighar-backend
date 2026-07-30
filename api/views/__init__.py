@@ -85,3 +85,6 @@ from .blog_views import (
     list_blog_posts, list_all_blog_posts, get_blog_post_by_slug, get_blog_post,
     create_blog_post, update_blog_post, delete_blog_post,
 )
+from .role_views import (
+    list_roles, list_permissions, create_role, update_role, delete_role,
+)

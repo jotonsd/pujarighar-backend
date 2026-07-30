@@ -36,7 +36,7 @@ class Command(BaseCommand):
         dry     = options['dry_run']
         svc     = StockService()
 
-        admin    = User.objects.filter(role='ADMIN', is_active=True).first()
+        admin    = User.objects.filter(role__code='ADMIN', is_active=True).first()
         supplier = Supplier.objects.first()
 
         if not admin:

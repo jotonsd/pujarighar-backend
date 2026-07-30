@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import DeliveryCharge
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def get_delivery_charges(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('delivery_charges', 'edit')])
 def update_delivery_charges(request):
     charge = DeliveryCharge.get()
     inside  = request.data.get('inside_dhaka')

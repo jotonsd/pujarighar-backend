@@ -12,8 +12,10 @@ class BaseCourierService(ABC):
     """
 
     @abstractmethod
-    def create_order(self, order: SalesOrder) -> dict:
-        """Send an order to the courier. Returns the raw provider response."""
+    def create_order(self, order: SalesOrder, weight=None) -> dict:
+        """Send an order to the courier. `weight` (kg) is optional and, when
+        given, is passed through to the provider for shipping-charge
+        calculation. Returns the raw provider response."""
         ...
 
     @abstractmethod

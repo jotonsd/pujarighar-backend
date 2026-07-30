@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import PromoEmail
 from api.serializers.promo_email_serializers import PromoEmailSerializer, PromoEmailCreateSerializer
 from api.services.mail_service import send_promo_email, promo_recipients
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('promo_emails', 'view')])
 def list_promo_emails(request):
     try:
         qs = PromoEmail.objects.select_related('sent_by', 'sent_by__profile').all()
@@ -30,7 +30,7 @@ def list_promo_emails(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('promo_emails', 'view')])
 def promo_email_audience(request):
     """Returns the recipient count for a given email_type before sending, for confirmation."""
     email_type = request.query_params.get('email_type', 'GENERAL')
@@ -42,7 +42,7 @@ def promo_email_audience(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('promo_emails', 'create')])
 def create_promo_email(request):
     serializer = PromoEmailCreateSerializer(data=request.data)
     if not serializer.is_valid():
@@ -61,7 +61,7 @@ def create_promo_email(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('promo_emails', 'create')])
 def resend_promo_email(request, pk):
     try:
         original = PromoEmail.objects.get(pk=pk)

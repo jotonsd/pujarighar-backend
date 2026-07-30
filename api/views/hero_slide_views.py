@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import HeroSlide
 from api.serializers.hero_slide_serializers import HeroSlideSerializer
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ def list_hero_slides(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('hero_slider', 'view')])
 def list_all_hero_slides(request):
     try:
         qs = HeroSlide.objects.all()
@@ -31,7 +31,7 @@ def list_all_hero_slides(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('hero_slider', 'create')])
 def create_hero_slide(request):
     serializer = HeroSlideSerializer(data=request.data, context={'request': request})
     if not serializer.is_valid():
@@ -44,7 +44,7 @@ def create_hero_slide(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('hero_slider', 'edit')])
 def update_hero_slide(request, pk):
     try:
         slide = HeroSlide.objects.get(id=pk)
@@ -61,7 +61,7 @@ def update_hero_slide(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('hero_slider', 'delete')])
 def delete_hero_slide(_request, pk):
     try:
         HeroSlide.objects.get(id=pk).delete()

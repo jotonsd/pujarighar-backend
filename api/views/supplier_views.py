@@ -7,13 +7,13 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import Account, JournalEntry, JournalLine, Supplier, SupplierPayment
 from api.serializers.product_serializers import SupplierPaymentSerializer, SupplierSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin, IsAdminOrWarehouse
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'view')])
 def list_suppliers(request):
     include_inactive = request.query_params.get('include_inactive') == 'true'
     qs = Supplier.objects.all() if include_inactive else Supplier.objects.filter(is_active=True)
@@ -21,7 +21,7 @@ def list_suppliers(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'create')])
 def create_supplier(request):
     serializer = SupplierSerializer(data=request.data)
     if not serializer.is_valid():
@@ -31,7 +31,7 @@ def create_supplier(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'view')])
 def get_supplier(_request, pk):
     try:
         supplier = Supplier.objects.get(pk=pk)
@@ -41,7 +41,7 @@ def get_supplier(_request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'edit')])
 def update_supplier(request, pk):
     try:
         supplier = Supplier.objects.get(pk=pk)
@@ -55,7 +55,7 @@ def update_supplier(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'delete')])
 def delete_supplier(_request, pk):
     try:
         supplier = Supplier.objects.get(pk=pk)
@@ -99,7 +99,7 @@ def _create_supplier_payment_journal(payment: SupplierPayment, user) -> None:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'view')])
 def list_supplier_payments(request, pk):
     try:
         supplier = Supplier.objects.get(pk=pk)
@@ -116,7 +116,7 @@ def list_supplier_payments(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'create')])
 def create_supplier_payment(request, pk):
     try:
         supplier = Supplier.objects.get(pk=pk)
@@ -138,7 +138,7 @@ def create_supplier_payment(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('suppliers', 'delete')])
 def delete_supplier_payment(request, pk, payment_pk):
     try:
         payment = SupplierPayment.objects.select_related('supplier').get(pk=payment_pk, supplier_id=pk)

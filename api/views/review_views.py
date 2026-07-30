@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.models import Notification, Product, ProductPackageItem, Review, SalesOrder, SalesOrderItem, User
 from api.serializers.review_serializers import ReviewSerializer, ReviewCreateSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.services.notification_ws import broadcast_notifications
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def create_review(request):
 
     product_name = product.name_bn or product.name_en
     reviewer_name = getattr(getattr(request.user, 'profile', None), 'full_name_bn', None) or request.user.email
-    admins = User.objects.filter(role='ADMIN', is_active=True)
+    admins = User.objects.filter(role__code='ADMIN', is_active=True)
     notifications = [
         Notification(
             user=admin,
@@ -147,14 +147,14 @@ def my_order_reviews(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reviews', 'view')])
 def list_pending_reviews(request):
     reviews = Review.objects.filter(is_approved=False).select_related('user__profile', 'product')
     return ApiResponse(message='Pending reviews', data=ReviewSerializer(reviews, many=True).data)
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reviews', 'edit')])
 def approve_review(_request, pk):
     try:
         review = Review.objects.get(pk=pk)
@@ -166,7 +166,7 @@ def approve_review(_request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reviews', 'delete')])
 def delete_review(_request, pk):
     try:
         Review.objects.get(pk=pk).delete()

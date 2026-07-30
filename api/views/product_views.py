@@ -12,7 +12,7 @@ from api.services.product_service import ProductService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
 from api.utils.visitor import get_visitor
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 _svc = ProductService()
@@ -58,7 +58,7 @@ def list_products(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('products', 'create')])
 def create_product(request):
     serializer = ProductSerializer(data=request.data, context=_ctx(request))
     if not serializer.is_valid():
@@ -123,7 +123,7 @@ def get_product_by_slug(request, slug):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('products', 'edit')])
 def update_product(request, pk):
     try:
         product = _svc.get_product(pk)
@@ -143,7 +143,7 @@ def update_product(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('products', 'delete')])
 def delete_product(_request, pk):
     try:
         product = _svc.get_product(pk)
@@ -156,7 +156,7 @@ def delete_product(_request, pk):
 MAX_IMAGES = 5
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('products', 'edit')])
 def add_product_image(request, pk):
     try:
         product = _svc.get_product(pk)
@@ -198,7 +198,7 @@ def add_product_image(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('products', 'edit')])
 def delete_product_image(request, pk, image_id):
     try:
         img = ProductImage.objects.get(pk=image_id, product_id=pk)

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class OrderService:
 
     def list_orders(self, user: User, params: dict):
-        role = user.role
+        role = user.role.code
         qs   = SalesOrder.objects.select_related('customer', 'delivery').prefetch_related('items', 'status_logs')
 
         if role == 'CUSTOMER':
@@ -59,7 +59,7 @@ class OrderService:
     def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User) -> SalesOrder:
         delivery_person = None
         if delivery_person_id:
-            delivery_person = User.objects.get(id=delivery_person_id, role='DELIVERY')
+            delivery_person = User.objects.get(id=delivery_person_id, role__code='DELIVERY')
         DeliveryAssignment.objects.update_or_create(order=order, defaults={'delivery_person': delivery_person})
         # Already ASSIGNED (e.g. assigned earlier without a delivery person) — just
         # attaching/updating the delivery person now, no status transition needed.

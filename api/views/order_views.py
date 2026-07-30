@@ -14,14 +14,14 @@ from api.services.order_service import OrderService
 from api.services import mail_service
 from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin, IsAdminOrWarehouse, IsAdminOrDelivery
+from api.permissions import IsAdminOrDelivery, has_permission
 
 logger = logging.getLogger(__name__)
 _svc = OrderService()
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('pos', 'create')])
 def pos_create_order(request):
     serializer = POSCheckoutSerializer(data=request.data)
     if not serializer.is_valid():
@@ -74,7 +74,7 @@ def list_orders(request):
 def get_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        role  = request.user.role
+        role  = request.user.role.code
         if role == 'CUSTOMER' and order.customer != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         if role == 'WAREHOUSE':
@@ -128,7 +128,7 @@ def track_by_order_number(request):
 def get_order_status_log(request, pk):
     try:
         order = SalesOrder.objects.prefetch_related('delivery').get(pk=pk)
-        role  = request.user.role
+        role  = request.user.role.code
         if role == 'CUSTOMER' and order.customer != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         if role == 'DELIVERY':
@@ -143,7 +143,7 @@ def get_order_status_log(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def confirm_order(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -155,7 +155,7 @@ def confirm_order(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def pack_order(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -167,7 +167,7 @@ def pack_order(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def assign_delivery(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -190,7 +190,7 @@ def dispatch_order(request, pk):
     try:
         order = _svc.get_order(pk)
         # Only the assigned delivery person is ownership-checked — admins can act on any order.
-        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         return ApiResponse(message="Order dispatched", data=SalesOrderSerializer(_svc.dispatch(order, request.user), context={'request': request}).data)
     except SalesOrder.DoesNotExist:
@@ -204,7 +204,7 @@ def dispatch_order(request, pk):
 def deliver_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         delivered = _svc.deliver(order, request.user)
         mail_service.send_order_delivered(delivered)
@@ -220,7 +220,7 @@ def deliver_order(request, pk):
 def return_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        if request.user.role == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         note_bn = request.data.get('note_bn', '')
         note_en = request.data.get('note_en', '')
@@ -250,7 +250,7 @@ def mark_cod_paid(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def apply_discount(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -277,7 +277,7 @@ def cancel_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
 
-    role = request.user.role
+    role = request.user.role.code
     if role == 'CUSTOMER':
         if order.customer != request.user:
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
@@ -301,7 +301,7 @@ def cancel_order(request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def update_shipping(request, pk):
     try:
         order = SalesOrder.objects.get(pk=pk)

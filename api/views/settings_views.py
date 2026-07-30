@@ -2,7 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.models import SiteSetting
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 
 PAGE_SIZE_CHOICES  = ['A4', 'A5', 'LETTER', 'THERMAL']
@@ -34,7 +34,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
     }
 
     user = getattr(request, 'user', None) if request else None
-    if user and user.is_authenticated and getattr(user, 'role', None) == 'ADMIN':
+    if user and user.is_authenticated and getattr(user.role, 'code', None) == 'ADMIN':
         data.update({
             'email_host':               s.email_host,
             'email_port':               s.email_port,
@@ -54,7 +54,7 @@ def get_site_settings(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('site_settings', 'edit')])
 def update_site_settings(request):
     s = SiteSetting.get()
     updated = []
