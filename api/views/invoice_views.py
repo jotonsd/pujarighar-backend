@@ -592,7 +592,7 @@ def download_invoice(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
 
-    role     = request.user.role
+    role     = request.user.role.code
     is_admin = role not in ('CUSTOMER',)
 
     # Customers can only download their own orders

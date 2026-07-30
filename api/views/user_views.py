@@ -15,115 +15,151 @@ from api.serializers.user_serializers import (
 from api.services.user_service import UserService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
-from api.permissions import IsAdmin, IsAdminOrWarehouse
+from api.permissions import IsAdmin, has_permission
 
 logger = logging.getLogger(__name__)
 _svc = UserService()
 
 
-def _build_nav_menu(role: str) -> list:
-    """Return structured nav menu for the given role. Consumed by the frontend Navbar."""
+def _nav_registry() -> list:
+    """Canonical nav item registry for admin-staff roles (ADMIN + WAREHOUSE +
+    any custom role). Labels/icons/hrefs are static content, not admin-
+    configurable — only which roles can see which '_module'-tagged entries
+    is dynamic (see _filter_nav_by_permissions). 'roles_admin' deliberately
+    has no matching Permission catalog rows, so it can never be granted to
+    anyone but ADMIN (which bypasses filtering entirely) — role/permission
+    management must stay ADMIN-only to avoid privilege escalation."""
 
-    def link(href, icon, bn, en):
-        return {'type': 'link', 'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en}
+    def link(href, icon, bn, en, module):
+        return {'type': 'link', 'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en, '_module': module}
 
     def group(icon, bn, en, items):
         return {'type': 'group', 'icon': icon, 'label_bn': bn, 'label_en': en, 'items': items}
 
-    def item(href, icon, bn, en):
-        return {'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en}
+    def item(href, icon, bn, en, module):
+        return {'href': href, 'icon': icon, 'label_bn': bn, 'label_en': en, '_module': module}
 
-    if role == 'ADMIN':
-        return [
-            link('/admin/orders/new',  'receipt',      'POS',            'POS'),
-            link('/admin/orders',      'shopping-bag', 'অর্ডার',          'Orders'),
-            group('layout-dashboard', 'ড্যাশবোর্ড', 'Dashboard', [
-                item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview'),
-                item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO'),
-                item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier'),
-            ]),
-            group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
-                group('package', 'পণ্য', 'Catalog', [
-                    item('/admin/products',         'package',     'পণ্য',          'Products'),
-                    item('/admin/packages',         'gift',        'প্যাকেজ',       'Packages'),
-                    item('/admin/categories',       'tag',         'কেটাগরি',       'Categories'),
-                    item('/admin/settings/brands',  'badge-check', 'ব্র্যান্ড',     'Brands'),
-                    item('/admin/discounts',        'percent',     'ডিসকাউন্ট',     'Discounts'),
-                ]),
-                group('warehouse', 'গুদাম', 'Inventory', [
-                    item('/admin/inventory',           'clipboard-list', 'স্টক',         'Stock'),
-                    item('/admin/settings/suppliers',  'truck',          'সরবরাহকারী',   'Suppliers'),
-                ]),
-            ]),
-            group('users', 'ব্যবহারকারী', 'Users', [
-                item('/admin/users',             'users',      'ব্যবহারকারী',     'Users'),
-                item('/admin/settings/partners', 'handshake',  'অংশীদার',          'Partners'),
-                item('/admin/settings/loans',    'piggy-bank', 'ঋণ বিনিয়োগকারী', 'Loan Investors'),
-            ]),
-            group('landmark', 'ফিন্যান্স', 'Finance', [
-                group('book-open', 'হিসাব', 'Accounting', [
-                    item('/admin/accounting/journal',       'notebook-pen',  'জার্নাল',          'Journal'),
-                    item('/admin/accounting/ledger',        'book-open',     'খাতা',              'Ledger'),
-                    item('/admin/accounting/profit-loss',   'trending-up',   'লাভ-ক্ষতি',        'Profit & Loss'),
-                    item('/admin/accounting/trial-balance', 'scale',         'ট্রায়াল ব্যালেন্স', 'Trial Balance'),
-                    item('/admin/accounting/sales-summary', 'shopping-cart', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary'),
-                ]),
-                item('/admin/expenses',                  'plus-circle', 'খরচ যোগ করুন',   'Add Expense'),
-                item('/admin/settings/delivery-charges', 'truck', 'ডেলিভারি চার্জ', 'Delivery Charges'),
-                item('/admin/settings/cashback',         'gift',  'ক্যাশব্যাক',      'Cashback'),
-            ]),
-            group('file-bar-chart', 'রিপোর্ট', 'Reports', [
-                item('/admin/reports/purchases',            'receipt',       'ক্রয় রিপোর্ট',              'Purchase Report'),
-                item('/admin/reports/supplier-returns',      'undo',         'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report'),
-                item('/admin/reports/supplier-outstanding',  'credit-card',  'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report'),
-                item('/admin/reports/product-stock',         'package',      'পণ্য স্টক রিপোর্ট',         'Product Stock Report'),
-                item('/admin/reports/income',                'trending-up',  'আয় রিপোর্ট',                'Income Report'),
-                item('/admin/reports/expenses',              'trending-down','ব্যয় রিপোর্ট',              'Expense Report'),
-            ]),
-            group('megaphone', 'মার্কেটিং', 'Marketing', [
-                item('/admin/slides',                 'gallery-horizontal', 'হিরো স্লাইডার', 'Hero Slider'),
-                item('/admin/banners',                'target',             'ব্যানার',         'Banners'),
-                item('/admin/blog',                    'file-text',          'ব্লগ পোস্ট',       'Blog Posts'),
-                item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails'),
-                item('/admin/settings/reviews',       'star',               'রিভিউ',           'Reviews'),
-            ]),
-        ]
-
-    if role == 'WAREHOUSE':
-        return [
-            link('/admin/orders/new', 'receipt',      'POS',         'POS'),
-            link('/admin/orders',     'shopping-bag', 'অর্ডার',       'Orders'),
+    return [
+        link('/admin/orders/new',  'receipt',      'POS',            'POS', 'pos'),
+        link('/admin/orders',      'shopping-bag', 'অর্ডার',          'Orders', 'orders'),
+        group('layout-dashboard', 'ড্যাশবোর্ড', 'Dashboard', [
+            item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview', 'dashboard_overview'),
+            item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO', 'analytics'),
+            item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier', 'courier'),
+        ]),
+        group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
             group('package', 'পণ্য', 'Catalog', [
-                item('/admin/products',        'package',     'পণ্য',      'Products'),
-                item('/admin/packages',        'gift',        'প্যাকেজ',   'Packages'),
-                item('/admin/categories',      'tag',         'কেটাগরি',   'Categories'),
-                item('/admin/settings/brands', 'badge-check', 'ব্র্যান্ড', 'Brands'),
+                item('/admin/products',         'package',     'পণ্য',          'Products', 'products'),
+                item('/admin/packages',         'gift',        'প্যাকেজ',       'Packages', 'packages'),
+                item('/admin/categories',       'tag',         'কেটাগরি',       'Categories', 'categories'),
+                item('/admin/settings/brands',  'badge-check', 'ব্র্যান্ড',     'Brands', 'brands'),
+                item('/admin/discounts',        'percent',     'ডিসকাউন্ট',     'Discounts', 'discounts'),
             ]),
-            link('/admin/inventory', 'warehouse', 'গুদাম', 'Inventory'),
-        ]
+            group('warehouse', 'গুদাম', 'Inventory', [
+                item('/admin/inventory',           'clipboard-list', 'স্টক',         'Stock', 'inventory_stock'),
+                item('/admin/settings/suppliers',  'truck',          'সরবরাহকারী',   'Suppliers', 'suppliers'),
+            ]),
+        ]),
+        group('users', 'ব্যবহারকারী', 'Users', [
+            item('/admin/users',             'users',      'ব্যবহারকারী',     'Users', 'users_admin'),
+            item('/admin/roles',             'shield',     'রোল',           'Roles', 'roles_admin'),
+            item('/admin/settings/partners', 'handshake',  'অংশীদার',          'Partners', 'partners'),
+            item('/admin/settings/loans',    'piggy-bank', 'ঋণ বিনিয়োগকারী', 'Loan Investors', 'loans'),
+        ]),
+        group('landmark', 'ফিন্যান্স', 'Finance', [
+            group('book-open', 'হিসাব', 'Accounting', [
+                item('/admin/accounting/journal',       'notebook-pen',  'জার্নাল',          'Journal', 'accounting_journal'),
+                item('/admin/accounting/ledger',        'book-open',     'খাতা',              'Ledger', 'accounting_ledger'),
+                item('/admin/accounting/profit-loss',   'trending-up',   'লাভ-ক্ষতি',        'Profit & Loss', 'accounting_profit_loss'),
+                item('/admin/accounting/trial-balance', 'scale',         'ট্রায়াল ব্যালেন্স', 'Trial Balance', 'accounting_trial_balance'),
+                item('/admin/accounting/sales-summary', 'shopping-cart', 'বিক্রয় সারসংক্ষেপ', 'Sales Summary', 'accounting_sales_summary'),
+            ]),
+            item('/admin/expenses',                  'plus-circle', 'খরচ যোগ করুন',   'Add Expense', 'expenses'),
+            item('/admin/settings/delivery-charges', 'truck', 'ডেলিভারি চার্জ', 'Delivery Charges', 'delivery_charges'),
+            item('/admin/settings/cashback',         'gift',  'ক্যাশব্যাক',      'Cashback', 'cashback'),
+        ]),
+        group('file-bar-chart', 'রিপোর্ট', 'Reports', [
+            item('/admin/reports/purchases',            'receipt',       'ক্রয় রিপোর্ট',              'Purchase Report', 'reports_purchases'),
+            item('/admin/reports/supplier-returns',      'undo',         'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report', 'reports_supplier_returns'),
+            item('/admin/reports/supplier-outstanding',  'credit-card',  'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report', 'reports_supplier_outstanding'),
+            item('/admin/reports/product-stock',         'package',      'পণ্য স্টক রিপোর্ট',         'Product Stock Report', 'reports_product_stock'),
+            item('/admin/reports/income',                'trending-up',  'আয় রিপোর্ট',                'Income Report', 'reports_income'),
+            item('/admin/reports/expenses',              'trending-down','ব্যয় রিপোর্ট',              'Expense Report', 'reports_expenses'),
+        ]),
+        group('megaphone', 'মার্কেটিং', 'Marketing', [
+            item('/admin/slides',                 'gallery-horizontal', 'হিরো স্লাইডার', 'Hero Slider', 'hero_slider'),
+            item('/admin/banners',                'target',             'ব্যানার',         'Banners', 'banners'),
+            item('/admin/blog',                    'file-text',          'ব্লগ পোস্ট',       'Blog Posts', 'blog'),
+            item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails', 'promo_emails'),
+            item('/admin/settings/reviews',       'star',               'রিভিউ',           'Reviews', 'reviews'),
+        ]),
+    ]
 
-    if role == 'DELIVERY':
+
+def _strip_modules(entries: list) -> list:
+    """Drop the internal '_module' tag before an unfiltered (ADMIN) menu is returned."""
+    cleaned = []
+    for entry in entries:
+        entry = {k: v for k, v in entry.items() if k != '_module'}
+        if entry.get('type') == 'group':
+            entry['items'] = _strip_modules(entry['items'])
+        cleaned.append(entry)
+    return cleaned
+
+
+def _filter_nav_by_permissions(entries: list, granted_modules: set) -> list:
+    """Keep only leaf/link entries whose module the role has 'view' on;
+    a group collapses away entirely if none of its children survive."""
+    filtered = []
+    for entry in entries:
+        if entry.get('type') == 'group':
+            children = _filter_nav_by_permissions(entry['items'], granted_modules)
+            if children:
+                filtered.append({**entry, 'items': children})
+        elif entry.get('_module') in granted_modules:
+            filtered.append({k: v for k, v in entry.items() if k != '_module'})
+    return filtered
+
+
+def _get_permission_keys(user) -> list:
+    """Flat "module.action" strings for the frontend's action-level button gating."""
+    if user.role.code == 'ADMIN':
+        return ['*']
+    return [f'{p.module}.{p.action}' for p in user.role.permissions.all()]
+
+
+def _build_nav_menu(user) -> list:
+    """Return the structured nav menu for this user. Consumed by the frontend Navbar."""
+    role = user.role
+
+    if role.code == 'DELIVERY':
         return [
-            link('/delivery/orders', 'truck', 'ডেলিভারি', 'My Deliveries'),
+            {'type': 'link', 'href': '/delivery/orders', 'icon': 'truck', 'label_bn': 'ডেলিভারি', 'label_en': 'My Deliveries'},
         ]
 
-    if role == 'CUSTOMER':
+    if role.code == 'CUSTOMER':
         return [
-            link('/',         'home',         'হোম',           'Home'),
-            link('/products', 'store',        'পণ্য',           'Products'),
-            link('/packages', 'gift',         'প্যাকেজ',        'Packages'),
-            link('/blog',     'file-text',    'ব্লগ',           'Blog'),
-            link('/track',    'truck',        'অর্ডার ট্র্যাক', 'Track Order'),
-            link('/orders',   'shopping-bag', 'আমার অর্ডার',   'My Orders'),
+            {'type': 'link', 'href': '/',         'icon': 'home',         'label_bn': 'হোম',           'label_en': 'Home'},
+            {'type': 'link', 'href': '/products', 'icon': 'store',        'label_bn': 'পণ্য',           'label_en': 'Products'},
+            {'type': 'link', 'href': '/packages', 'icon': 'gift',         'label_bn': 'প্যাকেজ',        'label_en': 'Packages'},
+            {'type': 'link', 'href': '/blog',     'icon': 'file-text',    'label_bn': 'ব্লগ',           'label_en': 'Blog'},
+            {'type': 'link', 'href': '/track',    'icon': 'truck',        'label_bn': 'অর্ডার ট্র্যাক', 'label_en': 'Track Order'},
+            {'type': 'link', 'href': '/orders',   'icon': 'shopping-bag', 'label_bn': 'আমার অর্ডার',   'label_en': 'My Orders'},
         ]
 
-    return []
+    if role.code == 'ADMIN':
+        return _strip_modules(_nav_registry())
+
+    # WAREHOUSE + any custom admin-staff role: filtered by whatever 'view'
+    # permissions the role has actually been granted.
+    granted = set(role.permissions.filter(action='view').values_list('module', flat=True))
+    return _filter_nav_by_permissions(_nav_registry(), granted)
 
 
 # ─── Admin: user list & create ───────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'view')])
 def list_users(request):
     try:
         qs = _svc.list_users(
@@ -144,7 +180,7 @@ def list_users(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'create')])
 def create_user(request):
     serializer = AdminCreateUserSerializer(data=request.data)
     if not serializer.is_valid():
@@ -160,7 +196,7 @@ def create_user(request):
 # ─── Admin: user detail ───────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'view')])
 def get_user(request, pk):
     try:
         user = _svc.get_user(pk)
@@ -170,7 +206,7 @@ def get_user(request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'edit')])
 def update_user(request, pk):
     try:
         user = _svc.get_user(pk)
@@ -188,7 +224,7 @@ def update_user(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'edit')])
 def delete_user(request, pk):
     try:
         user = _svc.get_user(pk)
@@ -199,7 +235,7 @@ def delete_user(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'edit')])
 def activate_user(request, pk):
     try:
         user = _svc.get_user(pk)
@@ -210,7 +246,7 @@ def activate_user(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'edit')])
 def deactivate_user(request, pk):
     try:
         user = _svc.get_user(pk)
@@ -243,7 +279,8 @@ def change_role(request, pk):
 @permission_classes([IsAuthenticated])
 def get_me(request):
     data = UserSerializer(request.user, context={'request': request}).data
-    data['nav_menu'] = _build_nav_menu(request.user.role)
+    data['nav_menu'] = _build_nav_menu(request.user)
+    data['permissions'] = _get_permission_keys(request.user)
     return ApiResponse(message="Profile retrieved", data=data)
 
 
@@ -315,7 +352,8 @@ def update_me(request):
             profile_data['avatar'] = settings.BACKEND_URL + settings.MEDIA_URL + path
         _svc.update_profile(request.user, profile_data)
         data = UserSerializer(request.user, context={'request': request}).data
-        data['nav_menu'] = _build_nav_menu(request.user.role)
+        data['nav_menu'] = _build_nav_menu(request.user)
+        data['permissions'] = _get_permission_keys(request.user)
         return ApiResponse(message="Profile updated", data=data)
     except Exception as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
@@ -335,14 +373,14 @@ def change_password(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('orders', 'view')])
 def list_delivery_persons(request):
     persons = _svc.list_delivery_persons()
     return ApiResponse(message="Delivery persons retrieved", data=UserSerializer(persons, many=True, context={'request': request}).data)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('orders', 'view')])
 def lookup_user_by_phone(request):
     phone = request.query_params.get('phone', '').strip()
     if not phone:

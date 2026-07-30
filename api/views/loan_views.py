@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import Account, JournalEntry, JournalLine, LoanInvestor, LoanPayment
 from api.serializers.loan_serializers import LoanInvestorSerializer, LoanPaymentSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +92,14 @@ def _create_loan_payment_journal(payment: LoanPayment, user) -> None:
 # ─── Loan Investors CRUD ──────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'view')])
 def list_loan_investors(_request):
     loans = LoanInvestor.objects.filter(is_active=True)
     return ApiResponse(message="Loan investors retrieved", data=LoanInvestorSerializer(loans, many=True).data)
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'create')])
 @transaction.atomic
 def create_loan_investor(request):
     serializer = LoanInvestorSerializer(data=request.data)
@@ -111,7 +111,7 @@ def create_loan_investor(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'edit')])
 def update_loan_investor(request, pk):
     try:
         loan = LoanInvestor.objects.get(pk=pk)
@@ -125,7 +125,7 @@ def update_loan_investor(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'delete')])
 def delete_loan_investor(_request, pk):
     try:
         loan = LoanInvestor.objects.get(pk=pk)
@@ -139,7 +139,7 @@ def delete_loan_investor(_request, pk):
 # ─── Loan Payments ────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'view')])
 def list_loan_payments(_request, pk):
     try:
         loan = LoanInvestor.objects.get(pk=pk)
@@ -162,7 +162,7 @@ def list_loan_payments(_request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'create')])
 @transaction.atomic
 def create_loan_payment(request, pk):
     try:
@@ -180,7 +180,7 @@ def create_loan_payment(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('loans', 'delete')])
 def delete_loan_payment(_request, pk, payment_pk):
     try:
         payment = LoanPayment.objects.select_related('loan').get(pk=payment_pk, loan_id=pk)

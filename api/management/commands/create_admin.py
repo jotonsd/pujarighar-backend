@@ -28,7 +28,7 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        from api.models import User
+        from api.models import Role, User
 
         email = options['email'] or input('Email: ').strip()
         if not email:
@@ -57,7 +57,7 @@ class Command(BaseCommand):
 
         user = User.objects.create_user(
             email=email, phone=phone, password=password,
-            role='ADMIN', is_staff=True, is_superuser=True,
+            role=Role.objects.get(code='ADMIN'), is_staff=True, is_superuser=True,
         )
         if name:
             user.profile.full_name_bn = name

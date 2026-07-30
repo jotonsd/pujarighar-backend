@@ -5,7 +5,7 @@ from django.shortcuts import redirect
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.services.google_analytics_service import GoogleAnalyticsService, GoogleNotConnectedError
 from api.utils.response import ApiResponse
 
@@ -21,7 +21,7 @@ def _date_range(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'edit')])
 def google_connect_url(request):
     return ApiResponse(message='Authorization URL generated', data={'auth_url': _svc.get_authorization_url()})
 
@@ -42,13 +42,13 @@ def google_callback(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def google_status(request):
     return ApiResponse(message='Status retrieved', data=_svc.get_status())
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def google_properties(request):
     try:
         return ApiResponse(message='Properties retrieved', data={
@@ -63,7 +63,7 @@ def google_properties(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'edit')])
 def google_select(request):
     data = request.data
     ga4_property_id = data.get('ga4_property_id', '')
@@ -76,14 +76,14 @@ def google_select(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'edit')])
 def google_disconnect(request):
     _svc.disconnect()
     return ApiResponse(message='Disconnected')
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def traffic_metrics(request):
     from_str, to_str = _date_range(request)
     try:
@@ -96,7 +96,7 @@ def traffic_metrics(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def sales_metrics(request):
     from_str, to_str = _date_range(request)
     try:
@@ -109,7 +109,7 @@ def sales_metrics(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def seo_metrics(request):
     from_str, to_str = _date_range(request)
     try:
@@ -122,7 +122,7 @@ def seo_metrics(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'view')])
 def pagespeed_seo(request):
     strategy = request.query_params.get('strategy', 'MOBILE').upper()
     if strategy not in ('MOBILE', 'DESKTOP'):
@@ -137,7 +137,7 @@ def pagespeed_seo(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('analytics', 'edit')])
 def pagespeed_seo_refresh(request):
     try:
         return ApiResponse(message='PageSpeed scores refreshed', data=_svc.refresh_pagespeed_seo())

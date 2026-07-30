@@ -3,7 +3,7 @@ from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from api.models import Discount, Product
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
 
@@ -32,7 +32,7 @@ class DiscountSerializer(drf_serializers.ModelSerializer):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'view')])
 def list_discounts(request):
     product_id = request.query_params.get('product')
     qs = Discount.objects.select_related('product').prefetch_related('product__images').order_by('-created_at')
@@ -47,7 +47,7 @@ def list_discounts(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'create')])
 def create_discount(request):
     s = DiscountSerializer(data=request.data, context={'request': request})
     if not s.is_valid():
@@ -57,7 +57,7 @@ def create_discount(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'edit')])
 def toggle_discount(request, pk):
     try:
         discount = Discount.objects.get(pk=pk)
@@ -69,7 +69,7 @@ def toggle_discount(request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'edit')])
 def update_discount(request, pk):
     try:
         discount = Discount.objects.get(pk=pk)
@@ -83,7 +83,7 @@ def update_discount(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'delete')])
 def delete_discount(request, pk):
     try:
         Discount.objects.get(pk=pk).delete()

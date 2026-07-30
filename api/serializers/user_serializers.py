@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from api.models import User, Profile
+from api.models import Role, User, Profile
+from api.serializers.role_serializers import RoleSerializer
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -28,6 +29,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     profile = ProfileSerializer(read_only=True)
+    role    = RoleSerializer(read_only=True)
 
     class Meta:
         model  = User
@@ -37,6 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class AdminCreateUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
+    role     = serializers.PrimaryKeyRelatedField(queryset=Role.objects.all())
 
     class Meta:
         model  = User
@@ -47,6 +50,8 @@ class AdminCreateUserSerializer(serializers.ModelSerializer):
 
 
 class AdminUpdateUserSerializer(serializers.ModelSerializer):
+    role = serializers.PrimaryKeyRelatedField(queryset=Role.objects.all(), required=False)
+
     class Meta:
         model  = User
         fields = ['email', 'phone', 'role', 'is_active', 'preferred_language']
@@ -61,7 +66,7 @@ class AdminUpdateUserSerializer(serializers.ModelSerializer):
 
 
 class ChangeRoleSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(choices=['ADMIN', 'WAREHOUSE', 'DELIVERY', 'CUSTOMER'])
+    role = serializers.PrimaryKeyRelatedField(queryset=Role.objects.all())
 
     def validate_role(self, value):
         if self.context.get('target_user') == self.context['request'].user:

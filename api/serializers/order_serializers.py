@@ -187,7 +187,7 @@ class AssignDeliverySerializer(serializers.Serializer):
     def validate_delivery_person_id(self, value):
         if value is None:
             return value
-        if not User.objects.filter(id=value, role='DELIVERY', is_active=True).exists():
+        if not User.objects.filter(id=value, role__code='DELIVERY', is_active=True).exists():
             raise serializers.ValidationError({
                 'message_bn': 'ডেলিভারিম্যান পাওয়া যায়নি',
                 'message_en': 'Delivery person not found',

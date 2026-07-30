@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import Banner
 from api.serializers.banner_serializers import BannerSerializer
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ def list_banners(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('banners', 'view')])
 def list_all_banners(request):
     try:
         qs = Banner.objects.all()
@@ -31,7 +31,7 @@ def list_all_banners(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('banners', 'create')])
 def create_banner(request):
     serializer = BannerSerializer(data=request.data, context={'request': request})
     if not serializer.is_valid():
@@ -44,7 +44,7 @@ def create_banner(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('banners', 'edit')])
 def update_banner(request, pk):
     try:
         banner = Banner.objects.get(id=pk)
@@ -68,7 +68,7 @@ def update_banner(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('banners', 'delete')])
 def delete_banner(_request, pk):
     try:
         Banner.objects.get(id=pk).delete()

@@ -130,7 +130,7 @@ class SSLCommerzService:
         order.status         = 'CONFIRMED'
         order.save(update_fields=['payment_status', 'status', 'updated_at'])
 
-        admin = User.objects.filter(role='ADMIN').first()
+        admin = User.objects.filter(role__code='ADMIN').first()
         if admin:
             OrderStatusLog.objects.create(
                 order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
