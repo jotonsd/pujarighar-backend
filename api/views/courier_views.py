@@ -109,7 +109,7 @@ def send_to_courier(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
     try:
-        consignment = _svc.send_order(order, request.data.get('provider_id'), request.user)
+        consignment = _svc.send_order(order, request.data.get('provider_id'), request.user, request.data.get('weight'))
         return ApiResponse(message='Sent to courier', data=CourierConsignmentSerializer(consignment).data, status_code=201)
     except Exception as e:
         logger.error(f'Send to courier error: {e}', exc_info=True)

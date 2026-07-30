@@ -24,7 +24,7 @@ class CourierService:
         return CourierProvider.objects.get(pk=pk)
 
     @transaction.atomic
-    def send_order(self, order: SalesOrder, provider_id, user: User) -> CourierConsignment:
+    def send_order(self, order: SalesOrder, provider_id, user: User, weight=None) -> CourierConsignment:
         # Sending to courier is offered as an alternative to internal delivery
         # assignment (same "who delivers this" decision point), so it's only
         # valid from the same states assign_delivery() accepts from.
@@ -49,7 +49,7 @@ class CourierService:
 
         service = get_courier_service(provider)
         try:
-            result = service.create_order(order)
+            result = service.create_order(order, weight)
         except Exception as e:
             logger.error(f'Courier send_order failed for {order.order_number}: {e}', exc_info=True)
             raise ValidationError({
