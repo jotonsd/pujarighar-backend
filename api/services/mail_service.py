@@ -37,7 +37,7 @@ def _get_connection():
 
 def _admin_emails():
     return list(
-        User.objects.filter(role='ADMIN', is_active=True)
+        User.objects.filter(role__code='ADMIN', is_active=True)
         .exclude(email='')
         .values_list('email', flat=True)
     )
@@ -391,7 +391,7 @@ _PROMO_PREF_FIELD = {
 def promo_recipients_by_language(email_type: str):
     """Returns {'bn': [emails], 'en': [emails]} based on each user's preferred_language."""
     qs = (
-        User.objects.filter(role='CUSTOMER', is_active=True, profile__notify_marketing=True)
+        User.objects.filter(role__code='CUSTOMER', is_active=True, profile__notify_marketing=True)
         .exclude(email='')
     )
     field = _PROMO_PREF_FIELD.get(email_type)

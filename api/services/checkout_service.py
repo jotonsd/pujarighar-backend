@@ -193,7 +193,7 @@ class CheckoutService:
                 )
 
     def _notify_admins(self, order: SalesOrder) -> None:
-        admins  = User.objects.filter(role='ADMIN', is_active=True)
+        admins  = User.objects.filter(role__code='ADMIN', is_active=True)
         amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'

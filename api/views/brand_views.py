@@ -7,7 +7,7 @@ from api.models import Brand
 from api.serializers.product_serializers import BrandSerializer
 from api.services.product_service import BrandService
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 _svc = BrandService()
@@ -27,7 +27,7 @@ def list_brands(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('brands', 'create')])
 def create_brand(request):
     serializer = BrandSerializer(data=request.data)
     if not serializer.is_valid():
@@ -53,7 +53,7 @@ def get_brand(_request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('brands', 'edit')])
 def update_brand(request, pk):
     try:
         brand = _svc.get_brand(pk)
@@ -70,7 +70,7 @@ def update_brand(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('brands', 'delete')])
 def delete_brand(_request, pk):
     try:
         _svc.delete_brand(_svc.get_brand(pk))

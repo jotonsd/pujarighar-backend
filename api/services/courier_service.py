@@ -192,7 +192,7 @@ class CourierService:
             self._notify_admins(consignment)
 
     def _notify_admins(self, consignment: CourierConsignment) -> None:
-        admins = User.objects.filter(role='ADMIN', is_active=True)
+        admins = User.objects.filter(role__code='ADMIN', is_active=True)
         order = consignment.order
         notifications = [
             Notification(

@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 from api.models import CashbackTier
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.utils.response import ApiResponse
 
 logger = logging.getLogger(__name__)
@@ -21,14 +21,14 @@ def _serialize(tier: CashbackTier) -> dict:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('cashback', 'view')])
 def list_cashback_tiers(request):
     tiers = CashbackTier.objects.all()
     return ApiResponse(message='Cashback tiers', data=[_serialize(t) for t in tiers])
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('cashback', 'create')])
 def create_cashback_tier(request):
     try:
         tier = CashbackTier.objects.create(
@@ -45,7 +45,7 @@ def create_cashback_tier(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('cashback', 'edit')])
 def update_cashback_tier(request, pk):
     try:
         tier = CashbackTier.objects.get(pk=pk)
@@ -60,7 +60,7 @@ def update_cashback_tier(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('cashback', 'delete')])
 def delete_cashback_tier(request, pk):
     try:
         CashbackTier.objects.get(pk=pk).delete()

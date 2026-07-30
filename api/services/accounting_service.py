@@ -345,7 +345,7 @@ class AccountingService:
             'today_revenue':         str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(today), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
             'pending_orders':        SalesOrder.objects.filter(status='PENDING').count(),
             'low_stock_count':       low_stock_count,
-            'total_customers':       User.objects.filter(role='CUSTOMER', is_active=True).count(),
+            'total_customers':       User.objects.filter(role__code='CUSTOMER', is_active=True).count(),
             'total_products':        Product.objects.filter(is_active=True).count(),
             'monthly_revenue_chart': monthly_chart,
             'status_breakdown':      status_breakdown,

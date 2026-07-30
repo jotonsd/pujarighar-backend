@@ -29,12 +29,43 @@ class BaseModel(models.Model):
 
 # ─── Accounts ─────────────────────────────────────────────────────────────────
 
-ROLE_CHOICES = [
-    ('ADMIN',     'অ্যাডমিন'),
-    ('WAREHOUSE', 'গুদামঘর কর্মী'),
-    ('DELIVERY',  'ডেলিভারিম্যান'),
-    ('CUSTOMER',  'গ্রাহক'),
-]
+class Permission(BaseModel):
+    """Fixed, code-defined catalog of module+action permission keys — not admin-creatable."""
+    # 'delete' is deliberately not a grantable action — resources are managed
+    # via view/create/edit only; only the ADMIN superuser bypass can delete.
+    ACTIONS = [
+        ('view',   'View'),
+        ('create', 'Create'),
+        ('edit',   'Edit'),
+    ]
+    module   = models.CharField(max_length=50)
+    action   = models.CharField(max_length=10, choices=ACTIONS)
+    label_bn = models.CharField(max_length=100)
+    label_en = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ('module', 'action')
+        ordering = ['module', 'action']
+
+    def __str__(self):
+        return f'{self.module}.{self.action}'
+
+
+class Role(BaseModel):
+    """Admin-creatable staff role. The 4 seeded system roles (code set, is_system=True)
+    replace the old fixed ROLE_CHOICES enum; ADMIN bypasses the permissions M2M entirely
+    (see api/permissions.py has_permission()) and is never editable."""
+    name_bn     = models.CharField(max_length=100)
+    name_en     = models.CharField(max_length=100)
+    code        = models.CharField(max_length=20, null=True, blank=True, unique=True)
+    is_system   = models.BooleanField(default=False)
+    permissions = models.ManyToManyField(Permission, blank=True, related_name='roles')
+
+    class Meta:
+        ordering = ['name_bn']
+
+    def __str__(self):
+        return self.name_bn or self.name_en
 
 
 class UserManager(BaseUserManager):
@@ -47,7 +78,8 @@ class UserManager(BaseUserManager):
         return user
 
     def create_superuser(self, email, phone, password=None, **extra):
-        extra.setdefault('role', 'ADMIN')
+        if 'role' not in extra:
+            extra['role'] = Role.objects.get(code='ADMIN')
         extra.setdefault('is_staff', True)
         extra.setdefault('is_superuser', True)
         return self.create_user(email, phone, password, **extra)
@@ -58,7 +90,7 @@ class User(AbstractUser):
     username           = None
     email              = models.EmailField(unique=True)
     phone              = models.CharField(max_length=15, unique=True, null=True, blank=True)
-    role               = models.CharField(max_length=20, choices=ROLE_CHOICES, default='CUSTOMER')
+    role               = models.ForeignKey(Role, on_delete=models.PROTECT, related_name='users')
     preferred_language = models.CharField(
         max_length=5,
         choices=[('bn', 'বাংলা'), ('en', 'English')],
@@ -519,7 +551,7 @@ class DeliveryAssignment(BaseModel):
     order           = models.OneToOneField(SalesOrder, on_delete=models.CASCADE, related_name='delivery')
     delivery_person = models.ForeignKey(
         User, on_delete=models.PROTECT, null=True, blank=True,
-        limit_choices_to={'role': 'DELIVERY'},
+        limit_choices_to={'role__code': 'DELIVERY'},
         related_name='deliveries',
     )
     assigned_at   = models.DateTimeField(auto_now_add=True)

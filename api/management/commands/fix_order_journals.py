@@ -73,7 +73,7 @@ class Command(BaseCommand):
         dry = options['dry_run']
         today = timezone.now().date()
 
-        admin = User.objects.filter(role='ADMIN', is_active=True).first()
+        admin = User.objects.filter(role__code='ADMIN', is_active=True).first()
         if not admin:
             self.stderr.write('No active admin user found. Aborting.')
             return

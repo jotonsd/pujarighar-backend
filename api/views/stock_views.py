@@ -10,14 +10,14 @@ from api.serializers.product_serializers import (
 )
 from api.services.product_service import StockService
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin, IsAdminOrWarehouse
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 _svc = StockService()
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'view')])
 def get_stock(_request, pk):
     try:
         product = Product.objects.get(pk=pk)
@@ -31,7 +31,7 @@ def get_stock(_request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdminOrWarehouse])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'edit')])
 def adjust_stock(request, pk):
     try:
         product = Product.objects.get(pk=pk)
@@ -63,7 +63,7 @@ def adjust_stock(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reports_purchases', 'view')])
 def get_purchase_report(request):
     data = _svc.get_purchase_report(
         request=request,
@@ -76,7 +76,7 @@ def get_purchase_report(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('reports_supplier_returns', 'view')])
 def get_supplier_return_report(request):
     data = _svc.get_supplier_return_report(
         request=request,
@@ -89,7 +89,7 @@ def get_supplier_return_report(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'view')])
 def list_package_items(_request, pk):
     try:
         product = Product.objects.get(pk=pk, is_package=True)
@@ -100,7 +100,7 @@ def list_package_items(_request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'edit')])
 def add_package_item(request, pk):
     try:
         package = Product.objects.get(pk=pk, is_package=True)
@@ -118,7 +118,7 @@ def add_package_item(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'edit')])
 def delete_package_item(_request, pk, item_id):
     try:
         item = ProductPackageItem.objects.get(pk=item_id, package_id=pk)

@@ -7,7 +7,7 @@ from api.models import Category
 from api.serializers.product_serializers import CategorySerializer
 from api.services.product_service import CategoryService
 from api.utils.response import ApiResponse
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
 _svc = CategoryService()
@@ -28,7 +28,7 @@ def list_categories(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('categories', 'create')])
 def create_category(request):
     serializer = CategorySerializer(data=request.data)
     if not serializer.is_valid():
@@ -54,7 +54,7 @@ def get_category(_request, pk):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('categories', 'edit')])
 def update_category(request, pk):
     try:
         category = _svc.get_category(pk)
@@ -71,7 +71,7 @@ def update_category(request, pk):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('categories', 'delete')])
 def delete_category(_request, pk):
     try:
         _svc.delete_category(_svc.get_category(pk))

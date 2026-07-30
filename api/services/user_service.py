@@ -10,7 +10,7 @@ class UserService:
     def list_users(self, role: str = '', search: str = '', is_active: str = ''):
         qs = User.objects.select_related('profile').all()
         if role:
-            qs = qs.filter(role=role)
+            qs = qs.filter(role_id=role)
         if search:
             qs = qs.filter(Q(email__icontains=search) | Q(phone__icontains=search))
         if is_active != '':
@@ -72,4 +72,4 @@ class UserService:
         user.save()
 
     def list_delivery_persons(self):
-        return User.objects.filter(role='DELIVERY', is_active=True).select_related('profile')
+        return User.objects.filter(role__code='DELIVERY', is_active=True).select_related('profile')

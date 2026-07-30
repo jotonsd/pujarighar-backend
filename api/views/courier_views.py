@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import CourierConsignment, CourierProvider, CourierReturnRequest, SalesOrder
-from api.permissions import IsAdmin
+from api.permissions import has_permission
 from api.serializers.courier_serializers import (
     CourierConsignmentSerializer, CourierProviderSerializer, CourierReturnRequestSerializer,
 )
@@ -21,7 +21,7 @@ _svc = CourierService()
 # ─── Providers ─────────────────────────────────────────────────────────────────
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def providers(request):
     if request.method == 'GET':
         qs = _svc.list_providers()
@@ -50,7 +50,7 @@ def providers(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'edit')])
 def update_provider(request, pk):
     try:
         provider = CourierProvider.objects.get(pk=pk)
@@ -72,7 +72,7 @@ def update_provider(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def provider_balance(request, pk):
     try:
         provider = CourierProvider.objects.get(pk=pk)
@@ -86,7 +86,7 @@ def provider_balance(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def provider_police_stations(request, pk):
     try:
         provider = CourierProvider.objects.get(pk=pk)
@@ -102,7 +102,7 @@ def provider_police_stations(request, pk):
 # ─── Send order / consignments ─────────────────────────────────────────────────
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'edit')])
 def send_to_courier(request, pk):
     try:
         order = SalesOrder.objects.get(pk=pk)
@@ -117,7 +117,7 @@ def send_to_courier(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def courier_status(request, pk):
     try:
         order = SalesOrder.objects.get(pk=pk)
@@ -133,7 +133,7 @@ def courier_status(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def list_consignments(request):
     qs = CourierConsignment.objects.select_related('order', 'provider').prefetch_related('events').order_by('-created_at')
     status_filter = request.query_params.get('status')
@@ -148,7 +148,7 @@ def list_consignments(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def get_consignment(request, pk):
     try:
         consignment = CourierConsignment.objects.select_related('order', 'provider').prefetch_related('events').get(pk=pk)
@@ -160,7 +160,7 @@ def get_consignment(request, pk):
 # ─── Return requests ────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'create')])
 def create_return_request(request):
     try:
         consignment = CourierConsignment.objects.get(pk=request.data.get('consignment_id'))
@@ -175,7 +175,7 @@ def create_return_request(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def get_return_request(request, pk):
     try:
         rr = CourierReturnRequest.objects.select_related('consignment__order').get(pk=pk)
@@ -190,7 +190,7 @@ def get_return_request(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def list_return_requests(request):
     qs = CourierReturnRequest.objects.select_related('consignment__order').order_by('-created_at')
     page_data, pagination = paginate_queryset(qs, request)
@@ -204,7 +204,7 @@ def list_return_requests(request):
 # ─── Payments (read-through to provider) ───────────────────────────────────────
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def list_payments(request):
     try:
         provider = CourierProvider.objects.get(pk=request.query_params.get('provider_id'))
@@ -218,7 +218,7 @@ def list_payments(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def get_payment(request, payment_id):
     try:
         provider = CourierProvider.objects.get(pk=request.query_params.get('provider_id'))

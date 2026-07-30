@@ -37,4 +37,4 @@ class MaintenanceModeMiddleware:
         if not auth:
             return False
         user, _ = auth
-        return user.is_authenticated and user.role == 'ADMIN'
+        return user.is_authenticated and user.role.code == 'ADMIN'
