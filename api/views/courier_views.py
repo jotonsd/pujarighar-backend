@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import CourierConsignment, CourierProvider, CourierReturnRequest, SalesOrder
-from api.permissions import has_permission
+from api.permissions import has_permission, has_any_permission
 from api.serializers.courier_serializers import (
     CourierConsignmentSerializer, CourierProviderSerializer, CourierReturnRequestSerializer,
 )
@@ -21,12 +21,19 @@ _svc = CourierService()
 # ─── Providers ─────────────────────────────────────────────────────────────────
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated, has_permission('courier', 'view')])
+@permission_classes([IsAuthenticated])
 def providers(request):
     if request.method == 'GET':
+        # Also readable by anyone who can view orders — the order-details
+        # "assign to courier" flow needs this list to populate its provider
+        # dropdown, without requiring the full 'courier' module permission.
+        if not has_any_permission(('courier', 'view'), ('orders', 'view'))().has_permission(request, None):
+            return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
         qs = _svc.list_providers()
         return ApiResponse(message='Providers retrieved', data=CourierProviderSerializer(qs, many=True).data)
 
+    if not has_permission('courier', 'view')().has_permission(request, None):
+        return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
     data = request.data
     if not data.get('code') or not data.get('name'):
         return ApiResponse(message='Code and name are required', errors='Validation error', status_code=422)
@@ -102,7 +109,7 @@ def provider_police_stations(request, pk):
 # ─── Send order / consignments ─────────────────────────────────────────────────
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated, has_permission('courier', 'edit')])
+@permission_classes([IsAuthenticated, has_any_permission(('courier', 'edit'), ('orders', 'edit'))])
 def send_to_courier(request, pk):
     try:
         order = SalesOrder.objects.get(pk=pk)
