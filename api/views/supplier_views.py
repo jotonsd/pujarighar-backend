@@ -7,13 +7,19 @@ from rest_framework.permissions import IsAuthenticated
 from api.models import Account, JournalEntry, JournalLine, Supplier, SupplierPayment
 from api.serializers.product_serializers import SupplierPaymentSerializer, SupplierSerializer
 from api.utils.response import ApiResponse
-from api.permissions import has_permission
+from api.permissions import has_permission, has_any_permission
 
 logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, has_permission('suppliers', 'view')])
+@permission_classes([IsAuthenticated, has_any_permission(
+    ('suppliers', 'view'),
+    ('reports_purchases', 'view'),
+    ('reports_supplier_returns', 'view'),
+    ('reports_supplier_outstanding', 'view'),
+    ('inventory_stock', 'view'),
+)])
 def list_suppliers(request):
     include_inactive = request.query_params.get('include_inactive') == 'true'
     qs = Supplier.objects.all() if include_inactive else Supplier.objects.filter(is_active=True)
