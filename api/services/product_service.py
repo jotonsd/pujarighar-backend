@@ -166,35 +166,45 @@ class ProductService:
                 '_disc_amount' if ordering == 'discount_asc' else '-_disc_amount',
             )
         elif personalize_user or personalize_guest_id:
-            # No explicit sort chosen — reuse the same category-affinity signal
-            # behind "Recommended for You" (see get_recommended_products) to
-            # bubble up products from categories this visitor has actually
-            # viewed, instead of a flat alphabetical list. Falls through to the
-            # model's default ordering (name_bn) for visitors with no view
-            # history yet, so nothing changes for them.
-            qs = self._personalize_ordering(qs, personalize_user, personalize_guest_id)
+            # No explicit sort chosen. Logged-in customers: rank by their own
+            # "most visited" category affinity first (same signal behind
+            # "Recommended for You" — see get_recommended_products), then by
+            # badge priority (new > flash_sale > trendy). Guests skip straight
+            # to the badge-priority ranking. Either way, falls back to the
+            # model's default ordering (-created_at) as the final tiebreak.
+            qs = self._personalize_ordering(qs, personalize_user)
         return qs
 
-    def _personalize_ordering(self, qs, user, guest_id):
-        identity = Q(user=user) if user else (Q(guest_id=guest_id) if guest_id else None)
-        if identity is None:
-            return qs
+    def _personalize_ordering(self, qs, user):
+        order_by = []
 
-        since = timezone.now() - timedelta(days=90)
-        cat_weight = defaultdict(int)
-        views = ProductView.objects.filter(identity, created_at__gte=since).select_related('product')
-        for v in views:
-            if v.product and v.product.category_id:
-                cat_weight[v.product.category_id] += 1
-        if not cat_weight:
-            return qs
+        if user:
+            since = timezone.now() - timedelta(days=90)
+            cat_weight = defaultdict(int)
+            views = ProductView.objects.filter(user=user, created_at__gte=since).select_related('product')
+            for v in views:
+                if v.product and v.product.category_id:
+                    cat_weight[v.product.category_id] += 1
+            if cat_weight:
+                affinity = Case(
+                    *[When(category_id=cid, then=Value(weight)) for cid, weight in cat_weight.items()],
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+                qs = qs.annotate(_affinity=affinity)
+                order_by.append('-_affinity')
 
-        affinity = Case(
-            *[When(category_id=cid, then=Value(weight)) for cid, weight in cat_weight.items()],
+        badge_priority = Case(
+            When(badges__contains=['new'], then=Value(3)),
+            When(badges__contains=['flash_sale'], then=Value(2)),
+            When(badges__contains=['trendy'], then=Value(1)),
             default=Value(0),
             output_field=IntegerField(),
         )
-        return qs.annotate(_affinity=affinity).order_by('-_affinity', 'name_bn')
+        qs = qs.annotate(_badge_priority=badge_priority)
+        order_by.append('-_badge_priority')
+
+        return qs.order_by(*order_by, '-created_at')
 
     def get_recommended_products(self, user, guest_id: str, limit: int = 12):
         """Personalized picks for this visitor: find every category they've

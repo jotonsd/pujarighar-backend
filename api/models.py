@@ -195,7 +195,7 @@ class Supplier(BaseModel):
         return self.name_bn or self.name_en
 
 
-PRODUCT_BADGES = ['new', 'trendy', 'flash_sale', 'popular']
+PRODUCT_BADGES = ['new', 'trendy', 'flash_sale']
 
 
 class Product(BaseModel):
@@ -235,7 +235,7 @@ class Product(BaseModel):
     badges = models.JSONField(default=list, blank=True)
 
     class Meta:
-        ordering = ['name_bn']
+        ordering = ['-created_at']
 
     def __str__(self):
         return f'{self.name_bn} ({self.sku})'
