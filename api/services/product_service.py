@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
+from uuid import UUID
 from django.db import transaction
 from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
@@ -93,8 +94,22 @@ class ProductService:
         elif not include_inactive:
             qs = qs.filter(is_active=True)
         if category:
-            ids = [c.strip() for c in category.split(',') if c.strip()]
-            qs = qs.filter(category_id__in=ids) if ids else qs
+            tokens = [c.strip() for c in category.split(',') if c.strip()]
+            # Accepts either category UUIDs (admin product list still filters
+            # this way) or slugs (the public storefront links to categories
+            # by slug for readable/shareable URLs) in the same param.
+            ids, slugs = [], []
+            for token in tokens:
+                try:
+                    UUID(token)
+                    ids.append(token)
+                except ValueError:
+                    slugs.append(token)
+            if ids or slugs:
+                cond = Q()
+                if ids:   cond |= Q(category_id__in=ids)
+                if slugs: cond |= Q(category__slug__in=slugs)
+                qs = qs.filter(cond)
         if brand:
             ids = [b.strip() for b in brand.split(',') if b.strip()]
             qs = qs.filter(brand_id__in=ids) if ids else qs
