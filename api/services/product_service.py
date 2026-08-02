@@ -130,7 +130,10 @@ class ProductService:
                 Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
             ).distinct()
         if ordering == 'newest':
-            qs = qs.order_by('-created_at')
+            # "New Released" is the New badge, not just recency — only
+            # products the admin has actually tagged 'new' show up here,
+            # ordered by creation date among themselves.
+            qs = qs.filter(badges__contains=['new']).order_by('-created_at')
         elif ordering in ('price_asc', 'price_desc'):
             disc_type = Subquery(
                 Discount.objects.filter(product=OuterRef('pk'), is_active=True)
