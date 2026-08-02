@@ -68,6 +68,7 @@ def _nav_registry() -> list:
         ]),
         group('landmark', 'ফিন্যান্স', 'Finance', [
             group('book-open', 'হিসাব', 'Accounting', [
+                item('/admin/accounting/chart',         'list-tree',     'একাউন্ট চার্ট',     'Chart of Accounts', 'accounting_chart'),
                 item('/admin/accounting/journal',       'notebook-pen',  'জার্নাল',          'Journal', 'accounting_journal'),
                 item('/admin/accounting/ledger',        'book-open',     'খাতা',              'Ledger', 'accounting_ledger'),
                 item('/admin/accounting/profit-loss',   'trending-up',   'লাভ-ক্ষতি',        'Profit & Loss', 'accounting_profit_loss'),
