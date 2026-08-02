@@ -27,6 +27,12 @@ def _ctx(request):
 def list_products(request):
     try:
         include_inactive = request.query_params.get('include_inactive', '').lower() == 'true'
+        # Personalized default ordering is a storefront-only concern — admin
+        # staff browsing the catalog (who also trigger ProductView rows when
+        # opening a product's edit page) should still get a stable, predictable
+        # listing, not one reshuffled by their own recent admin activity.
+        user, guest_id = get_visitor(request)
+        is_staff = user is not None and user.role.code != 'CUSTOMER'
         qs = _svc.list_products(
             category=request.query_params.get('category'),
             brand=request.query_params.get('brand'),
@@ -38,14 +44,14 @@ def list_products(request):
             ordering=request.query_params.get('ordering'),
             has_discount=request.query_params.get('has_discount', '').lower() == 'true',
             is_active=request.query_params.get('is_active'),
+            personalize_user=None if is_staff else user,
+            personalize_guest_id='' if is_staff else guest_id,
         )
         page_data, pagination = paginate_queryset(qs, request)
 
         search = request.query_params.get('search', '').strip()
-        if search:
-            user, guest_id = get_visitor(request)
-            if user or guest_id:
-                SearchLog.objects.create(user=user, guest_id=guest_id, query=search[:200])
+        if search and (user or guest_id):
+            SearchLog.objects.create(user=user, guest_id=guest_id, query=search[:200])
 
         return ApiResponse(
             message="Products retrieved successfully",

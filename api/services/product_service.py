@@ -85,7 +85,7 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
         if is_active is not None:
@@ -165,7 +165,36 @@ class ProductService:
             ).order_by(
                 '_disc_amount' if ordering == 'discount_asc' else '-_disc_amount',
             )
+        elif personalize_user or personalize_guest_id:
+            # No explicit sort chosen — reuse the same category-affinity signal
+            # behind "Recommended for You" (see get_recommended_products) to
+            # bubble up products from categories this visitor has actually
+            # viewed, instead of a flat alphabetical list. Falls through to the
+            # model's default ordering (name_bn) for visitors with no view
+            # history yet, so nothing changes for them.
+            qs = self._personalize_ordering(qs, personalize_user, personalize_guest_id)
         return qs
+
+    def _personalize_ordering(self, qs, user, guest_id):
+        identity = Q(user=user) if user else (Q(guest_id=guest_id) if guest_id else None)
+        if identity is None:
+            return qs
+
+        since = timezone.now() - timedelta(days=90)
+        cat_weight = defaultdict(int)
+        views = ProductView.objects.filter(identity, created_at__gte=since).select_related('product')
+        for v in views:
+            if v.product and v.product.category_id:
+                cat_weight[v.product.category_id] += 1
+        if not cat_weight:
+            return qs
+
+        affinity = Case(
+            *[When(category_id=cid, then=Value(weight)) for cid, weight in cat_weight.items()],
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+        return qs.annotate(_affinity=affinity).order_by('-_affinity', 'name_bn')
 
     def get_recommended_products(self, user, guest_id: str, limit: int = 12):
         """Personalized picks for this visitor: find every category they've
