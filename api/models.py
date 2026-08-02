@@ -228,10 +228,9 @@ class Product(BaseModel):
     focus_keyword        = models.CharField(max_length=150, blank=True, default='')
     canonical_url        = models.URLField(max_length=500, blank=True, default='')
 
-    # Merchandising badges (e.g. 'new', 'trendy', 'flash_sale', 'popular') —
-    # set directly by the admin on the product form, not computed/derived, so
-    # they stay exactly as intended until changed. A list since a product can
-    # carry more than one badge at once.
+    # Merchandising badges (see PRODUCT_BADGES) — set directly by the admin on
+    # the product form, not computed/derived, so they stay exactly as intended
+    # until changed. A list since a product can carry more than one badge.
     badges = models.JSONField(default=list, blank=True)
 
     class Meta:
