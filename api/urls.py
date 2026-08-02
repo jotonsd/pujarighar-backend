@@ -140,7 +140,9 @@ urlpatterns = [
 
     # ─── Accounting ───────────────────────────────────────────────────────────
     path('accounting/accounts/',                      views.list_accounts,         name='account-list'),
+    path('accounting/accounts/create/',                views.create_account,        name='account-create'),
     path('accounting/accounts/<uuid:pk>/',             views.get_account,           name='account-detail'),
+    path('accounting/accounts/<uuid:pk>/update/',      views.update_account,        name='account-update'),
     path('accounting/journal-entries/',                views.list_journal_entries,  name='journal-list'),
     path('accounting/journal-entries/create/',         views.create_manual_journal, name='journal-create'),
     path('accounting/journal-entries/<uuid:pk>/',      views.get_journal_entry,     name='journal-detail'),

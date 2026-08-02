@@ -17,11 +17,35 @@ logger = logging.getLogger(__name__)
 
 class AccountingService:
 
-    def list_accounts(self):
-        return Account.objects.filter(is_active=True)
+    def list_accounts(self, include_inactive: bool = False):
+        qs = Account.objects.all() if include_inactive else Account.objects.filter(is_active=True)
+        return qs.order_by('code')
 
     def get_account(self, pk: str) -> Account:
         return Account.objects.get(pk=pk)
+
+    def create_account(self, data: dict) -> Account:
+        return Account.objects.create(
+            code=data['code'],
+            name_bn=data['name_bn'],
+            name_en=data['name_en'],
+            account_type=data['account_type'],
+            parent=data.get('parent'),
+        )
+
+    def update_account(self, account: Account, data: dict) -> Account:
+        # `code` is intentionally not editable here — journal lines and manual
+        # entries reference accounts by code (see create_manual_journal), so
+        # changing it after creation would silently break those lookups.
+        for field in ('name_bn', 'name_en', 'account_type'):
+            if field in data:
+                setattr(account, field, data[field])
+        if 'parent' in data:
+            account.parent = data['parent']
+        if 'is_active' in data:
+            account.is_active = data['is_active']
+        account.save()
+        return account
 
     def list_journal_entries(self, params: dict):
         qs = JournalEntry.objects.prefetch_related('lines__account')

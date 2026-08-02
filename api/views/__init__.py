@@ -41,7 +41,7 @@ from .order_views import (
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
 from .accounting_views import (
-    list_accounts, get_account,
+    list_accounts, get_account, create_account, update_account,
     list_journal_entries, get_journal_entry,
     get_ledger,
     get_trial_balance, get_profit_loss, get_sales_summary,

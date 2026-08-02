@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from api.models import Account, JournalEntry, JournalLine
 
@@ -24,6 +25,7 @@ class JournalEntrySerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
     total_debit      = serializers.SerializerMethodField()
     total_credit     = serializers.SerializerMethodField()
+    is_balanced      = serializers.SerializerMethodField()
 
     class Meta:
         model  = JournalEntry
@@ -31,7 +33,7 @@ class JournalEntrySerializer(serializers.ModelSerializer):
             'id', 'entry_number', 'reference_type', 'reference_id',
             'description_bn', 'description_en',
             'created_by', 'created_by_email', 'created_at', 'is_posted',
-            'lines', 'total_debit', 'total_credit',
+            'lines', 'total_debit', 'total_credit', 'is_balanced',
         ]
 
     def get_total_debit(self, obj):
@@ -39,3 +41,7 @@ class JournalEntrySerializer(serializers.ModelSerializer):
 
     def get_total_credit(self, obj):
         return str(sum(l.credit for l in obj.lines.all()))
+
+    def get_is_balanced(self, obj):
+        lines = obj.lines.all()
+        return abs(sum(l.debit for l in lines) - sum(l.credit for l in lines)) < Decimal('0.01')
