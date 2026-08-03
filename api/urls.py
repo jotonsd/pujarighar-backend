@@ -56,6 +56,7 @@ urlpatterns = [
     # ─── Stock ────────────────────────────────────────────────────────────────
     path('products/<uuid:pk>/stock/',          views.get_stock,          name='product-stock'),
     path('products/<uuid:pk>/stock/adjust/',   views.adjust_stock,       name='stock-adjust'),
+    path('products/<uuid:pk>/stock/<uuid:movement_id>/update/', views.update_stock_movement, name='stock-movement-update'),
     path('reports/purchases/',                 views.get_purchase_report,        name='purchase-report'),
     path('reports/supplier-returns/',          views.get_supplier_return_report, name='supplier-return-report'),
     path('reports/income/',                    views.get_income_report,          name='income-report'),

@@ -204,3 +204,27 @@ class StockAdjustSerializer(serializers.Serializer):
         if data['movement_type'] in ('PURCHASE', 'SUPPLIER_RETURN') and data.get('unit_cost', Decimal('0')) <= 0:
             raise serializers.ValidationError({'unit_cost': 'Buying price must be greater than zero for purchases and supplier returns'})
         return data
+
+
+class StockMovementUpdateSerializer(serializers.Serializer):
+    """Corrects a mistaken PURCHASE/SUPPLIER_RETURN entry — deliberately does
+    NOT accept movement_type/product (those never change on an edit, only
+    the numbers that were entered wrong)."""
+    quantity       = serializers.DecimalField(max_digits=12, decimal_places=3, required=False)
+    unit_cost      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    unit_price     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    supplier_id    = serializers.UUIDField(required=False, allow_null=True)
+    supplier_name  = serializers.CharField(required=False, allow_blank=True)
+    payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False)
+    note_bn        = serializers.CharField(required=False, allow_blank=True)
+    note_en        = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_quantity(self, value):
+        if value == 0:
+            raise serializers.ValidationError('Quantity cannot be zero')
+        return value
+
+    def validate_unit_cost(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Buying price must be greater than zero')
+        return value
