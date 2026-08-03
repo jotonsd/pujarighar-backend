@@ -57,3 +57,30 @@ def has_permission(module: str, action: str):
                 return True
             return user.role.permissions.filter(module=module, action=action).exists()
     return _HasPermission
+
+
+def has_any_permission(*module_actions: tuple[str, str]):
+    """
+    Like has_permission(), but passes if the user holds ANY of the given
+    (module, action) pairs. For endpoints that serve as a cross-module lookup
+    rather than management of their own resource — e.g. the supplier list is
+    a filter-dropdown source for purchase/return/outstanding reports and the
+    inventory stock-adjust panel, and the courier-provider list/send-to-courier
+    action is used from the order-details assign flow — so a role granted
+    only the *consuming* module's permission shouldn't also need the owning
+    module's permission just to populate a dropdown or perform the assignment.
+
+    Usage: @permission_classes([IsAuthenticated, has_any_permission(('suppliers', 'view'), ('reports_purchases', 'view'))])
+    """
+    class _HasAnyPermission(BasePermission):
+        def has_permission(self, request, view):
+            user = request.user
+            if not (user and user.is_authenticated):
+                return False
+            if user.role.code == 'ADMIN':
+                return True
+            for module, action in module_actions:
+                if user.role.permissions.filter(module=module, action=action).exists():
+                    return True
+            return False
+    return _HasAnyPermission

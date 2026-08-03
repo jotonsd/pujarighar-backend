@@ -2,7 +2,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from django.db.models import Q, Sum
 from django.utils import timezone
-from api.models import Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier, SupplierPayment
+from api.models import PRODUCT_BADGES, Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier, SupplierPayment
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -93,6 +93,12 @@ class ProductSerializer(serializers.ModelSerializer):
         d = self._active_discount(obj)
         return str(d.discount_value) if d else None
 
+    def validate_badges(self, value):
+        invalid = set(value) - set(PRODUCT_BADGES)
+        if invalid:
+            raise serializers.ValidationError(f'Unknown badge(s): {", ".join(invalid)}')
+        return value
+
     class Meta:
         model  = Product
         fields = [
@@ -103,7 +109,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'unit_price', 'cost_price', 'effective_price', 'original_price',
             'active_discount_type', 'active_discount_value',
             'unit_bn', 'unit_en',
-            'is_package', 'discount_type', 'discount_value', 'is_active',
+            'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
             'stock_on_hand', 'images', 'package_items',
             'average_rating', 'review_count',
             'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',

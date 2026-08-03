@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
+from uuid import UUID
 from django.db import transaction
 from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
@@ -45,7 +46,9 @@ class CategoryService:
             qs = qs.filter(parent_id=parent)
         if not include_inactive:
             qs = qs.filter(is_active=True)
-        return qs
+        # Category has an explicit admin-managed `order` field for exactly
+        # this — display sequence — rather than any derived ranking.
+        return qs.order_by('order', 'name_bn')
 
     def get_category(self, pk: str) -> Category:
         return Category.objects.get(pk=pk)
@@ -85,7 +88,7 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
         if is_active is not None:
@@ -93,8 +96,22 @@ class ProductService:
         elif not include_inactive:
             qs = qs.filter(is_active=True)
         if category:
-            ids = [c.strip() for c in category.split(',') if c.strip()]
-            qs = qs.filter(category_id__in=ids) if ids else qs
+            tokens = [c.strip() for c in category.split(',') if c.strip()]
+            # Accepts either category UUIDs (admin product list still filters
+            # this way) or slugs (the public storefront links to categories
+            # by slug for readable/shareable URLs) in the same param.
+            ids, slugs = [], []
+            for token in tokens:
+                try:
+                    UUID(token)
+                    ids.append(token)
+                except ValueError:
+                    slugs.append(token)
+            if ids or slugs:
+                cond = Q()
+                if ids:   cond |= Q(category_id__in=ids)
+                if slugs: cond |= Q(category__slug__in=slugs)
+                qs = qs.filter(cond)
         if brand:
             ids = [b.strip() for b in brand.split(',') if b.strip()]
             qs = qs.filter(brand_id__in=ids) if ids else qs
@@ -115,7 +132,10 @@ class ProductService:
                 Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
             ).distinct()
         if ordering == 'newest':
-            qs = qs.order_by('-created_at')
+            # "New Released" is the New badge, not just recency — only
+            # products the admin has actually tagged 'new' show up here,
+            # ordered by creation date among themselves.
+            qs = qs.filter(badges__contains=['new']).order_by('-created_at')
         elif ordering in ('price_asc', 'price_desc'):
             disc_type = Subquery(
                 Discount.objects.filter(product=OuterRef('pk'), is_active=True)
@@ -165,7 +185,46 @@ class ProductService:
             ).order_by(
                 '_disc_amount' if ordering == 'discount_asc' else '-_disc_amount',
             )
+        elif personalize_user or personalize_guest_id:
+            # No explicit sort chosen. Logged-in customers: rank by their own
+            # "most visited" category affinity first (same signal behind
+            # "Recommended for You" — see get_recommended_products), then by
+            # badge priority (new > flash_sale > trendy). Guests skip straight
+            # to the badge-priority ranking. Either way, falls back to the
+            # model's default ordering (-created_at) as the final tiebreak.
+            qs = self._personalize_ordering(qs, personalize_user)
         return qs
+
+    def _personalize_ordering(self, qs, user):
+        order_by = []
+
+        if user:
+            since = timezone.now() - timedelta(days=90)
+            cat_weight = defaultdict(int)
+            views = ProductView.objects.filter(user=user, created_at__gte=since).select_related('product')
+            for v in views:
+                if v.product and v.product.category_id:
+                    cat_weight[v.product.category_id] += 1
+            if cat_weight:
+                affinity = Case(
+                    *[When(category_id=cid, then=Value(weight)) for cid, weight in cat_weight.items()],
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+                qs = qs.annotate(_affinity=affinity)
+                order_by.append('-_affinity')
+
+        badge_priority = Case(
+            When(badges__contains=['new'], then=Value(3)),
+            When(badges__contains=['flash_sale'], then=Value(2)),
+            When(badges__contains=['trendy'], then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+        qs = qs.annotate(_badge_priority=badge_priority)
+        order_by.append('-_badge_priority')
+
+        return qs.order_by(*order_by, '-created_at')
 
     def get_recommended_products(self, user, guest_id: str, limit: int = 12):
         """Personalized picks for this visitor: find every category they've

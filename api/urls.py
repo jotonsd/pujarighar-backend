@@ -140,7 +140,9 @@ urlpatterns = [
 
     # ─── Accounting ───────────────────────────────────────────────────────────
     path('accounting/accounts/',                      views.list_accounts,         name='account-list'),
+    path('accounting/accounts/create/',                views.create_account,        name='account-create'),
     path('accounting/accounts/<uuid:pk>/',             views.get_account,           name='account-detail'),
+    path('accounting/accounts/<uuid:pk>/update/',      views.update_account,        name='account-update'),
     path('accounting/journal-entries/',                views.list_journal_entries,  name='journal-list'),
     path('accounting/journal-entries/create/',         views.create_manual_journal, name='journal-create'),
     path('accounting/journal-entries/<uuid:pk>/',      views.get_journal_entry,     name='journal-detail'),
@@ -148,6 +150,13 @@ urlpatterns = [
     path('accounting/reports/trial-balance/',          views.get_trial_balance,     name='trial-balance'),
     path('accounting/reports/profit-loss/',            views.get_profit_loss,       name='profit-loss'),
     path('accounting/reports/sales-summary/',          views.get_sales_summary,     name='sales-summary'),
+
+    # ─── Bayna Bookings ───────────────────────────────────────────────────────
+    path('bayna/create/',              views.create_bayna_booking,   name='bayna-create'),
+    path('bayna/',                     views.list_bayna_bookings,    name='bayna-list'),
+    path('bayna/mine/',                views.list_my_bayna_bookings, name='bayna-mine'),
+    path('bayna/<uuid:pk>/',           views.get_bayna_booking,      name='bayna-detail'),
+    path('bayna/<uuid:pk>/update/',    views.update_bayna_booking,   name='bayna-update'),
 
     # ─── Dashboard ────────────────────────────────────────────────────────────
     path('dashboard/summary/', views.get_dashboard_summary, name='dashboard-summary'),

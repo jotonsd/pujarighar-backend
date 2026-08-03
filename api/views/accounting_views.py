@@ -10,26 +10,63 @@ from api.serializers.accounting_serializers import AccountSerializer, JournalEnt
 from api.services.accounting_service import AccountingService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
-from api.permissions import has_permission
+from api.permissions import has_permission, has_any_permission
 
 logger = logging.getLogger(__name__)
 _svc = AccountingService()
 
+# Accounts are a shared lookup consumed by several other modules' dropdowns
+# (journal entry lines, ledger account picker, expense/income report filters)
+# in addition to the Chart of Accounts management page itself.
+_ACCOUNTS_VIEWERS = (
+    ('accounting_chart', 'view'),
+    ('accounting_journal', 'view'),
+    ('accounting_ledger', 'view'),
+    ('expenses', 'view'),
+    ('reports_income', 'view'),
+    ('reports_expenses', 'view'),
+)
+
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
-def list_accounts(_request):
-    accounts = _svc.list_accounts()
+@permission_classes([IsAuthenticated, has_any_permission(*_ACCOUNTS_VIEWERS)])
+def list_accounts(request):
+    include_inactive = request.query_params.get('include_inactive') == 'true'
+    accounts = _svc.list_accounts(include_inactive=include_inactive)
     return ApiResponse(message="Accounts retrieved", data=AccountSerializer(accounts, many=True).data)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, has_permission('accounting_journal', 'view')])
+@permission_classes([IsAuthenticated, has_any_permission(*_ACCOUNTS_VIEWERS)])
 def get_account(_request, pk):
     try:
         return ApiResponse(message="Account retrieved", data=AccountSerializer(_svc.get_account(pk)).data)
     except Account.DoesNotExist:
         return ApiResponse(message="Account not found", errors="Not found", status_code=404)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('accounting_chart', 'create')])
+def create_account(request):
+    serializer = AccountSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+    account = _svc.create_account(serializer.validated_data)
+    return ApiResponse(message="Account created", data=AccountSerializer(account).data, status_code=201)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, has_permission('accounting_chart', 'edit')])
+def update_account(request, pk):
+    try:
+        account = _svc.get_account(pk)
+    except Account.DoesNotExist:
+        return ApiResponse(message="Account not found", errors="Not found", status_code=404)
+    serializer = AccountSerializer(account, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+    updated = _svc.update_account(account, serializer.validated_data)
+    return ApiResponse(message="Account updated", data=AccountSerializer(updated).data)
 
 
 @api_view(['GET'])

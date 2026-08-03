@@ -74,7 +74,11 @@ class CartSerializer(serializers.ModelSerializer):
         return str(max(total, Decimal('0')))
 
     def get_item_count(self, obj):
-        return obj.items.count()
+        # Total units across all lines, not the number of distinct products —
+        # adding 4 of one product should read as 4, not 1. Cast off Decimal so
+        # this serializes as a JSON number (the frontend types it as `number`),
+        # not a string like the other Decimal-backed fields on this serializer.
+        return float(sum(item.quantity for item in obj.items.all()))
 
 
 class AddToCartSerializer(serializers.Serializer):

@@ -41,7 +41,7 @@ from .order_views import (
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
 from .accounting_views import (
-    list_accounts, get_account,
+    list_accounts, get_account, create_account, update_account,
     list_journal_entries, get_journal_entry,
     get_ledger,
     get_trial_balance, get_profit_loss, get_sales_summary,
@@ -87,4 +87,11 @@ from .blog_views import (
 )
 from .role_views import (
     list_roles, list_permissions, create_role, update_role, delete_role,
+)
+from .bayna_views import (
+    create_booking as create_bayna_booking,
+    list_bookings as list_bayna_bookings,
+    get_booking as get_bayna_booking,
+    update_booking as update_bayna_booking,
+    list_my_bookings as list_my_bayna_bookings,
 )
