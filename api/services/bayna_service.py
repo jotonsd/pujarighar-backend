@@ -38,7 +38,7 @@ class BaynaService:
         return booking
 
     def update_booking(self, booking: BaynaBooking, data: dict) -> BaynaBooking:
-        for field in ('status', 'admin_notes'):
+        for field in ('status', 'admin_notes', 'event_date'):
             if field in data:
                 setattr(booking, field, data[field])
         booking.save()
