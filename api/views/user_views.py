@@ -59,6 +59,7 @@ def _nav_registry() -> list:
                 item('/admin/inventory',           'clipboard-list', 'স্টক',         'Stock', 'inventory_stock'),
                 item('/admin/settings/suppliers',  'truck',          'সরবরাহকারী',   'Suppliers', 'suppliers'),
             ]),
+            item('/admin/bayna', 'calendar', 'বায়না', 'Bayna Bookings', 'bayna'),
         ]),
         group('users', 'ব্যবহারকারী', 'Users', [
             item('/admin/users',             'users',      'ব্যবহারকারী',     'Users', 'users_admin'),
@@ -143,6 +144,7 @@ def _build_nav_menu(user) -> list:
             {'type': 'link', 'href': '/',         'icon': 'home',         'label_bn': 'হোম',           'label_en': 'Home'},
             {'type': 'link', 'href': '/products', 'icon': 'store',        'label_bn': 'পণ্য',           'label_en': 'Products'},
             {'type': 'link', 'href': '/packages', 'icon': 'gift',         'label_bn': 'প্যাকেজ',        'label_en': 'Packages'},
+            {'type': 'link', 'href': '/bayna',    'icon': 'calendar',     'label_bn': 'বায়না',          'label_en': 'Bayna'},
             {'type': 'link', 'href': '/blog',     'icon': 'file-text',    'label_bn': 'ব্লগ',           'label_en': 'Blog'},
             {'type': 'link', 'href': '/track',    'icon': 'truck',        'label_bn': 'অর্ডার ট্র্যাক', 'label_en': 'Track Order'},
             {'type': 'link', 'href': '/orders',   'icon': 'shopping-bag', 'label_bn': 'আমার অর্ডার',   'label_en': 'My Orders'},

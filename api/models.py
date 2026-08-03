@@ -978,6 +978,45 @@ class SearchLog(models.Model):
         ]
 
 
+class BaynaBooking(BaseModel):
+    """A বায়না (advance booking) request for a puja-related service — no
+    payment is collected through the system; admin/staff follow up by phone
+    to finalize price, assignment, and payment. `user`/`guest_id` mirror the
+    dual-identity pattern used by ProductView/SearchLog above, so both
+    logged-in customers and guests can submit a request."""
+
+    SERVICE_TYPES = [
+        ('PUJARI', 'পূজারী'),
+        ('DHAKI', 'ঢাকি'),
+        ('MURTI', 'মূর্তি'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('CONTACTED', 'Contacted'),
+        ('CONFIRMED', 'Confirmed'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+
+    user         = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='bayna_bookings')
+    guest_id     = models.CharField(max_length=64, blank=True, default='')
+    service_type = models.CharField(max_length=10, choices=SERVICE_TYPES)
+    event_date   = models.DateField()
+    name         = models.CharField(max_length=150)
+    phone        = models.CharField(max_length=20)
+    email        = models.EmailField(blank=True, default='')
+    location     = models.CharField(max_length=300)
+    description  = models.TextField()
+    status       = models.CharField(max_length=12, choices=STATUS_CHOICES, default='PENDING')
+    admin_notes  = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_service_type_display()} — {self.name} ({self.event_date})'
+
+
 # ─── Google Analytics / Search Console Integration ────────────────────────────
 # Singleton row holding the OAuth connection used to pull GA4 + Search Console
 # data into the admin dashboard. Tokens are stored encrypted (see api/utils/crypto.py)

@@ -88,3 +88,10 @@ from .blog_views import (
 from .role_views import (
     list_roles, list_permissions, create_role, update_role, delete_role,
 )
+from .bayna_views import (
+    create_booking as create_bayna_booking,
+    list_bookings as list_bayna_bookings,
+    get_booking as get_bayna_booking,
+    update_booking as update_bayna_booking,
+    list_my_bookings as list_my_bayna_bookings,
+)
