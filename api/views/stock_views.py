@@ -3,13 +3,13 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
-from api.models import Product, ProductPackageItem
+from api.models import Product, ProductPackageItem, StockMovement
 from api.serializers.product_serializers import (
-    StockMovementSerializer, StockAdjustSerializer,
+    StockMovementSerializer, StockAdjustSerializer, StockMovementUpdateSerializer,
     PackageItemReadSerializer, PackageItemWriteSerializer,
 )
 from api.services.product_service import StockService
-from api.utils.response import ApiResponse
+from api.utils.response import ApiResponse, api_error
 from api.permissions import has_permission
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,25 @@ def adjust_stock(request, pk):
     except Exception as e:
         logger.error(f"Stock adjust error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated, has_permission('inventory_stock', 'edit')])
+def update_stock_movement(request, pk, movement_id):
+    try:
+        movement = StockMovement.objects.select_related('product').get(pk=movement_id, product_id=pk)
+    except StockMovement.DoesNotExist:
+        return ApiResponse(message="Movement not found", errors="Not found", status_code=404)
+
+    serializer = StockMovementUpdateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+    try:
+        updated = _svc.update_stock_movement(movement, serializer.validated_data)
+        return ApiResponse(message="Stock entry updated", data=StockMovementSerializer(updated).data)
+    except Exception as e:
+        logger.error(f"Stock movement update error: {e}", exc_info=True)
+        return api_error(e)
 
 
 @api_view(['GET'])
