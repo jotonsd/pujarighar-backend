@@ -151,6 +151,13 @@ urlpatterns = [
     path('accounting/reports/profit-loss/',            views.get_profit_loss,       name='profit-loss'),
     path('accounting/reports/sales-summary/',          views.get_sales_summary,     name='sales-summary'),
 
+    # ─── Bayna Bookings ───────────────────────────────────────────────────────
+    path('bayna/create/',              views.create_bayna_booking,   name='bayna-create'),
+    path('bayna/',                     views.list_bayna_bookings,    name='bayna-list'),
+    path('bayna/mine/',                views.list_my_bayna_bookings, name='bayna-mine'),
+    path('bayna/<uuid:pk>/',           views.get_bayna_booking,      name='bayna-detail'),
+    path('bayna/<uuid:pk>/update/',    views.update_bayna_booking,   name='bayna-update'),
+
     # ─── Dashboard ────────────────────────────────────────────────────────────
     path('dashboard/summary/', views.get_dashboard_summary, name='dashboard-summary'),
 

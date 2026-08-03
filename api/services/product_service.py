@@ -46,7 +46,9 @@ class CategoryService:
             qs = qs.filter(parent_id=parent)
         if not include_inactive:
             qs = qs.filter(is_active=True)
-        return qs
+        # Category has an explicit admin-managed `order` field for exactly
+        # this — display sequence — rather than any derived ranking.
+        return qs.order_by('order', 'name_bn')
 
     def get_category(self, pk: str) -> Category:
         return Category.objects.get(pk=pk)
