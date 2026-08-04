@@ -8,7 +8,7 @@ from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, 
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
 from api.utils.dates import local_day_start, local_day_end_exclusive
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, personalize_user=None, personalize_guest_id=''):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
         if is_active is not None:
@@ -132,6 +132,13 @@ class ProductService:
                 Q(discounts__start_date__isnull=True) | Q(discounts__start_date__lte=today),
                 Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
             ).distinct()
+        if badges:
+            wanted = [b.strip() for b in badges.split(',') if b.strip() in PRODUCT_BADGES]
+            if wanted:
+                cond = Q()
+                for b in wanted:
+                    cond |= Q(badges__contains=[b])
+                qs = qs.filter(cond)
         if ordering == 'newest':
             # "New Released" is the New badge, not just recency — only
             # products the admin has actually tagged 'new' show up here,

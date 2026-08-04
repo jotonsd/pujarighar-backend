@@ -44,6 +44,7 @@ def list_products(request):
             ordering=request.query_params.get('ordering'),
             has_discount=request.query_params.get('has_discount', '').lower() == 'true',
             is_active=request.query_params.get('is_active'),
+            badges=request.query_params.get('badges'),
             personalize_user=None if is_staff else user,
             personalize_guest_id='' if is_staff else guest_id,
         )
