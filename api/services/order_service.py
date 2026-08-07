@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     SalesOrder, OrderStatusLog, DeliveryAssignment, User,
     StockMovement, Account, JournalEntry, JournalLine, Notification,
-    ReferralBonus,
+    ReferralBonus, SiteSetting,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.services.notification_ws import broadcast_notification
@@ -269,7 +269,7 @@ class OrderService:
         # Only pay once per referrer–referred pair
         if ReferralBonus.objects.filter(referrer=referrer, referred_user=customer).exists():
             return
-        amount = Decimal('8.00')
+        amount = SiteSetting.get().referral_bonus_amount
         ReferralBonus.objects.create(referrer=referrer, referred_user=customer, order=order, amount=amount)
         referrer.profile.cashback_balance = F('cashback_balance') + amount
         referrer.profile.save(update_fields=['cashback_balance'])

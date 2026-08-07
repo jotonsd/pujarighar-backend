@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
@@ -12,6 +13,7 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
 INT_FIELDS         = ['email_port']
 BOOL_FIELDS        = ['email_use_tls']
 FILE_FIELDS        = ['logo', 'favicon']
+DECIMAL_FIELDS     = ['referral_bonus_amount']
 
 
 def _serialize(s: SiteSetting, request=None) -> dict:
@@ -42,6 +44,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'has_email_host_password':  bool(s.email_host_password),
             'email_use_tls':            s.email_use_tls,
             'email_default_from':       s.email_default_from,
+            'referral_bonus_amount':    str(s.referral_bonus_amount),
         })
 
     return data
@@ -81,6 +84,15 @@ def update_site_settings(request):
         if field in request.FILES:
             setattr(s, field, request.FILES[field])
             updated.append(field)
+    for field in DECIMAL_FIELDS:
+        if field in request.data:
+            try:
+                value = Decimal(str(request.data[field]))
+                if value >= 0:
+                    setattr(s, field, value)
+                    updated.append(field)
+            except (InvalidOperation, TypeError, ValueError):
+                pass
     if updated:
         s.save(update_fields=updated)
     return ApiResponse(message='Settings updated', data=_serialize(s, request))
