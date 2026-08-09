@@ -5,9 +5,9 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
-    SalesOrder, OrderStatusLog, DeliveryAssignment, User,
+    SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User,
     StockMovement, Account, JournalEntry, JournalLine, Notification,
-    ReferralBonus, SiteSetting,
+    ReferralBonus, SiteSetting, ProductPackageItem,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.services.notification_ws import broadcast_notification
@@ -151,6 +151,49 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def update_item_quantity(self, order: SalesOrder, item: SalesOrderItem, new_quantity: Decimal, user: User) -> SalesOrder:
+        """Correct a mistaken quantity on a not-yet-shipped order — adjusts the
+        already-deducted stock by the delta, recomputes order totals from the
+        item's own locked-in unit_price (never re-priced against the product's
+        current price), and — since a non-COD order posts its SALE journal
+        immediately at checkout, before payment is even confirmed — resyncs
+        whatever journal entry (SALE or PAYMENT) already exists for this order
+        so COGS/Revenue/AR stay correct. Scoped to PENDING/CONFIRMED only,
+        mirroring apply_discount's own gate.
+        """
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারের পরিমাণ পরিবর্তন করা যায়',
+                'message_en': 'Quantity can only be changed on pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারের পরিমাণ পরিবর্তন করা যাবে না',
+                'message_en': 'Quantity cannot be changed on an already-paid order',
+            })
+        if new_quantity <= 0:
+            raise ValidationError({
+                'message_bn': 'পরিমাণ শূন্যের বেশি হতে হবে — বাদ দিতে অর্ডার বাতিল করুন',
+                'message_en': 'Quantity must be greater than zero — cancel the order to remove an item',
+            })
+
+        delta = new_quantity - item.quantity
+        if delta == 0:
+            return order
+
+        self._adjust_order_item_stock(item.product, delta, order.id, user)
+
+        item.quantity   = new_quantity
+        item.line_total = item.unit_price * new_quantity
+        item.save(update_fields=['quantity', 'line_total'])
+
+        self._recalc_order_totals(order)
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Order {order.order_number} item {item.id} quantity corrected: {item.quantity - delta} → {new_quantity} by {user.email}')
+        return order
+
+    @transaction.atomic
     def return_order(self, order: SalesOrder, user: User, note_bn: str = '', note_en: str = '') -> SalesOrder:
         order = self._transition(order, 'RETURNED', user, note_bn, note_en)
         if order.payment_status == 'PAID':
@@ -217,6 +260,80 @@ class OrderService:
             return Account.objects.get(code=code)
         except Account.DoesNotExist:
             return None
+
+    def _adjust_order_item_stock(self, product, delta: Decimal, order_id, user: User) -> None:
+        """delta > 0 (quantity increased) needs MORE stock deducted; delta < 0
+        (quantity decreased) restores stock. Packages have no stock movement
+        of their own — deduct/restore each component instead, same as the
+        original checkout-time deduction."""
+        if product.is_package:
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+                self._create_order_stock_movement(pi.component, -(pi.quantity * delta), order_id, user)
+        else:
+            self._create_order_stock_movement(product, -delta, order_id, user)
+
+    def _create_order_stock_movement(self, product, qty_change: Decimal, order_id, user: User) -> None:
+        if qty_change == 0:
+            return
+        if qty_change < 0 and product.stock_on_hand + qty_change < 0:
+            raise ValidationError({
+                'message_bn': f'{product.name_bn} এর পর্যাপ্ত স্টক নেই',
+                'message_en': f'Insufficient stock for {product.name_en}',
+            })
+        StockMovement.objects.create(
+            product=product, movement_type='SALE', quantity=qty_change,
+            reference_id=order_id, created_by=user,
+        )
+
+    def _recalc_order_totals(self, order: SalesOrder) -> None:
+        subtotal = sum((i.line_total for i in order.items.all()), Decimal('0'))
+        order.subtotal    = subtotal
+        order.grand_total = subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['subtotal', 'grand_total'])
+
+    def _resync_order_item_journal(self, order: SalesOrder) -> None:
+        """A non-COD order posts its SALE journal immediately at checkout
+        (before payment is even confirmed), and a COD order can be marked
+        paid — posting a PAYMENT journal — while still PENDING/CONFIRMED. So
+        by the time a quantity is corrected, one of those may already exist
+        with stale COGS/Revenue/AR-or-Cash amounts; rebuild it in place. If
+        neither exists yet (the common case — unpaid COD), there's nothing
+        posted to fix; whichever journal is created later will compute COGS
+        fresh from the now-corrected item quantities."""
+        entry = JournalEntry.objects.filter(
+            reference_id=order.id, reference_type__in=('SALE', 'PAYMENT'),
+        ).first()
+        if not entry:
+            return
+
+        cogs    = sum((i.product.cost_price * i.quantity for i in order.items.select_related('product')), Decimal('0'))
+        cb_used = Decimal(str(order.cashback_used or 0))
+
+        if entry.reference_type == 'SALE':
+            lines = [
+                ('1100', order.grand_total,                  Decimal('0')),  # Dr AR
+                ('4000', Decimal('0'),                       order.subtotal),  # Cr Revenue
+                ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),   # Cr Delivery
+                ('2100', Decimal('0'),                       order.tax_amount),  # Cr Tax
+                ('5000', cogs,                                Decimal('0')),  # Dr COGS
+                ('1300', Decimal('0'),                       cogs),          # Cr Inventory
+            ]
+        else:  # PAYMENT
+            lines = [
+                ('1000', order.grand_total,                  Decimal('0')),  # Dr Cash
+                ('5000', cogs,                                Decimal('0')),  # Dr COGS
+                ('4000', Decimal('0'),                       order.subtotal),  # Cr Revenue
+                ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),   # Cr Delivery
+                ('1300', Decimal('0'),                       cogs),          # Cr Inventory
+            ]
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
+
+        entry.lines.all().delete()
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
     def _create_payment_journal(self, order: SalesOrder, user: User) -> None:
         cogs    = sum(item.product.cost_price * item.quantity for item in order.items.select_related('product'))
