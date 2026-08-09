@@ -194,6 +194,37 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def delete_item(self, order: SalesOrder, item: SalesOrderItem, user: User) -> SalesOrder:
+        """Remove a mistakenly-added line item from a not-yet-shipped order —
+        same gate and stock/totals/journal reconciliation as
+        update_item_quantity, treating the removal as a drop to zero."""
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডার থেকে পণ্য মুছা যায়',
+                'message_en': 'Items can only be removed from pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডার থেকে পণ্য মুছা যাবে না',
+                'message_en': 'Items cannot be removed from an already-paid order',
+            })
+        if order.items.count() <= 1:
+            raise ValidationError({
+                'message_bn': 'অর্ডারে অন্তত একটি পণ্য থাকতে হবে — সম্পূর্ণ অর্ডার বাতিল করতে অর্ডার বাতিল করুন',
+                'message_en': 'An order must keep at least one item — cancel the whole order instead to remove everything',
+            })
+
+        self._adjust_order_item_stock(item.product, -item.quantity, order.id, user)
+        product_name = item.product_name_en
+        item.delete()
+
+        self._recalc_order_totals(order)
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Order {order.order_number} item removed ({product_name}) by {user.email}')
+        return order
+
+    @transaction.atomic
     def return_order(self, order: SalesOrder, user: User, note_bn: str = '', note_en: str = '') -> SalesOrder:
         order = self._transition(order, 'RETURNED', user, note_bn, note_en)
         if order.payment_status == 'PAID':
