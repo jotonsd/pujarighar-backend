@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
@@ -317,7 +317,10 @@ class OrderService:
         )
 
     def _recalc_order_totals(self, order: SalesOrder) -> None:
-        subtotal = sum((i.line_total for i in order.items.all()), Decimal('0'))
+        # order.items.all() would silently reuse get_order()'s prefetch_related
+        # cache here — stale from before this same request's delete/quantity
+        # change — so query the base manager directly to force a fresh read.
+        subtotal = SalesOrderItem.objects.filter(order=order).aggregate(total=Sum('line_total'))['total'] or Decimal('0')
         order.subtotal    = subtotal
         order.grand_total = subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
         order.save(update_fields=['subtotal', 'grand_total'])
@@ -337,7 +340,7 @@ class OrderService:
         if not entry:
             return
 
-        cogs    = sum((i.product.cost_price * i.quantity for i in order.items.select_related('product')), Decimal('0'))
+        cogs    = sum((i.product.cost_price * i.quantity for i in SalesOrderItem.objects.filter(order=order).select_related('product')), Decimal('0'))
         cb_used = Decimal(str(order.cashback_used or 0))
 
         if entry.reference_type == 'SALE':
