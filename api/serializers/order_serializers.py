@@ -6,12 +6,21 @@ from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssig
 class SalesOrderItemSerializer(serializers.ModelSerializer):
     is_package    = serializers.BooleanField(source='product.is_package', read_only=True)
     package_items = serializers.SerializerMethodField()
+    product_image = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrderItem
-        fields = ['id', 'product', 'product_name_bn', 'product_name_en',
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_image',
                   'original_unit_price', 'unit_price', 'quantity', 'line_total',
                   'is_package', 'package_items']
+
+    def get_product_image(self, obj):
+        img = obj.product.images.first()
+        if not img:
+            return None
+        request = self.context.get('request')
+        url = img.image.url
+        return request.build_absolute_uri(url) if request else url
 
     def get_package_items(self, obj):
         if not obj.product.is_package:
