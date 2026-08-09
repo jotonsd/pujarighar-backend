@@ -47,7 +47,7 @@ class OrderService:
         return qs
 
     def get_order(self, pk: str) -> SalesOrder:
-        return SalesOrder.objects.prefetch_related('items__product', 'status_logs', 'delivery').get(pk=pk)
+        return SalesOrder.objects.prefetch_related('items__product__images', 'status_logs', 'delivery').get(pk=pk)
 
     def confirm(self, order: SalesOrder, user: User) -> SalesOrder:
         return self._transition(order, 'CONFIRMED', user)
