@@ -144,6 +144,7 @@ def _build_nav_menu(user) -> list:
             {'type': 'link', 'href': '/',         'icon': 'home',         'label_bn': 'হোম',           'label_en': 'Home'},
             {'type': 'link', 'href': '/products', 'icon': 'store',        'label_bn': 'পণ্য',           'label_en': 'Products'},
             {'type': 'link', 'href': '/packages', 'icon': 'gift',         'label_bn': 'প্যাকেজ',        'label_en': 'Packages'},
+            {'type': 'link', 'href': '/products?offers=true', 'icon': 'tag', 'label_bn': 'অফার',       'label_en': 'Offers'},
             {'type': 'link', 'href': '/bayna',    'icon': 'calendar',     'label_bn': 'বায়না',          'label_en': 'Bayna'},
             {'type': 'link', 'href': '/blog',     'icon': 'file-text',    'label_bn': 'ব্লগ',           'label_en': 'Blog'},
             {'type': 'link', 'href': '/track',    'icon': 'truck',        'label_bn': 'অর্ডার ট্র্যাক', 'label_en': 'Track Order'},

@@ -7,7 +7,8 @@ from django.db import transaction
 from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
 from django.db.models.functions import Greatest
 from django.utils import timezone
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier
+from rest_framework.exceptions import ValidationError
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
 from api.utils.dates import local_day_start, local_day_end_exclusive
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, personalize_user=None, personalize_guest_id=''):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
         if is_active is not None:
@@ -131,6 +132,13 @@ class ProductService:
                 Q(discounts__start_date__isnull=True) | Q(discounts__start_date__lte=today),
                 Q(discounts__end_date__isnull=True)   | Q(discounts__end_date__gte=today),
             ).distinct()
+        if badges:
+            wanted = [b.strip() for b in badges.split(',') if b.strip() in PRODUCT_BADGES]
+            if wanted:
+                cond = Q()
+                for b in wanted:
+                    cond |= Q(badges__contains=[b])
+                qs = qs.filter(cond)
         if ordering == 'newest':
             # "New Released" is the New badge, not just recency — only
             # products the admin has actually tagged 'new' show up here,
@@ -359,6 +367,102 @@ class StockService:
 
         logger.info(f"Stock adjusted: {product.sku} {movement_type} {quantity}")
         return movement
+
+    @transaction.atomic
+    def update_stock_movement(self, movement: StockMovement, data: dict) -> StockMovement:
+        """Correct a mistaken purchase/supplier-return entry in place — updates
+        the movement AND, if one was posted, the linked JournalEntry's lines
+        (re-pointing the cash/payable side if payment_method changed too), so
+        the ledger stays in sync with the corrected numbers. Deliberately
+        in-place (no reversal/audit-trail entry) per explicit product
+        decision — scoped to PURCHASE/SUPPLIER_RETURN only, since those are
+        the only movement types that ever post a 1:1-linked journal entry
+        (see _create_purchase_journal/_create_supplier_return_journal); SALE
+        and RETURN movements come from orders and have no such link to fix.
+        """
+        if movement.movement_type not in ('PURCHASE', 'SUPPLIER_RETURN'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র ক্রয় বা সরবরাহকারীকে ফেরত এন্ট্রি সম্পাদনা করা যায়',
+                'message_en': 'Only purchase or supplier-return entries can be edited',
+            })
+
+        product = movement.product
+        old_quantity = movement.quantity
+
+        new_quantity = data.get('quantity', movement.quantity)
+        if movement.movement_type == 'SUPPLIER_RETURN':
+            new_quantity = -abs(new_quantity)
+
+        # Edit-safe stock check — movement.clean()'s own check assumes a
+        # not-yet-saved row (stock_on_hand doesn't include it yet), but here
+        # the OLD quantity is already counted in stock_on_hand, so we swap it
+        # for the new one rather than just adding the new one on top.
+        projected = product.stock_on_hand - old_quantity + new_quantity
+        if projected < 0:
+            raise ValidationError({
+                'message_bn': 'পর্যাপ্ত স্টক নেই',
+                'message_en': 'Insufficient stock',
+            })
+
+        movement.quantity = new_quantity
+        if 'unit_cost' in data:
+            movement.unit_cost = data['unit_cost']
+        if 'payment_method' in data:
+            movement.payment_method = data['payment_method']
+        if 'supplier_id' in data:
+            movement.supplier = Supplier.objects.filter(pk=data['supplier_id']).first() if data['supplier_id'] else None
+        if 'supplier_name' in data:
+            movement.supplier_name = data['supplier_name']
+        if 'note_bn' in data:
+            movement.note_bn = data['note_bn']
+        if 'note_en' in data:
+            movement.note_en = data['note_en']
+        movement.save()
+
+        self._sync_movement_journal(movement)
+
+        # Only the most recent PURCHASE for this product drives its current
+        # cost/price — an older one being corrected shouldn't overwrite a
+        # price a newer purchase already superseded.
+        if movement.movement_type == 'PURCHASE':
+            latest = product.stock_movements.filter(movement_type='PURCHASE').order_by('-created_at').first()
+            if latest and latest.id == movement.id:
+                product.cost_price = movement.unit_cost
+                if data.get('unit_price'):
+                    product.unit_price = data['unit_price']
+                    product.save(update_fields=['cost_price', 'unit_price'])
+                else:
+                    product.save(update_fields=['cost_price'])
+
+        logger.info(f"Stock movement corrected: {movement.id} ({product.sku} {movement.movement_type})")
+        return movement
+
+    def _sync_movement_journal(self, movement: StockMovement) -> None:
+        entry = JournalEntry.objects.filter(
+            reference_type=movement.movement_type, reference_id=movement.id,
+        ).prefetch_related('lines__account').first()
+        if not entry:
+            return
+        lines = list(entry.lines.all())
+        if len(lines) != 2:
+            logger.warning(f"Skipped journal sync for movement {movement.id}: expected 2 lines, found {len(lines)}")
+            return
+
+        total = movement.unit_cost * abs(movement.quantity)
+        variable_code = '1000' if movement.payment_method == 'CASH' else '2000'
+        variable_acct = Account.objects.filter(code=variable_code).first()
+        inventory_is_debit = movement.movement_type == 'PURCHASE'
+
+        for line in lines:
+            if line.account.code == '1300':
+                line.debit  = total if inventory_is_debit else Decimal('0')
+                line.credit = Decimal('0') if inventory_is_debit else total
+            else:
+                if variable_acct:
+                    line.account = variable_acct
+                line.debit  = Decimal('0') if inventory_is_debit else total
+                line.credit = total if inventory_is_debit else Decimal('0')
+            line.save()
 
     def _create_purchase_journal(self, product: Product, quantity: Decimal,
                                   unit_cost: Decimal, movement: StockMovement, user,

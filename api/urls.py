@@ -56,6 +56,7 @@ urlpatterns = [
     # ─── Stock ────────────────────────────────────────────────────────────────
     path('products/<uuid:pk>/stock/',          views.get_stock,          name='product-stock'),
     path('products/<uuid:pk>/stock/adjust/',   views.adjust_stock,       name='stock-adjust'),
+    path('products/<uuid:pk>/stock/<uuid:movement_id>/update/', views.update_stock_movement, name='stock-movement-update'),
     path('reports/purchases/',                 views.get_purchase_report,        name='purchase-report'),
     path('reports/supplier-returns/',          views.get_supplier_return_report, name='supplier-return-report'),
     path('reports/income/',                    views.get_income_report,          name='income-report'),
@@ -107,6 +108,8 @@ urlpatterns = [
     path('orders/<uuid:pk>/courier/send/',       views.send_to_courier,    name='order-courier-send'),
     path('orders/<uuid:pk>/courier/status/',     views.courier_status,     name='order-courier-status'),
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),
+    path('orders/<uuid:pk>/items/<uuid:item_id>/update/', views.update_order_item, name='order-item-update'),
+    path('orders/<uuid:pk>/items/<uuid:item_id>/delete/', views.delete_order_item, name='order-item-delete'),
     path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
 
     # ─── Suppliers ────────────────────────────────────────────────────────────

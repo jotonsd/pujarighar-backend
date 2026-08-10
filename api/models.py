@@ -887,6 +887,8 @@ class SiteSetting(models.Model):
     email_host_password = models.CharField(max_length=255, blank=True, default='')
     email_use_tls     = models.BooleanField(default=True)
     email_default_from = models.EmailField(blank=True, default='')
+    # Referral
+    referral_bonus_amount = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('8.00'))
 
     class Meta:
         verbose_name = 'Site Setting'

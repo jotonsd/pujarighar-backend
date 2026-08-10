@@ -16,7 +16,7 @@ from .brand_views import (
     list_brands, create_brand, get_brand, update_brand, delete_brand,
 )
 from .stock_views import (
-    get_stock, adjust_stock, get_purchase_report, get_supplier_return_report,
+    get_stock, adjust_stock, update_stock_movement, get_purchase_report, get_supplier_return_report,
     list_package_items, add_package_item, delete_package_item,
 )
 from .cart_views import (
@@ -36,7 +36,7 @@ from .order_views import (
     track_by_order_number,
     confirm_order, pack_order, assign_delivery, dispatch_order,
     deliver_order, return_order, cancel_order, pos_create_order,
-    mark_cod_paid, update_shipping, apply_discount,
+    mark_cod_paid, update_shipping, apply_discount, update_order_item, delete_order_item,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
