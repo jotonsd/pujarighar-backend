@@ -889,6 +889,9 @@ class SiteSetting(models.Model):
     email_default_from = models.EmailField(blank=True, default='')
     # Referral
     referral_bonus_amount = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('8.00'))
+    # Telegram admin notifications
+    telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
+    telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
 
     class Meta:
         verbose_name = 'Site Setting'

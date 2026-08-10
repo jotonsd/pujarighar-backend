@@ -9,6 +9,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from api.models import SiteSetting, User
+from api.services.telegram_service import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,12 @@ def send_order_created(order):
             """
         )
         _send_async(f"[PujariGhar] New Order #{order.order_number}", body, admins)
+        send_telegram_message(
+            f"🛒 <b>New Order #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}\n"
+            f"Payment: {order.payment_method} — {order.payment_status}\n"
+            f"Total: ৳{_fmt(order.grand_total)}"
+        )
 
 
 def send_order_cancelled(order):
@@ -349,6 +356,10 @@ def send_order_cancelled(order):
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Cancelled", body, admins)
+        send_telegram_message(
+            f"❌ <b>Order Cancelled #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}"
+        )
 
 
 def send_order_delivered(order):
@@ -389,6 +400,10 @@ def send_order_delivered(order):
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Delivered", body, admins)
+        send_telegram_message(
+            f"✅ <b>Order Delivered #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}"
+        )
 
 
 # ── Promotional / marketing emails ──────────────────────────────────────────────
