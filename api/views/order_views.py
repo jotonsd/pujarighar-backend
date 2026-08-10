@@ -270,6 +270,21 @@ def apply_discount(request, pk):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
+def waive_delivery_charge(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+    try:
+        updated = _svc.waive_delivery_charge(order, request.user)
+        return ApiResponse(message='Delivery charge waived', data=SalesOrderSerializer(updated, context={'request': request}).data)
+    except Exception as e:
+        logger.error(f'Waive delivery charge error: {e}', exc_info=True)
+        return api_error(e)
+
+
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def cancel_order(request, pk):
     try:

@@ -151,6 +151,37 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def waive_delivery_charge(self, order: SalesOrder, user: User) -> SalesOrder:
+        """Let staff skip/waive the delivery charge on a not-yet-shipped order
+        — same gate as apply_discount. One-way (like apply_discount): there's
+        no stored delivery zone on the order to recompute the original rate
+        from, so this isn't a togglable checkbox, just a deliberate waiver."""
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারের ডেলিভারি চার্জ মওকুফ করা যায়',
+                'message_en': 'Delivery charge can only be waived on pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারের ডেলিভারি চার্জ মওকুফ করা যাবে না',
+                'message_en': 'Delivery charge cannot be waived on an already-paid order',
+            })
+        if order.delivery_charge <= 0:
+            raise ValidationError({
+                'message_bn': 'এই অর্ডারে ইতিমধ্যে কোনো ডেলিভারি চার্জ নেই',
+                'message_en': 'This order already has no delivery charge',
+            })
+
+        waived = order.delivery_charge
+        order.delivery_charge = Decimal('0')
+        order.grand_total = order.subtotal + order.tax_amount - order.cashback_used
+        order.save(update_fields=['delivery_charge', 'grand_total'])
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Delivery charge waived on order {order.order_number} by {user.email} (৳{waived})')
+        return order
+
+    @transaction.atomic
     def update_item_quantity(self, order: SalesOrder, item: SalesOrderItem, new_quantity: Decimal, user: User) -> SalesOrder:
         """Correct a mistaken quantity on a not-yet-shipped order — adjusts the
         already-deducted stock by the delta, recomputes order totals from the
