@@ -291,12 +291,12 @@ class ProductService:
 
     def get_product(self, pk: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
         ).get(pk=pk)
 
     def get_product_by_slug(self, slug: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
         ).get(slug=slug, is_active=True)
 
     def create_product(self, validated_data: dict) -> Product:
