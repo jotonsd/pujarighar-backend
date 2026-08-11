@@ -88,8 +88,15 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     has_order_discount = discount_amount > 0
     show_cashback      = not order.is_guest and (is_admin or order.status == 'DELIVERED')
 
-    payment_label = t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery') if order.payment_method == 'COD' else t('অনলাইন', 'Online')
-    paid_stamp    = f'<span class="stamp-paid">{t("পরিশোধিত","PAID")}</span>' if order.payment_status == 'PAID' else f'<span class="stamp-unpaid">{t("অপরিশোধিত","UNPAID")}</span>'
+    # Once paid, "Cash on Delivery" would contradict the Status stamp right next
+    # to it (payment already collected, e.g. via mark-cod-paid before packing) —
+    # show "Paid" there too, same word as the status stamp, instead of a method
+    # label that implies payment is still pending.
+    if order.payment_status == 'PAID':
+        payment_label = t('পেইড', 'Paid')
+    else:
+        payment_label = t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery') if order.payment_method == 'COD' else t('অনলাইন', 'Online')
+    paid_stamp    = f'<span class="stamp-paid">{t("পেইড","PAID")}</span>' if order.payment_status == 'PAID' else f'<span class="stamp-unpaid">{t("অপরিশোধিত","UNPAID")}</span>'
 
     # ── Item rows ─────────────────────────────────────────────────────────────
     rows_html = ''
@@ -484,7 +491,10 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
                 items_html += f'<div class="sub-item">↳ {comp_name} &times; {comp_qty}</div>'
 
     discount_amount = Decimal(str(order.discount_amount or 0))
-    payment_label   = t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery') if order.payment_method == 'COD' else t('অনলাইন', 'Online')
+    if order.payment_status == 'PAID':
+        payment_label = t('পেইড', 'Paid')
+    else:
+        payment_label = t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery') if order.payment_method == 'COD' else t('অনলাইন', 'Online')
 
     totals_html = f'<div class="tot-row"><span>{t("সাবটোটাল","Subtotal")}</span><span>৳ {_fmt(order.subtotal)}</span></div>'
 
@@ -502,7 +512,7 @@ def _build_thermal_html(order: SalesOrder, lang: str, is_admin: bool = False) ->
 
     paid_html = ''
     if order.payment_status == 'PAID':
-        paid_html = f'<div class="tot-row"><span>{t("পরিশোধিত","Paid")}</span><span>৳ {_fmt(order.grand_total)}</span></div>'
+        paid_html = f'<div class="tot-row"><span>{t("পেইড","Paid")}</span><span>৳ {_fmt(order.grand_total)}</span></div>'
 
     msg_parts = []
     if discount_amount > 0:
