@@ -114,7 +114,7 @@ def get_order(request, pk):
 @permission_classes([AllowAny])
 def get_order_tracking(_request, pk):
     try:
-        order = SalesOrder.objects.prefetch_related(
+        order = SalesOrder.objects.select_related('courier_consignment__provider').prefetch_related(
             'status_logs', 'delivery__delivery_person__profile'
         ).get(pk=pk)
         return ApiResponse(message="Tracking retrieved", data=OrderTrackingSerializer(order).data)
@@ -136,7 +136,7 @@ def track_by_order_number(request):
         )
 
     try:
-        order = SalesOrder.objects.prefetch_related(
+        order = SalesOrder.objects.select_related('courier_consignment__provider').prefetch_related(
             'status_logs', 'delivery__delivery_person__profile'
         ).get(
             order_number__iexact=order_number,

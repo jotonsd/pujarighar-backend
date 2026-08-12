@@ -37,7 +37,7 @@ class SteadfastCourierService(BaseCourierService):
             logger.error(f'Steadfast request failed: {method} {url} — {e}', exc_info=True)
             raise Exception('Steadfast is unreachable right now. Please try again.')
 
-    def create_order(self, order: SalesOrder, weight=None) -> dict:
+    def create_order(self, order: SalesOrder, weight=None, note=None) -> dict:
         name = order.shipping_name_en or order.shipping_name_bn or 'Customer'
         address_parts = [
             order.shipping_address_en or order.shipping_address_bn or '',
@@ -56,7 +56,7 @@ class SteadfastCourierService(BaseCourierService):
             'recipient_phone': order.shipping_phone,
             'recipient_address': address,
             'cod_amount': str(cod_amount),
-            'note': order.notes_en or order.notes_bn or '',
+            'note': note or order.notes_en or order.notes_bn or '',
             'item_description': item_description,
             'total_lot': items.count(),
         }

@@ -11,9 +11,12 @@ class CourierProviderSerializer(serializers.Serializer):
     name = serializers.CharField()
     base_url = serializers.CharField()
     is_active = serializers.BooleanField()
+    store_id = serializers.CharField(required=False, allow_blank=True)
     has_api_key = serializers.SerializerMethodField()
     has_secret_key = serializers.SerializerMethodField()
     has_webhook_secret = serializers.SerializerMethodField()
+    has_username = serializers.SerializerMethodField()
+    has_password = serializers.SerializerMethodField()
 
     def get_has_api_key(self, obj):
         return bool(obj.api_key_encrypted)
@@ -24,11 +27,28 @@ class CourierProviderSerializer(serializers.Serializer):
     def get_has_webhook_secret(self, obj):
         return bool(obj.webhook_secret_encrypted)
 
+    def get_has_username(self, obj):
+        return bool(obj.username_encrypted)
+
+    def get_has_password(self, obj):
+        return bool(obj.password_encrypted)
+
 
 class CourierTrackingEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = CourierTrackingEvent
         fields = ['id', 'status', 'message', 'source', 'created_at']
+
+
+def build_courier_tracking_url(consignment: CourierConsignment) -> str | None:
+    """Public tracking-page URL for this consignment, on the provider's own
+    site — currently only Pathao exposes one (Steadfast doesn't have an
+    equivalent public tracker in what we've integrated)."""
+    if not consignment.consignment_id:
+        return None
+    if consignment.provider.code == 'PATHAO':
+        return f'https://merchant.pathao.com/tracking?consignment_id={consignment.consignment_id}&phone={consignment.order.shipping_phone}'
+    return None
 
 
 class CourierConsignmentSerializer(serializers.ModelSerializer):
@@ -37,14 +57,18 @@ class CourierConsignmentSerializer(serializers.ModelSerializer):
     provider_code = serializers.CharField(source='provider.code', read_only=True)
     provider_name = serializers.CharField(source='provider.name', read_only=True)
     events = CourierTrackingEventSerializer(many=True, read_only=True)
+    tracking_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CourierConsignment
         fields = [
             'id', 'order_id', 'order_number', 'provider', 'provider_code', 'provider_name',
-            'consignment_id', 'tracking_code', 'status', 'cod_amount', 'delivery_charge',
-            'tracking_message', 'created_at', 'updated_at', 'events',
+            'consignment_id', 'tracking_code', 'status', 'cod_amount', 'delivery_charge', 'weight',
+            'tracking_message', 'tracking_url', 'created_at', 'updated_at', 'events',
         ]
+
+    def get_tracking_url(self, obj):
+        return build_courier_tracking_url(obj)
 
 
 class CourierReturnRequestSerializer(serializers.ModelSerializer):
