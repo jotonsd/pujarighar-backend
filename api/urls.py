@@ -92,6 +92,7 @@ urlpatterns = [
     # ─── Orders ───────────────────────────────────────────────────────────────
     path('orders/track/',                          views.track_by_order_number, name='order-track-public'),
     path('orders/pos-create/',                   views.pos_create_order,   name='pos-create-order'),
+    path('orders/lookup-by-phone/',              views.lookup_recent_order_by_phone, name='order-lookup-by-phone'),
     path('orders/',                              views.list_orders,        name='order-list'),
     path('orders/<uuid:pk>/',                    views.get_order,          name='order-detail'),
     path('orders/<uuid:pk>/tracking/',           views.get_order_tracking, name='order-tracking'),
