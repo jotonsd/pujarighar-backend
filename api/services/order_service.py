@@ -46,6 +46,18 @@ class OrderService:
             qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
         return qs
 
+    def find_recent_shipping_by_phone(self, phone: str) -> SalesOrder | None:
+        """POS auto-fill fallback for repeat guest customers — lookup_user_by_phone
+        only finds people with an actual registered account, but most walk-in/
+        phone orders are guest checkouts with no User row at all. This searches
+        past orders' shipping snapshot directly instead, regardless of whether
+        the order was placed as a guest or a registered customer."""
+        return (
+            SalesOrder.objects.filter(shipping_phone=phone)
+            .order_by('-created_at')
+            .first()
+        )
+
     def get_order(self, pk: str) -> SalesOrder:
         return SalesOrder.objects.prefetch_related('items__product__images', 'status_logs', 'delivery').get(pk=pk)
 

@@ -54,6 +54,30 @@ def pos_create_order(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('pos', 'create')])
+def lookup_recent_order_by_phone(request):
+    """POS auto-fill fallback for repeat guest customers — see
+    OrderService.find_recent_shipping_by_phone for why this is separate from
+    lookup_user_by_phone (that one only finds registered accounts)."""
+    phone = request.query_params.get('phone', '').strip()
+    if not phone:
+        return ApiResponse(message="Phone required", errors="phone param required", status_code=400)
+    order = _svc.find_recent_shipping_by_phone(phone)
+    if not order:
+        return ApiResponse(message="Not found", errors="No past order with this phone", status_code=404)
+    return ApiResponse(message="Order found", data={
+        'name_bn':     order.shipping_name_bn,
+        'name_en':     order.shipping_name_en,
+        'phone':       order.shipping_phone,
+        'address_bn':  order.shipping_address_bn,
+        'address_en':  order.shipping_address_en,
+        'district':    order.shipping_district,
+        'thana':       order.shipping_thana,
+        'post_code':   order.shipping_post_code,
+    })
+
+
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def list_orders(request):
     try:
