@@ -42,11 +42,16 @@ def providers(request):
         name=data['name'],
         base_url=data.get('base_url', ''),
         is_active=bool(data.get('is_active', False)),
+        store_id=data.get('store_id', ''),
     )
     if data.get('api_key'):
         provider.api_key_encrypted = encrypt_token(data['api_key'])
     if data.get('secret_key'):
         provider.secret_key_encrypted = encrypt_token(data['secret_key'])
+    if data.get('username'):
+        provider.username_encrypted = encrypt_token(data['username'])
+    if data.get('password'):
+        provider.password_encrypted = encrypt_token(data['password'])
     provider.webhook_secret_encrypted = encrypt_token(secrets.token_urlsafe(32))
     provider.save()
     payload = CourierProviderSerializer(provider).data
@@ -65,7 +70,7 @@ def update_provider(request, pk):
         return ApiResponse(message='Provider not found', errors='Not found', status_code=404)
 
     data = request.data
-    for field in ('name', 'base_url'):
+    for field in ('name', 'base_url', 'store_id'):
         if field in data:
             setattr(provider, field, data[field])
     if 'is_active' in data:
@@ -74,6 +79,10 @@ def update_provider(request, pk):
         provider.api_key_encrypted = encrypt_token(data['api_key'])
     if data.get('secret_key'):
         provider.secret_key_encrypted = encrypt_token(data['secret_key'])
+    if data.get('username'):
+        provider.username_encrypted = encrypt_token(data['username'])
+    if data.get('password'):
+        provider.password_encrypted = encrypt_token(data['password'])
     provider.save()
     return ApiResponse(message='Provider updated', data=CourierProviderSerializer(provider).data)
 
@@ -116,7 +125,7 @@ def send_to_courier(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
     try:
-        consignment = _svc.send_order(order, request.data.get('provider_id'), request.user, request.data.get('weight'))
+        consignment = _svc.send_order(order, request.data.get('provider_id'), request.user, request.data.get('weight'), request.data.get('note'))
         return ApiResponse(message='Sent to courier', data=CourierConsignmentSerializer(consignment).data, status_code=201)
     except Exception as e:
         logger.error(f'Send to courier error: {e}', exc_info=True)
@@ -146,6 +155,9 @@ def list_consignments(request):
     status_filter = request.query_params.get('status')
     if status_filter:
         qs = qs.filter(status=status_filter)
+    provider_code = request.query_params.get('provider_code')
+    if provider_code:
+        qs = qs.filter(provider__code=provider_code)
     page_data, pagination = paginate_queryset(qs, request)
     return ApiResponse(
         message='Consignments retrieved',

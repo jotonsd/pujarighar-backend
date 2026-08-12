@@ -11,9 +11,12 @@ class CourierProviderSerializer(serializers.Serializer):
     name = serializers.CharField()
     base_url = serializers.CharField()
     is_active = serializers.BooleanField()
+    store_id = serializers.CharField(required=False, allow_blank=True)
     has_api_key = serializers.SerializerMethodField()
     has_secret_key = serializers.SerializerMethodField()
     has_webhook_secret = serializers.SerializerMethodField()
+    has_username = serializers.SerializerMethodField()
+    has_password = serializers.SerializerMethodField()
 
     def get_has_api_key(self, obj):
         return bool(obj.api_key_encrypted)
@@ -23,6 +26,12 @@ class CourierProviderSerializer(serializers.Serializer):
 
     def get_has_webhook_secret(self, obj):
         return bool(obj.webhook_secret_encrypted)
+
+    def get_has_username(self, obj):
+        return bool(obj.username_encrypted)
+
+    def get_has_password(self, obj):
+        return bool(obj.password_encrypted)
 
 
 class CourierTrackingEventSerializer(serializers.ModelSerializer):
@@ -42,7 +51,7 @@ class CourierConsignmentSerializer(serializers.ModelSerializer):
         model = CourierConsignment
         fields = [
             'id', 'order_id', 'order_number', 'provider', 'provider_code', 'provider_name',
-            'consignment_id', 'tracking_code', 'status', 'cod_amount', 'delivery_charge',
+            'consignment_id', 'tracking_code', 'status', 'cod_amount', 'delivery_charge', 'weight',
             'tracking_message', 'created_at', 'updated_at', 'events',
         ]
 

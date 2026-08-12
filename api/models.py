@@ -1066,6 +1066,18 @@ class CourierProvider(models.Model):
     secret_key_encrypted     = models.TextField(blank=True, default='')
     webhook_secret_encrypted = models.TextField(blank=True, default='')
     is_active                = models.BooleanField(default=False)
+    # OAuth providers (e.g. Pathao) — api_key/secret_key above double as
+    # client_id/client_secret for these; username/password are the merchant
+    # login used for the password grant, store_id is the Pathao merchant
+    # store to ship from, and the token fields cache the issued OAuth token
+    # so every request doesn't re-authenticate (refreshed on expiry by the
+    # provider's service class, which persists the new token back here).
+    username_encrypted       = models.TextField(blank=True, default='')
+    password_encrypted       = models.TextField(blank=True, default='')
+    store_id                 = models.CharField(max_length=50, blank=True, default='')
+    access_token_encrypted   = models.TextField(blank=True, default='')
+    refresh_token_encrypted  = models.TextField(blank=True, default='')
+    token_expires_at         = models.DateTimeField(null=True, blank=True)
     created_at               = models.DateTimeField(auto_now_add=True)
     updated_at               = models.DateTimeField(auto_now=True)
 
@@ -1081,6 +1093,7 @@ class CourierConsignment(BaseModel):
     status           = models.CharField(max_length=50, blank=True, default='')
     cod_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     delivery_charge  = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    weight           = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     tracking_message = models.TextField(blank=True, default='')
     raw_response     = models.JSONField(default=dict, blank=True)
     created_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
