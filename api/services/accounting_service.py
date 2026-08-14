@@ -331,7 +331,7 @@ class AccountingService:
         out_of_stock     = sum(1 for p in active_products if p.stock_on_hand <= 0)
 
         # ── Recent orders ─────────────────────────────────────────────────────
-        recent_qs = SalesOrder.objects.order_by('-created_at')[:8]
+        recent_qs = SalesOrder.objects.order_by('-created_at')[:20]
         recent_orders = [
             {
                 'id':           str(o.id),
@@ -363,9 +363,10 @@ class AccountingService:
             for r in top_products_qs
         ]
 
+        week_start = today - timedelta(days=6)  # rolling 7-day window including today
         return {
             # existing
-            'today_orders':          SalesOrder.objects.filter(created_at__gte=local_day_start(today), created_at__lt=local_day_end_exclusive(today)).count(),
+            'week_orders':           SalesOrder.objects.filter(created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today)).count(),
             'today_revenue':         str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(today), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
             'pending_orders':        SalesOrder.objects.filter(status='PENDING').count(),
             'low_stock_count':       low_stock_count,
