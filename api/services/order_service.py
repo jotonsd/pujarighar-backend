@@ -7,10 +7,15 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User,
     StockMovement, Account, JournalEntry, JournalLine, Notification,
-    ReferralBonus, SiteSetting, ProductPackageItem,
+    ReferralBonus, SiteSetting, ProductPackageItem, DeliveryCharge,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.services.notification_ws import broadcast_notification
+
+# Same district-set checkout_service.py/guest_service.py use to pick a zone
+# when the customer didn't explicitly choose one — the order itself has no
+# stored zone to recompute from later, so this is re-derived the same way.
+_DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +73,7 @@ class OrderService:
         return self._transition(order, 'PACKED', user)
 
     @transaction.atomic
-    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User) -> SalesOrder:
+    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User, weight: Decimal = None) -> SalesOrder:
         delivery_person = None
         if delivery_person_id:
             delivery_person = User.objects.get(id=delivery_person_id, role__code='DELIVERY')
@@ -76,9 +81,34 @@ class OrderService:
         # Already ASSIGNED (e.g. assigned earlier without a delivery person) — just
         # attaching/updating the delivery person now, no status transition needed.
         updated = order if order.status == 'ASSIGNED' else self._transition(order, 'ASSIGNED', user)
+        self.recalculate_delivery_charge(updated, weight)
         if delivery_person:
             self._notify_delivery_person(updated, delivery_person)
         return updated
+
+    def recalculate_delivery_charge(self, order: SalesOrder, weight: Decimal = None) -> SalesOrder:
+        """Re-price delivery for the actual package weight, entered by admin
+        at assignment time (mirrors the courier flow's existing manual-weight
+        entry — no product in the catalog carries a weight field). A no-op
+        unless a weight was actually given, and skipped once the order is
+        already PAID (changing an already-collected amount would desync the
+        books — same reasoning waive_delivery_charge applies elsewhere), so
+        this never blocks assignment itself, it just silently leaves the
+        charge as-is in that case."""
+        if not weight or order.payment_status == 'PAID':
+            return order
+
+        zone = 'inside' if (order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
+        new_charge = DeliveryCharge.get().charge_for(zone, weight)
+        if new_charge == order.delivery_charge:
+            return order
+
+        order.delivery_charge = new_charge
+        order.grand_total = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['delivery_charge', 'grand_total'])
+        self._resync_order_item_journal(order)
+        logger.info(f'Delivery charge recalculated for order {order.order_number}: ৳{new_charge} (weight={weight}kg, zone={zone})')
+        return order
 
     def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
         order = self._transition(order, 'ON_THE_WAY', user)

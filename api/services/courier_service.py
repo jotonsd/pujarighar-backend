@@ -61,8 +61,14 @@ class CourierService:
         # reuse the existing "assign without a person" transition so the order
         # moves through the same PACKED → ASSIGNED → ON_THE_WAY → DELIVERED
         # pipeline regardless of who's actually delivering it.
+        order_svc = OrderService()
         if order.status != 'ASSIGNED':
-            order = OrderService().assign_delivery(order, None, user)
+            order = order_svc.assign_delivery(order, None, user, weight)
+        else:
+            # assign_delivery() (which also recalculates delivery charge from
+            # weight) only runs on the transition above — if the order was
+            # already ASSIGNED, that branch never fires, so recalculate here.
+            order_svc.recalculate_delivery_charge(order, weight)
 
         data = result.get('consignment', result)
         consignment = CourierConsignment.objects.create(
