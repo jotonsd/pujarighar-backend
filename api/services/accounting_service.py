@@ -325,6 +325,17 @@ class AccountingService:
         partner_agg = PartnerProfitPayment.objects.aggregate(ts=Sum('share_amount'), tp=Sum('paid_amount'))
         partner_outstanding = (Decimal(str(partner_agg['ts'] or 0)) - Decimal(str(partner_agg['tp'] or 0)))
 
+        # ── Cash on hand ───────────────────────────────────────────────────────
+        # Every cash-affecting action in the app (COD payments, cash purchases,
+        # supplier cash payments, loan cash in/out, partner cash in/out, manual
+        # journal entries) posts a JournalLine against Account '1000' (Cash) —
+        # so its all-time debit-minus-credit balance IS the current cash
+        # position. Same formula as AccountingService.get_ledger's running
+        # balance, just unfiltered by date (this is the "closing" balance now).
+        cash_agg = JournalLine.objects.filter(account__code='1000').aggregate(d=Sum('debit'), c=Sum('credit'))
+        cash_on_hand = (cash_agg['d'] or Decimal('0')) - (cash_agg['c'] or Decimal('0'))
+        cash_account = Account.objects.filter(code='1000').first()
+
         # ── Stock alerts ──────────────────────────────────────────────────────
         active_products = list(Product.objects.filter(is_active=True))
         low_stock_count  = sum(1 for p in active_products if 0 < p.stock_on_hand <= 5)
@@ -382,6 +393,8 @@ class AccountingService:
             'supplier_outstanding':  str(supplier_outstanding),
             'loan_outstanding':      str(loan_outstanding),
             'partner_outstanding':   str(partner_outstanding),
+            'cash_on_hand':          str(cash_on_hand),
+            'cash_account_id':       str(cash_account.id) if cash_account else None,
             'out_of_stock_count':    out_of_stock,
             'recent_orders':         recent_orders,
             'top_products':          top_products,
