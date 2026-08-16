@@ -62,6 +62,16 @@ class AccountingService:
     def get_journal_entry(self, pk: str) -> JournalEntry:
         return JournalEntry.objects.prefetch_related('lines__account').get(pk=pk)
 
+    def get_journal_totals(self, qs) -> dict:
+        """Debit/credit sums across the FULL filtered queryset (pre-pagination)
+        — the journal list page shows these next to the (paginated) entries,
+        so they need to reflect the whole date range, not just the visible page."""
+        agg = JournalLine.objects.filter(journal_entry__in=qs).aggregate(d=Sum('debit'), c=Sum('credit'))
+        return {
+            'total_debit':  str(agg['d'] or Decimal('0')),
+            'total_credit': str(agg['c'] or Decimal('0')),
+        }
+
     def get_ledger(self, account_id: str, from_date: str, to_date: str, locale: str) -> dict:
         account  = Account.objects.get(pk=account_id)
         lines_qs = JournalLine.objects.filter(account=account).select_related('journal_entry').order_by('journal_entry__created_at')

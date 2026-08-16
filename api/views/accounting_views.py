@@ -74,11 +74,12 @@ def update_account(request, pk):
 def list_journal_entries(request):
     try:
         qs = _svc.list_journal_entries(request.query_params)
-        page_data, pagination = paginate_queryset(qs, request)
+        totals = _svc.get_journal_totals(qs)
+        page_data, pagination = paginate_queryset(qs, request, default_page_size=100)
         return ApiResponse(
             message="Journal entries retrieved",
             data=JournalEntrySerializer(page_data, many=True).data,
-            pagination=pagination,
+            pagination={**pagination, **totals},
         )
     except Exception as e:
         logger.error(f"List journal entries error: {e}", exc_info=True)
