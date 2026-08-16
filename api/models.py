@@ -771,6 +771,16 @@ class Discount(models.Model):
 class DeliveryCharge(models.Model):
     inside_dhaka  = models.DecimalField(max_digits=8, decimal_places=2, default=60)
     outside_dhaka = models.DecimalField(max_digits=8, decimal_places=2, default=120)
+    # Optional weight-bracket tables, one per zone — each a list of
+    # {"max_weight_kg": "...", "charge_amount": "..."} objects, sorted
+    # ascending by max_weight_kg. When a weight is entered at delivery-
+    # assignment time (see OrderService.recalculate_delivery_charge), the
+    # charge for that zone becomes whichever bracket's max_weight_kg the
+    # weight first fits under (the heaviest bracket also covers anything
+    # above it). Empty list (the default) means no behavior change — the
+    # flat zone rate above is used, exactly as today.
+    inside_dhaka_weight_tiers  = models.JSONField(default=list, blank=True)
+    outside_dhaka_weight_tiers = models.JSONField(default=list, blank=True)
     updated_at    = models.DateTimeField(auto_now=True)
     updated_by    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -781,6 +791,20 @@ class DeliveryCharge(models.Model):
     def get(cls) -> 'DeliveryCharge':
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+    def charge_for(self, zone: str, weight=None) -> Decimal:
+        base = self.inside_dhaka if zone == 'inside' else self.outside_dhaka
+        if weight is None:
+            return base
+        tiers = self.inside_dhaka_weight_tiers if zone == 'inside' else self.outside_dhaka_weight_tiers
+        if not tiers:
+            return base
+        sorted_tiers = sorted(tiers, key=lambda t: Decimal(str(t['max_weight_kg'])))
+        w = Decimal(str(weight))
+        for tier in sorted_tiers:
+            if w <= Decimal(str(tier['max_weight_kg'])):
+                return Decimal(str(tier['charge_amount']))
+        return Decimal(str(sorted_tiers[-1]['charge_amount']))  # heaviest bracket covers "and above"
 
     def __str__(self):
         return f'ডেলিভারি চার্জ — ঢাকা: ৳{self.inside_dhaka}, বাইরে: ৳{self.outside_dhaka}'

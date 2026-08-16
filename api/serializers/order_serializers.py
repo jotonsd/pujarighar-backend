@@ -237,6 +237,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
 
 class AssignDeliverySerializer(serializers.Serializer):
     delivery_person_id = serializers.UUIDField(required=False, allow_null=True)
+    weight = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True, default=None)
 
     def validate_delivery_person_id(self, value):
         if value is None:
