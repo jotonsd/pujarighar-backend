@@ -90,6 +90,7 @@ def get_purchase_report(request):
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),
         to_date=request.query_params.get('to', ''),
+        payment_method=request.query_params.get('payment_method', ''),
     )
     return ApiResponse(message="Purchase report retrieved", data=data)
 
@@ -103,6 +104,7 @@ def get_supplier_return_report(request):
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),
         to_date=request.query_params.get('to', ''),
+        payment_method=request.query_params.get('payment_method', ''),
     )
     return ApiResponse(message="Supplier return report retrieved", data=data)
 
