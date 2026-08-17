@@ -291,12 +291,12 @@ class ProductService:
 
     def get_product(self, pk: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
         ).get(pk=pk)
 
     def get_product_by_slug(self, slug: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
         ).get(slug=slug, is_active=True)
 
     def create_product(self, validated_data: dict) -> Product:
@@ -330,7 +330,8 @@ class StockService:
                      unit_price: Decimal = None,
                      supplier_id: str = None,
                      supplier_name: str = '',
-                     payment_method: str = 'CASH') -> StockMovement:
+                     payment_method: str = 'CASH',
+                     date=None) -> StockMovement:
         supplier = None
         if supplier_id:
             try:
@@ -343,6 +344,13 @@ class StockService:
         if movement_type == 'SUPPLIER_RETURN':
             quantity = -abs(quantity)
 
+        # Entries are often logged a day or more after the actual purchase —
+        # keep the current time-of-day, just swap in the chosen calendar date,
+        # so ordering among same-day entries still stays sensible.
+        created_at = timezone.now()
+        if date:
+            created_at = timezone.localtime(created_at).replace(year=date.year, month=date.month, day=date.day)
+
         movement = StockMovement(
             product=product, movement_type=movement_type,
             quantity=quantity, unit_cost=unit_cost,
@@ -350,6 +358,7 @@ class StockService:
             supplier_name=supplier_name if not supplier else (supplier.name_bn or supplier.name_en),
             payment_method=payment_method if movement_type in ('PURCHASE', 'SUPPLIER_RETURN') else 'CASH',
             note_bn=note_bn, note_en=note_en, created_by=user,
+            created_at=created_at,
         )
         movement.clean()
         movement.save()
@@ -417,6 +426,10 @@ class StockService:
             movement.note_bn = data['note_bn']
         if 'note_en' in data:
             movement.note_en = data['note_en']
+        if data.get('date'):
+            movement.created_at = timezone.localtime(movement.created_at).replace(
+                year=data['date'].year, month=data['date'].month, day=data['date'].day,
+            )
         movement.save()
 
         self._sync_movement_journal(movement)
@@ -536,7 +549,7 @@ class StockService:
                 )
 
     def _get_movement_report(self, movement_type: str, request=None, supplier_id: str = '', product_id: str = '',
-                              from_date: str = '', to_date: str = '') -> dict:
+                              from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
         from django.db.models import Prefetch
         from api.models import ProductImage
 
@@ -552,6 +565,8 @@ class StockService:
             qs = qs.filter(created_at__gte=local_day_start(from_date))
         if to_date:
             qs = qs.filter(created_at__lt=local_day_end_exclusive(to_date))
+        if payment_method:
+            qs = qs.filter(payment_method=payment_method)
 
         qs = qs.order_by('-created_at')
 
@@ -590,12 +605,12 @@ class StockService:
         }
 
     def get_purchase_report(self, request=None, supplier_id: str = '', product_id: str = '',
-                             from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('PURCHASE', request, supplier_id, product_id, from_date, to_date)
+                             from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
+        return self._get_movement_report('PURCHASE', request, supplier_id, product_id, from_date, to_date, payment_method)
 
     def get_supplier_return_report(self, request=None, supplier_id: str = '', product_id: str = '',
-                                    from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('SUPPLIER_RETURN', request, supplier_id, product_id, from_date, to_date)
+                                    from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
+        return self._get_movement_report('SUPPLIER_RETURN', request, supplier_id, product_id, from_date, to_date, payment_method)
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')

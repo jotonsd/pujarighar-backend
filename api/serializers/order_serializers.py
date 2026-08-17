@@ -36,13 +36,27 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
         ]
 
 
+def _courier_status_label(order, is_bn: bool) -> str | None:
+    """An order sent to a courier is fulfilled by the provider, not an
+    internal delivery person — order.status still just says 'ASSIGNED' (the
+    courier flow reuses that same transition), so the generic "delivery
+    person assigned" label would be misleading/wrong here. Swap in the
+    courier's name whenever a consignment exists for this order."""
+    consignment = getattr(order, 'courier_consignment', None)
+    if not consignment:
+        return None
+    name = consignment.provider.name
+    return f'{name}-এ পাঠানো হয়েছে' if is_bn else f'Sent to {name}'
+
+
 class OrderStatusLogSerializer(serializers.ModelSerializer):
-    changed_by_email = serializers.EmailField(source='changed_by.email', read_only=True)
-    to_status_label  = serializers.SerializerMethodField()
+    changed_by_email  = serializers.EmailField(source='changed_by.email', read_only=True)
+    to_status_label   = serializers.SerializerMethodField()
+    to_status_label_en = serializers.SerializerMethodField()
 
     class Meta:
         model  = OrderStatusLog
-        fields = ['id', 'from_status', 'to_status', 'to_status_label',
+        fields = ['id', 'from_status', 'to_status', 'to_status_label', 'to_status_label_en',
                   'changed_by', 'changed_by_email', 'changed_at', 'note_bn', 'note_en']
 
     def get_to_status_label(self, obj):
@@ -51,6 +65,22 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'ডেলিভারিম্যান নির্ধারিত',
             'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে', 'CANCELLED': 'বাতিল',
         }
+        if obj.to_status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj.order, is_bn=True)
+            if courier_label:
+                return courier_label
+        return labels.get(obj.to_status, obj.to_status)
+
+    def get_to_status_label_en(self, obj):
+        labels = {
+            'PENDING': 'Pending', 'CONFIRMED': 'Confirmed',
+            'PACKED': 'Packed', 'ASSIGNED': 'Assigned',
+            'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered', 'CANCELLED': 'Cancelled',
+        }
+        if obj.to_status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj.order, is_bn=False)
+            if courier_label:
+                return courier_label
         return labels.get(obj.to_status, obj.to_status)
 
 
@@ -146,6 +176,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
     payment_method_label_bn = serializers.SerializerMethodField()
     payment_method_label_en = serializers.SerializerMethodField()
     delivery_info           = serializers.SerializerMethodField()
+    courier_tracking_url    = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
@@ -156,15 +187,28 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_district', 'shipping_thana',
             'grand_total', 'created_at',
-            'delivery_info',
+            'delivery_info', 'courier_tracking_url',
             'timeline',
         ]
 
     def get_status_label_bn(self, obj):
+        if obj.status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj, is_bn=True)
+            if courier_label:
+                return courier_label
         return STATUS_LABELS_BN.get(obj.status, obj.status)
 
     def get_status_label_en(self, obj):
+        if obj.status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj, is_bn=False)
+            if courier_label:
+                return courier_label
         return STATUS_LABELS_EN.get(obj.status, obj.status)
+
+    def get_courier_tracking_url(self, obj):
+        from api.serializers.courier_serializers import build_courier_tracking_url
+        consignment = getattr(obj, 'courier_consignment', None)
+        return build_courier_tracking_url(consignment) if consignment else None
 
     def get_payment_method_label_bn(self, obj):
         return 'ক্যাশ অন ডেলিভারি' if obj.payment_method == 'COD' else 'অনলাইন পেমেন্ট'
@@ -187,11 +231,13 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
         }
 
     def get_timeline(self, obj):
-        return OrderStatusLogSerializer(obj.status_logs.all(), many=True).data
+        logs = obj.status_logs.select_related('order__courier_consignment__provider').all()
+        return OrderStatusLogSerializer(logs, many=True).data
 
 
 class AssignDeliverySerializer(serializers.Serializer):
     delivery_person_id = serializers.UUIDField(required=False, allow_null=True)
+    weight = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True, default=None)
 
     def validate_delivery_person_id(self, value):
         if value is None:

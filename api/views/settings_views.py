@@ -9,7 +9,8 @@ from api.utils.response import ApiResponse
 PAGE_SIZE_CHOICES  = ['A4', 'A5', 'LETTER', 'THERMAL']
 TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
                       'contact_phone', 'contact_email', 'address_bn', 'address_en',
-                      'email_host', 'email_host_user', 'email_host_password', 'email_default_from']
+                      'email_host', 'email_host_user', 'email_host_password', 'email_default_from',
+                      'telegram_bot_token', 'telegram_chat_id']
 INT_FIELDS         = ['email_port']
 BOOL_FIELDS        = ['email_use_tls']
 FILE_FIELDS        = ['logo', 'favicon']
@@ -45,6 +46,8 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'email_use_tls':            s.email_use_tls,
             'email_default_from':       s.email_default_from,
             'referral_bonus_amount':    str(s.referral_bonus_amount),
+            'has_telegram_bot_token':   bool(s.telegram_bot_token),
+            'telegram_chat_id':         s.telegram_chat_id,
         })
 
     return data
@@ -65,8 +68,8 @@ def update_site_settings(request):
         if field in request.data:
             if field == 'invoice_page_size' and request.data[field] not in PAGE_SIZE_CHOICES:
                 continue
-            if field == 'email_host_password' and not request.data[field]:
-                continue  # blank means "keep the currently stored password"
+            if field in ('email_host_password', 'telegram_bot_token') and not request.data[field]:
+                continue  # blank means "keep the currently stored secret"
             setattr(s, field, request.data[field])
             updated.append(field)
     for field in INT_FIELDS:

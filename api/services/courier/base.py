@@ -12,10 +12,12 @@ class BaseCourierService(ABC):
     """
 
     @abstractmethod
-    def create_order(self, order: SalesOrder, weight=None) -> dict:
+    def create_order(self, order: SalesOrder, weight=None, note=None) -> dict:
         """Send an order to the courier. `weight` (kg) is optional and, when
         given, is passed through to the provider for shipping-charge
-        calculation. Returns the raw provider response."""
+        calculation. `note` (special instruction), when given, overrides the
+        order's own notes_en/notes_bn for this shipment only — the order
+        record itself is never modified. Returns the raw provider response."""
         ...
 
     @abstractmethod

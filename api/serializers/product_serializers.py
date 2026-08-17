@@ -32,11 +32,20 @@ class PackageItemReadSerializer(serializers.ModelSerializer):
     component_name_bn = serializers.CharField(source='component.name_bn', read_only=True)
     component_name_en = serializers.CharField(source='component.name_en', read_only=True)
     component_sku     = serializers.CharField(source='component.sku', read_only=True)
+    component_image   = serializers.SerializerMethodField()
     unit_price        = serializers.DecimalField(source='component.unit_price', max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model  = ProductPackageItem
-        fields = ['id', 'component_id', 'component_name_bn', 'component_name_en', 'component_sku', 'quantity', 'unit_price']
+        fields = ['id', 'component_id', 'component_name_bn', 'component_name_en', 'component_sku', 'component_image', 'quantity', 'unit_price']
+
+    def get_component_image(self, obj):
+        img = obj.component.images.first()
+        if not img:
+            return None
+        request = self.context.get('request')
+        url = img.image.url
+        return request.build_absolute_uri(url) if request else url
 
 
 class PackageItemWriteSerializer(serializers.Serializer):
@@ -192,6 +201,9 @@ class StockAdjustSerializer(serializers.Serializer):
     supplier_id    = serializers.UUIDField(required=False, allow_null=True, default=None)
     supplier_name  = serializers.CharField(required=False, allow_blank=True, default='')
     payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False, default='CASH')
+    # When the entry is being logged after the fact (e.g. purchased
+    # yesterday, entered today) — defaults to today if left out.
+    date           = serializers.DateField(required=False, allow_null=True, default=None)
     note_bn        = serializers.CharField(required=False, allow_blank=True, default='')
     note_en        = serializers.CharField(required=False, allow_blank=True, default='')
 
@@ -216,6 +228,7 @@ class StockMovementUpdateSerializer(serializers.Serializer):
     supplier_id    = serializers.UUIDField(required=False, allow_null=True)
     supplier_name  = serializers.CharField(required=False, allow_blank=True)
     payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False)
+    date           = serializers.DateField(required=False, allow_null=True)
     note_bn        = serializers.CharField(required=False, allow_blank=True)
     note_en        = serializers.CharField(required=False, allow_blank=True)
 

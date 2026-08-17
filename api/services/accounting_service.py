@@ -62,6 +62,16 @@ class AccountingService:
     def get_journal_entry(self, pk: str) -> JournalEntry:
         return JournalEntry.objects.prefetch_related('lines__account').get(pk=pk)
 
+    def get_journal_totals(self, qs) -> dict:
+        """Debit/credit sums across the FULL filtered queryset (pre-pagination)
+        — the journal list page shows these next to the (paginated) entries,
+        so they need to reflect the whole date range, not just the visible page."""
+        agg = JournalLine.objects.filter(journal_entry__in=qs).aggregate(d=Sum('debit'), c=Sum('credit'))
+        return {
+            'total_debit':  str(agg['d'] or Decimal('0')),
+            'total_credit': str(agg['c'] or Decimal('0')),
+        }
+
     def get_ledger(self, account_id: str, from_date: str, to_date: str, locale: str) -> dict:
         account  = Account.objects.get(pk=account_id)
         lines_qs = JournalLine.objects.filter(account=account).select_related('journal_entry').order_by('journal_entry__created_at')
@@ -325,13 +335,24 @@ class AccountingService:
         partner_agg = PartnerProfitPayment.objects.aggregate(ts=Sum('share_amount'), tp=Sum('paid_amount'))
         partner_outstanding = (Decimal(str(partner_agg['ts'] or 0)) - Decimal(str(partner_agg['tp'] or 0)))
 
+        # ── Cash on hand ───────────────────────────────────────────────────────
+        # Every cash-affecting action in the app (COD payments, cash purchases,
+        # supplier cash payments, loan cash in/out, partner cash in/out, manual
+        # journal entries) posts a JournalLine against Account '1000' (Cash) —
+        # so its all-time debit-minus-credit balance IS the current cash
+        # position. Same formula as AccountingService.get_ledger's running
+        # balance, just unfiltered by date (this is the "closing" balance now).
+        cash_agg = JournalLine.objects.filter(account__code='1000').aggregate(d=Sum('debit'), c=Sum('credit'))
+        cash_on_hand = (cash_agg['d'] or Decimal('0')) - (cash_agg['c'] or Decimal('0'))
+        cash_account = Account.objects.filter(code='1000').first()
+
         # ── Stock alerts ──────────────────────────────────────────────────────
         active_products = list(Product.objects.filter(is_active=True))
         low_stock_count  = sum(1 for p in active_products if 0 < p.stock_on_hand <= 5)
         out_of_stock     = sum(1 for p in active_products if p.stock_on_hand <= 0)
 
         # ── Recent orders ─────────────────────────────────────────────────────
-        recent_qs = SalesOrder.objects.order_by('-created_at')[:8]
+        recent_qs = SalesOrder.objects.order_by('-created_at')[:20]
         recent_orders = [
             {
                 'id':           str(o.id),
@@ -363,10 +384,11 @@ class AccountingService:
             for r in top_products_qs
         ]
 
+        week_start = today - timedelta(days=6)  # rolling 7-day window including today
         return {
             # existing
-            'today_orders':          SalesOrder.objects.filter(created_at__gte=local_day_start(today), created_at__lt=local_day_end_exclusive(today)).count(),
-            'today_revenue':         str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(today), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
+            'week_orders':           SalesOrder.objects.filter(created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today)).count(),
+            'week_revenue':          str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(week_start), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
             'pending_orders':        SalesOrder.objects.filter(status='PENDING').count(),
             'low_stock_count':       low_stock_count,
             'total_customers':       User.objects.filter(role__code='CUSTOMER', is_active=True).count(),
@@ -381,6 +403,8 @@ class AccountingService:
             'supplier_outstanding':  str(supplier_outstanding),
             'loan_outstanding':      str(loan_outstanding),
             'partner_outstanding':   str(partner_outstanding),
+            'cash_on_hand':          str(cash_on_hand),
+            'cash_account_id':       str(cash_account.id) if cash_account else None,
             'out_of_stock_count':    out_of_stock,
             'recent_orders':         recent_orders,
             'top_products':          top_products,

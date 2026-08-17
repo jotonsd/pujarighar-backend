@@ -1,7 +1,10 @@
 import logging
 import requests
+from decimal import Decimal
 from django.conf import settings
-from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User
+from django.db import transaction
+from django.utils import timezone
+from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +99,7 @@ class SSLCommerzService:
             logger.error(f'SSLCommerz verification failed: {e}', exc_info=True)
             return {'status': 'FAILED'}
 
+    @transaction.atomic
     def confirm_payment(self, tran_id: str, val_id: str, post_data: dict) -> SalesOrder | None:
         """
         Validate the payment and confirm the linked order.
@@ -135,6 +139,49 @@ class SSLCommerzService:
             OrderStatusLog.objects.create(
                 order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
             )
+            self._create_cash_receipt_journal(order, admin)
 
         logger.info(f'Payment confirmed for order {order.order_number}')
         return order
+
+    def _create_cash_receipt_journal(self, order: SalesOrder, user) -> None:
+        """Checkout already posted the SALE journal for this (non-COD) order —
+        Dr Accounts Receivable / Cr Revenue+Delivery+Tax — before payment was
+        even confirmed (see CheckoutService/GuestCheckoutService._create_sale_journal).
+        Gateway confirmation itself never converted that receivable into cash,
+        so the money was real but invisible to the Cash account and AR never
+        cleared. This posts that missing settlement: Dr Cash / Cr AR for the
+        full order amount, tagged the same way COD's cash-received entry is
+        (reference_type='PAYMENT') so downstream idempotency checks (e.g.
+        OrderService.deliver()) recognize this order as already settled and
+        don't post a second, duplicate revenue-recognizing entry later.
+        """
+        if JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+            return
+
+        today        = timezone.now().date()
+        prefix       = f'JE-{today:%Y%m%d}-'
+        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
+        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
+
+        entry = JournalEntry.objects.create(
+            entry_number=entry_number, reference_type='PAYMENT', reference_id=order.id,
+            description_bn=f'পেমেন্ট গৃহীত (অনলাইন) — {order.order_number}',
+            description_en=f'Payment Received (Online) — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+
+        def _acct(code):
+            try:
+                return Account.objects.get(code=code)
+            except Account.DoesNotExist:
+                return None
+
+        amount = Decimal(str(order.grand_total))
+        for code, debit, credit in [
+            ('1000', amount,        Decimal('0')),  # Dr Cash
+            ('1100', Decimal('0'),  amount),         # Cr Accounts Receivable
+        ]:
+            acct = _acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)

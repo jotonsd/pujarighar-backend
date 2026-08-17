@@ -9,6 +9,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from api.models import SiteSetting, User
+from api.services.telegram_service import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,18 @@ def _customer_lang(order) -> str:
     if order.customer and order.customer.preferred_language:
         return order.customer.preferred_language
     return 'bn'
+
+
+def _customer_display(order) -> str:
+    """Admin-facing "who placed this order" line. Guests never have an
+    email (it's not collected at guest/POS checkout), only a name + phone —
+    showing just the email (or 'Guest' when it's blank) silently dropped
+    that name/phone, which is the only identifying info admin has for them."""
+    name  = order.shipping_name_bn or order.shipping_name_en or ''
+    parts = [p for p in [name, order.shipping_phone] if p]
+    label = ' — '.join(parts) if parts else 'Guest'
+    email = _customer_email(order)
+    return f'{label} ({email})' if email else label
 
 
 def _fmt(value) -> str:
@@ -293,12 +306,18 @@ def send_order_created(order):
             f"""
             <p>A new order has been placed.</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
-            <strong>Customer:</strong> {customer_email or 'Guest'}<br>
+            <strong>Customer:</strong> {_customer_display(order)}<br>
             <strong>Payment:</strong> {order.payment_method} — {order.payment_status}</p>
             {_order_summary_html(order, False)}
             """
         )
         _send_async(f"[PujariGhar] New Order #{order.order_number}", body, admins)
+        send_telegram_message(
+            f"🛒 <b>New Order #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}\n"
+            f"Payment: {order.payment_method} — {order.payment_status}\n"
+            f"Total: ৳{_fmt(order.grand_total)}"
+        )
 
 
 def send_order_cancelled(order):
@@ -332,11 +351,15 @@ def send_order_cancelled(order):
             f"""
             <p>An order has been cancelled.</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
-            <strong>Customer:</strong> {customer_email or 'Guest'}</p>
+            <strong>Customer:</strong> {_customer_display(order)}</p>
             {_order_summary_html(order, False)}
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Cancelled", body, admins)
+        send_telegram_message(
+            f"❌ <b>Order Cancelled #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}"
+        )
 
 
 def send_order_delivered(order):
@@ -372,11 +395,15 @@ def send_order_delivered(order):
             f"""
             <p>An order has been delivered.</p>
             <p><strong>Order #:</strong> {order.order_number}<br>
-            <strong>Customer:</strong> {customer_email or 'Guest'}</p>
+            <strong>Customer:</strong> {_customer_display(order)}</p>
             {_order_summary_html(order, is_bn)}
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Delivered", body, admins)
+        send_telegram_message(
+            f"✅ <b>Order Delivered #{order.order_number}</b>\n"
+            f"Customer: {_customer_display(order)}"
+        )
 
 
 # ── Promotional / marketing emails ──────────────────────────────────────────────

@@ -51,6 +51,7 @@ def adjust_stock(request, pk):
             supplier_id=str(d['supplier_id']) if d.get('supplier_id') else None,
             supplier_name=d.get('supplier_name', ''),
             payment_method=d.get('payment_method', 'CASH'),
+            date=d.get('date'),
         )
         return ApiResponse(
             message="Stock adjusted",
@@ -90,6 +91,7 @@ def get_purchase_report(request):
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),
         to_date=request.query_params.get('to', ''),
+        payment_method=request.query_params.get('payment_method', ''),
     )
     return ApiResponse(message="Purchase report retrieved", data=data)
 
@@ -103,6 +105,7 @@ def get_supplier_return_report(request):
         product_id=request.query_params.get('product_id', ''),
         from_date=request.query_params.get('from', ''),
         to_date=request.query_params.get('to', ''),
+        payment_method=request.query_params.get('payment_method', ''),
     )
     return ApiResponse(message="Supplier return report retrieved", data=data)
 
