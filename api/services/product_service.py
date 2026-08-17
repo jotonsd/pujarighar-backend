@@ -536,7 +536,7 @@ class StockService:
                 )
 
     def _get_movement_report(self, movement_type: str, request=None, supplier_id: str = '', product_id: str = '',
-                              from_date: str = '', to_date: str = '') -> dict:
+                              from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
         from django.db.models import Prefetch
         from api.models import ProductImage
 
@@ -552,6 +552,8 @@ class StockService:
             qs = qs.filter(created_at__gte=local_day_start(from_date))
         if to_date:
             qs = qs.filter(created_at__lt=local_day_end_exclusive(to_date))
+        if payment_method:
+            qs = qs.filter(payment_method=payment_method)
 
         qs = qs.order_by('-created_at')
 
@@ -590,12 +592,12 @@ class StockService:
         }
 
     def get_purchase_report(self, request=None, supplier_id: str = '', product_id: str = '',
-                             from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('PURCHASE', request, supplier_id, product_id, from_date, to_date)
+                             from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
+        return self._get_movement_report('PURCHASE', request, supplier_id, product_id, from_date, to_date, payment_method)
 
     def get_supplier_return_report(self, request=None, supplier_id: str = '', product_id: str = '',
-                                    from_date: str = '', to_date: str = '') -> dict:
-        return self._get_movement_report('SUPPLIER_RETURN', request, supplier_id, product_id, from_date, to_date)
+                                    from_date: str = '', to_date: str = '', payment_method: str = '') -> dict:
+        return self._get_movement_report('SUPPLIER_RETURN', request, supplier_id, product_id, from_date, to_date, payment_method)
 
     def list_package_items(self, product: Product):
         return ProductPackageItem.objects.filter(package=product).select_related('component')
