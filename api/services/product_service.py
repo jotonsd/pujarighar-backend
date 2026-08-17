@@ -330,7 +330,8 @@ class StockService:
                      unit_price: Decimal = None,
                      supplier_id: str = None,
                      supplier_name: str = '',
-                     payment_method: str = 'CASH') -> StockMovement:
+                     payment_method: str = 'CASH',
+                     date=None) -> StockMovement:
         supplier = None
         if supplier_id:
             try:
@@ -343,6 +344,13 @@ class StockService:
         if movement_type == 'SUPPLIER_RETURN':
             quantity = -abs(quantity)
 
+        # Entries are often logged a day or more after the actual purchase —
+        # keep the current time-of-day, just swap in the chosen calendar date,
+        # so ordering among same-day entries still stays sensible.
+        created_at = timezone.now()
+        if date:
+            created_at = timezone.localtime(created_at).replace(year=date.year, month=date.month, day=date.day)
+
         movement = StockMovement(
             product=product, movement_type=movement_type,
             quantity=quantity, unit_cost=unit_cost,
@@ -350,6 +358,7 @@ class StockService:
             supplier_name=supplier_name if not supplier else (supplier.name_bn or supplier.name_en),
             payment_method=payment_method if movement_type in ('PURCHASE', 'SUPPLIER_RETURN') else 'CASH',
             note_bn=note_bn, note_en=note_en, created_by=user,
+            created_at=created_at,
         )
         movement.clean()
         movement.save()
@@ -417,6 +426,10 @@ class StockService:
             movement.note_bn = data['note_bn']
         if 'note_en' in data:
             movement.note_en = data['note_en']
+        if data.get('date'):
+            movement.created_at = timezone.localtime(movement.created_at).replace(
+                year=data['date'].year, month=data['date'].month, day=data['date'].day,
+            )
         movement.save()
 
         self._sync_movement_journal(movement)

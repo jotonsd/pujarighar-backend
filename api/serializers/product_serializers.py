@@ -201,6 +201,9 @@ class StockAdjustSerializer(serializers.Serializer):
     supplier_id    = serializers.UUIDField(required=False, allow_null=True, default=None)
     supplier_name  = serializers.CharField(required=False, allow_blank=True, default='')
     payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False, default='CASH')
+    # When the entry is being logged after the fact (e.g. purchased
+    # yesterday, entered today) — defaults to today if left out.
+    date           = serializers.DateField(required=False, allow_null=True, default=None)
     note_bn        = serializers.CharField(required=False, allow_blank=True, default='')
     note_en        = serializers.CharField(required=False, allow_blank=True, default='')
 
@@ -225,6 +228,7 @@ class StockMovementUpdateSerializer(serializers.Serializer):
     supplier_id    = serializers.UUIDField(required=False, allow_null=True)
     supplier_name  = serializers.CharField(required=False, allow_blank=True)
     payment_method = serializers.ChoiceField(choices=['CASH', 'CREDIT'], required=False)
+    date           = serializers.DateField(required=False, allow_null=True)
     note_bn        = serializers.CharField(required=False, allow_blank=True)
     note_en        = serializers.CharField(required=False, allow_blank=True)
 
