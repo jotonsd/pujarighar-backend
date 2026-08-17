@@ -51,6 +51,7 @@ def adjust_stock(request, pk):
             supplier_id=str(d['supplier_id']) if d.get('supplier_id') else None,
             supplier_name=d.get('supplier_name', ''),
             payment_method=d.get('payment_method', 'CASH'),
+            date=d.get('date'),
         )
         return ApiResponse(
             message="Stock adjusted",

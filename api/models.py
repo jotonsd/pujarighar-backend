@@ -357,7 +357,10 @@ class StockMovement(models.Model):
     note_bn        = models.TextField(blank=True)
     note_en        = models.TextField(blank=True)
     created_by     = models.ForeignKey(User, on_delete=models.PROTECT)
-    created_at     = models.DateTimeField(auto_now_add=True)
+    # Not auto_now_add — a PURCHASE entry is often logged a day or more after
+    # the actual buying happened, so the form lets the date be backdated.
+    # Defaults to now when nothing is supplied, same as auto_now_add would.
+    created_at     = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['-created_at']
