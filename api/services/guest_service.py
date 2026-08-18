@@ -11,6 +11,7 @@ from api.models import (
     User, Notification,
 )
 from api.services.notification_ws import broadcast_notifications
+from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
@@ -38,11 +39,7 @@ class GuestCheckoutService:
         for item in items:
             self._validate_stock(item['product'], item['quantity'])
 
-        # Generate order number
-        today        = timezone.now().date()
-        prefix       = f'PG-{today:%Y%m%d}-'
-        last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
-        order_number = f'{prefix}{last + 1:04d}'
+        order_number = generate_order_number()
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
         subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
