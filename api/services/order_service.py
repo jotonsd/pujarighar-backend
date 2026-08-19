@@ -267,6 +267,50 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User) -> SalesOrder:
+        """Add a product to a not-yet-shipped order — same gate as
+        update_item_quantity/delete_item. If the product's already on the
+        order, bumps that line's quantity instead of creating a duplicate
+        row (mirrors how re-adding an item already in the cart behaves at
+        checkout)."""
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারে পণ্য যোগ করা যায়',
+                'message_en': 'Products can only be added to pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারে পণ্য যোগ করা যাবে না',
+                'message_en': 'Products cannot be added to an already-paid order',
+            })
+        if quantity <= 0:
+            raise ValidationError({
+                'message_bn': 'পরিমাণ শূন্যের বেশি হতে হবে',
+                'message_en': 'Quantity must be greater than zero',
+            })
+
+        existing = order.items.filter(product=product).first()
+        if existing:
+            return self.update_item_quantity(order, existing, existing.quantity + quantity, user)
+
+        self._adjust_order_item_stock(product, quantity, order.id, user)
+
+        SalesOrderItem.objects.create(
+            order=order, product=product,
+            product_name_bn=product.name_bn, product_name_en=product.name_en,
+            original_unit_price=product.original_price,
+            unit_price=product.effective_price,
+            quantity=quantity,
+            line_total=product.effective_price * quantity,
+        )
+
+        self._recalc_order_totals(order)
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Order {order.order_number} item added: {product.sku} x{quantity} by {user.email}')
+        return order
+
+    @transaction.atomic
     def delete_item(self, order: SalesOrder, item: SalesOrderItem, user: User) -> SalesOrder:
         """Remove a mistakenly-added line item from a not-yet-shipped order —
         same gate and stock/totals/journal reconciliation as

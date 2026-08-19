@@ -36,7 +36,7 @@ from .order_views import (
     track_by_order_number,
     confirm_order, pack_order, assign_delivery, dispatch_order,
     deliver_order, return_order, cancel_order, pos_create_order,
-    mark_cod_paid, update_shipping, apply_discount, update_order_item, delete_order_item,
+    mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
     waive_delivery_charge, lookup_recent_order_by_phone,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
