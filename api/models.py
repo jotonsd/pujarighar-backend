@@ -490,6 +490,14 @@ class SalesOrder(BaseModel):
     payment_status      = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='UNPAID')
     subtotal            = models.DecimalField(max_digits=12, decimal_places=2)
     discount_amount     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Portion of discount_amount that's a manually-applied staff/POS discount
+    # (apply_discount / POS checkout's discount_type+value), as opposed to
+    # each item's own product-level discount (already baked into its
+    # unit_price). discount_amount itself is recomputed from current items
+    # every time they change; this field is what lets that recomputation
+    # still know how much staff discount to keep subtracting, since that
+    # portion isn't stored on any item.
+    staff_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)

@@ -79,10 +79,11 @@ class GuestCheckoutService:
             shipping_thana      = shipping['thana'],
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
-            subtotal            = subtotal,
-            discount_amount     = discount_amount,
-            delivery_charge     = delivery,
-            grand_total         = grand_total,
+            subtotal              = subtotal,
+            discount_amount       = discount_amount,
+            staff_discount_amount = extra_discount,
+            delivery_charge       = delivery,
+            grand_total           = grand_total,
         )
 
         for item in items:
