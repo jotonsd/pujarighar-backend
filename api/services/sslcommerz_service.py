@@ -139,22 +139,22 @@ class SSLCommerzService:
             OrderStatusLog.objects.create(
                 order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
             )
-            self._create_cash_receipt_journal(order, admin)
+            self._create_payment_journal(order, admin)
 
         logger.info(f'Payment confirmed for order {order.order_number}')
         return order
 
-    def _create_cash_receipt_journal(self, order: SalesOrder, user) -> None:
-        """Checkout already posted the SALE journal for this (non-COD) order —
-        Dr Accounts Receivable / Cr Revenue+Delivery+Tax — before payment was
-        even confirmed (see CheckoutService/GuestCheckoutService._create_sale_journal).
-        Gateway confirmation itself never converted that receivable into cash,
-        so the money was real but invisible to the Cash account and AR never
-        cleared. This posts that missing settlement: Dr Cash / Cr AR for the
-        full order amount, tagged the same way COD's cash-received entry is
-        (reference_type='PAYMENT') so downstream idempotency checks (e.g.
-        OrderService.deliver()) recognize this order as already settled and
-        don't post a second, duplicate revenue-recognizing entry later.
+    def _create_payment_journal(self, order: SalesOrder, user) -> None:
+        """Revenue is recognized here, at the moment payment is actually
+        confirmed — checkout no longer posts a speculative SALE journal
+        before the customer has paid (see CheckoutService._create_order,
+        which used to post Dr AR / Cr Revenue immediately at checkout; a
+        sale that fails or is abandoned mid-payment would have overstated
+        the books until someone noticed). This posts the full entry in one
+        go instead — Dr Cash+COGS / Cr Revenue+Delivery+Inventory — mirroring
+        COD's own OrderService._create_payment_journal exactly, tagged the
+        same way (reference_type='PAYMENT') so downstream idempotency checks
+        (e.g. OrderService.deliver()) recognize this order as already settled.
         """
         if JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
             return
@@ -163,6 +163,11 @@ class SSLCommerzService:
         prefix       = f'JE-{today:%Y%m%d}-'
         last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
         entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
+
+        cogs = sum(
+            item.product.cost_price * item.quantity
+            for item in order.items.select_related('product')
+        )
 
         entry = JournalEntry.objects.create(
             entry_number=entry_number, reference_type='PAYMENT', reference_id=order.id,
@@ -177,11 +182,18 @@ class SSLCommerzService:
             except Account.DoesNotExist:
                 return None
 
-        amount = Decimal(str(order.grand_total))
-        for code, debit, credit in [
-            ('1000', amount,        Decimal('0')),  # Dr Cash
-            ('1100', Decimal('0'),  amount),         # Cr Accounts Receivable
-        ]:
+        cb_used = Decimal(str(order.cashback_used or 0))
+        lines = [
+            ('1000', order.grand_total,                    Decimal('0')),  # Dr Cash
+            ('5000', cogs,                                 Decimal('0')),  # Dr COGS
+            ('4000', Decimal('0'),                         order.subtotal),  # Cr Revenue
+            ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),   # Cr Delivery Income
+            ('1300', Decimal('0'),                         cogs),          # Cr Inventory
+        ]
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
+
+        for code, debit, credit in lines:
             acct = _acct(code)
-            if acct:
+            if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)

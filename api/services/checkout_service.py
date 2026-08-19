@@ -2,12 +2,10 @@ import logging
 import math
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    Account, JournalEntry, JournalLine,
     ShippingAddress, Notification, User,
 )
 from api.services.notification_ws import broadcast_notifications
@@ -123,8 +121,11 @@ class CheckoutService:
             order.cashback_amount = cashback
             order.save(update_fields=['cashback_amount'])
 
-        if payment_method != 'COD':
-            self._create_sale_journal(order, user)
+        # No journal posted here — for an ONLINE order the customer hasn't
+        # actually paid yet at this point (that's confirmed later via
+        # SSLCommerzService.confirm_payment, which posts the full revenue +
+        # cash journal in one go). Posting revenue for a sale that might
+        # still fail/be abandoned overstates the books until payment lands.
         cart.items.all().delete()
         self._notify_admins(order)
 
@@ -145,49 +146,6 @@ class CheckoutService:
                 product=product, movement_type='SALE',
                 quantity=-quantity, reference_id=order_id, created_by=user,
             )
-
-    def _create_sale_journal(self, order: SalesOrder, user) -> None:
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
-
-        cogs = sum(
-            item.product.cost_price * item.quantity
-            for item in order.items.select_related('product')
-        )
-
-        entry = JournalEntry.objects.create(
-            entry_number=entry_number, reference_type='SALE', reference_id=order.id,
-            description_bn=f'বিক্রয় — {order.order_number}',
-            description_en=f'Sale — {order.order_number}',
-            created_by=user, is_posted=True,
-        )
-
-        def _acct(code):
-            try:
-                return Account.objects.get(code=code)
-            except Account.DoesNotExist:
-                return None
-
-        lines = [
-            ('1100', order.grand_total,                    Decimal('0')),  # Dr AR
-            ('4000', Decimal('0'),                         order.subtotal),  # Cr Revenue
-            ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),  # Cr Delivery
-            ('2100', Decimal('0'),                         order.tax_amount),  # Cr Tax
-            ('5000', cogs,                                 Decimal('0')),  # Dr COGS
-            ('1300', Decimal('0'),                         cogs),  # Cr Inventory
-        ]
-        cb_used = Decimal(str(order.cashback_used or 0))
-        if cb_used > 0:
-            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
-
-        for code, debit, credit in lines:
-            acct = _acct(code)
-            if acct and (debit or credit):
-                JournalLine.objects.create(
-                    journal_entry=entry, account=acct, debit=debit, credit=credit,
-                )
 
     def _notify_admins(self, order: SalesOrder) -> None:
         admins  = User.objects.filter(role__code='ADMIN', is_active=True)

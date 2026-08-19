@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
@@ -175,8 +175,10 @@ class OrderService:
             })
 
         # Same POS staff-discount calculation used at checkout (guest_service.py) —
-        # layered on top of whatever's already in subtotal/discount_amount, clamped
-        # so the order can't go negative.
+        # layered on top of whatever's already in subtotal, clamped so the
+        # order can't go negative. Stored in staff_discount_amount (not just
+        # folded into subtotal/discount_amount directly) so it survives a
+        # later item add/quantity-change/removal — see _recalc_order_totals.
         extra_discount = Decimal('0')
         if discount_type == 'PERCENTAGE':
             extra_discount = (order.subtotal * discount_value / 100).quantize(Decimal('0.01'))
@@ -184,10 +186,17 @@ class OrderService:
             extra_discount = discount_value
         extra_discount = min(extra_discount, order.subtotal)
 
-        order.subtotal -= extra_discount
-        order.discount_amount += extra_discount
-        order.grand_total = order.subtotal + order.delivery_charge
-        order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
+        order.staff_discount_amount = (order.staff_discount_amount or Decimal('0')) + extra_discount
+        order.save(update_fields=['staff_discount_amount'])
+        self._recalc_order_totals(order)
+        # A non-COD order posts its SALE journal immediately at checkout —
+        # before payment is even confirmed, while still PENDING/UNPAID, which
+        # is exactly the window a discount can be applied in. Without this,
+        # the journal's Revenue/AR would stay stale at the pre-discount
+        # amount while order.subtotal/grand_total move to the discounted
+        # figure. No-ops if no SALE/PAYMENT journal exists yet (the common
+        # COD case) — same as the other item-editing methods.
+        self._resync_order_item_journal(order)
 
         logger.info(f'Discount applied to order {order.order_number} by {user.email}: {discount_type} {discount_value} (৳{extra_discount})')
         return order
@@ -437,10 +446,27 @@ class OrderService:
         # order.items.all() would silently reuse get_order()'s prefetch_related
         # cache here — stale from before this same request's delete/quantity
         # change — so query the base manager directly to force a fresh read.
-        subtotal = SalesOrderItem.objects.filter(order=order).aggregate(total=Sum('line_total'))['total'] or Decimal('0')
-        order.subtotal    = subtotal
-        order.grand_total = subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
-        order.save(update_fields=['subtotal', 'grand_total'])
+        #
+        # discount_amount mixes two different things that both need to
+        # survive an item being added/changed/removed: each item's own
+        # product-level discount (original_unit_price vs unit_price — already
+        # baked into line_total, so it's recomputed fresh from current items
+        # every time) and a manually-applied staff/POS discount, which isn't
+        # stored on any item at all. Without separately tracking the latter
+        # in staff_discount_amount, a naive "subtotal = sum(line_total)"
+        # here would silently wipe out any staff discount the moment an item
+        # changed — discount_amount would stay stale while the customer-
+        # facing subtotal jumped back up as if the discount never happened.
+        items = list(SalesOrderItem.objects.filter(order=order))
+        raw_total = sum((i.line_total for i in items), Decimal('0'))
+        original_total = sum(((i.original_unit_price or i.unit_price) * i.quantity for i in items), Decimal('0'))
+        product_discount = original_total - raw_total
+        staff_discount = order.staff_discount_amount or Decimal('0')
+
+        order.subtotal        = raw_total - staff_discount
+        order.discount_amount = product_discount + staff_discount
+        order.grand_total     = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
 
     def _resync_order_item_journal(self, order: SalesOrder) -> None:
         """A non-COD order posts its SALE journal immediately at checkout

@@ -41,6 +41,7 @@ def pos_create_order(request):
             d, customer=customer,
             discount_type=d.get('discount_type', 'NONE'),
             discount_value=d.get('discount_value', 0),
+            is_pos=True,
         )
         order = _svc.confirm(order, request.user)
         mail_service.send_order_created(order)

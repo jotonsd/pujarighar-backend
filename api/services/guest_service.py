@@ -30,7 +30,8 @@ class GuestCheckoutService:
 
     @transaction.atomic
     def checkout(self, validated_data: dict, customer: User | None = None,
-                 discount_type: str = 'NONE', discount_value: Decimal = Decimal('0')) -> SalesOrder:
+                 discount_type: str = 'NONE', discount_value: Decimal = Decimal('0'),
+                 is_pos: bool = False) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
@@ -79,10 +80,11 @@ class GuestCheckoutService:
             shipping_thana      = shipping['thana'],
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
-            subtotal            = subtotal,
-            discount_amount     = discount_amount,
-            delivery_charge     = delivery,
-            grand_total         = grand_total,
+            subtotal              = subtotal,
+            discount_amount       = discount_amount,
+            staff_discount_amount = extra_discount,
+            delivery_charge       = delivery,
+            grand_total           = grand_total,
         )
 
         for item in items:
@@ -104,7 +106,13 @@ class GuestCheckoutService:
             changed_by=system_user,
         )
 
-        if payment_method != 'COD':
+        # POS: staff already collected the payment in person before hitting
+        # submit — there's no separate gateway/confirmation step coming
+        # later, so this IS the moment payment is confirmed; post now.
+        # Public guest checkout: an ONLINE order redirects to SSLCommerz and
+        # isn't actually paid yet — deferred to SSLCommerzService.confirm_payment,
+        # same reasoning as the logged-in checkout flow.
+        if payment_method != 'COD' and is_pos:
             self._create_sale_journal(order)
         self._notify_admins(order)
         logger.info(f"Guest order created: {order.order_number} phone={order.shipping_phone}")
