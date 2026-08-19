@@ -3,12 +3,13 @@ from decimal import Decimal
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.models import SalesOrder, OrderStatusLog
+from api.models import SalesOrder, OrderStatusLog, Product
 from api.serializers.guest_serializers import POSCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
+    AddOrderItemSerializer,
 )
 from api.services.order_service import OrderService
 from api.services import mail_service
@@ -361,6 +362,28 @@ def update_shipping(request, pk):
         setattr(order, k, v)
     order.save(update_fields=list(fields.keys()))
     return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order, context={'request': request}).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
+def add_order_item(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    serializer = AddOrderItemSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message='Validation failed', errors=serializer.errors, status_code=422)
+    d = serializer.validated_data
+
+    try:
+        product = Product.objects.get(pk=d['product_id'])
+        updated = _svc.add_item(order, product, d['quantity'], request.user)
+        return ApiResponse(message='Item added', data=SalesOrderSerializer(updated, context={'request': request}).data)
+    except Exception as e:
+        logger.error(f'Add order item error: {e}', exc_info=True)
+        return api_error(e)
 
 
 @api_view(['PATCH'])

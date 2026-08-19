@@ -1,6 +1,7 @@
+from decimal import Decimal
 from django.conf import settings
 from rest_framework import serializers
-from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User
+from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User, Product
 
 
 class SalesOrderItemSerializer(serializers.ModelSerializer):
@@ -253,3 +254,16 @@ class AssignDeliverySerializer(serializers.Serializer):
 class OrderCancelSerializer(serializers.Serializer):
     note_bn = serializers.CharField(required=False, allow_blank=True, default='')
     note_en = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class AddOrderItemSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+    def validate_product_id(self, value):
+        if not Product.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError({
+                'message_bn': 'পণ্য পাওয়া যায়নি',
+                'message_en': 'Product not found',
+            })
+        return value
