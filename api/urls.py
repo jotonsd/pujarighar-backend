@@ -200,6 +200,7 @@ urlpatterns = [
     # ─── Discounts ────────────────────────────────────────────────────────────
     path('discounts/',                      views.list_discounts,   name='discount-list'),
     path('discounts/create/',               views.create_discount,  name='discount-create'),
+    path('discounts/bulk-create/',          views.bulk_create_discount, name='discount-bulk-create'),
     path('discounts/<uuid:pk>/toggle/',     views.toggle_discount,  name='discount-toggle'),
     path('discounts/<uuid:pk>/update/',     views.update_discount,  name='discount-update'),
     path('discounts/<uuid:pk>/delete/',     views.delete_discount,  name='discount-delete'),
