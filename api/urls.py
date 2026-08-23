@@ -204,6 +204,7 @@ urlpatterns = [
     path('discounts/<uuid:pk>/toggle/',     views.toggle_discount,  name='discount-toggle'),
     path('discounts/<uuid:pk>/update/',     views.update_discount,  name='discount-update'),
     path('discounts/<uuid:pk>/delete/',     views.delete_discount,  name='discount-delete'),
+    path('discounts/bulk-delete/',          views.bulk_delete_discount, name='discount-bulk-delete'),
 
     # ─── Notifications ────────────────────────────────────────────────────────
     path('notifications/',                      views.list_notifications,     name='notification-list'),

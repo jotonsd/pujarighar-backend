@@ -121,3 +121,17 @@ def delete_discount(request, pk):
         return ApiResponse(message="Deleted")
     except Discount.DoesNotExist:
         return ApiResponse(message="Not found", errors="Not found", status_code=404)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'delete')])
+def bulk_delete_discount(request):
+    ids = request.data.get('ids')
+    if not ids or not isinstance(ids, list):
+        return ApiResponse(
+            message="Validation failed",
+            errors={'ids': 'Provide a non-empty list of discount IDs'},
+            status_code=422,
+        )
+    deleted_count, _ = Discount.objects.filter(id__in=ids).delete()
+    return ApiResponse(message=f"{deleted_count} discount(s) deleted", data={'deleted': deleted_count})
