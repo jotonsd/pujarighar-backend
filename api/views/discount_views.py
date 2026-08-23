@@ -56,6 +56,37 @@ def create_discount(request):
     return ApiResponse(message="Discount created", data=DiscountSerializer(discount, context={'request': request}).data, status_code=201)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('discounts', 'create')])
+def bulk_create_discount(request):
+    product_ids = request.data.get('product_ids')
+    if not product_ids or not isinstance(product_ids, list):
+        return ApiResponse(
+            message="Validation failed",
+            errors={'product_ids': 'Provide a non-empty list of product IDs'},
+            status_code=422,
+        )
+    if not Product.objects.filter(id__in=product_ids).count() == len(set(product_ids)):
+        return ApiResponse(message="Validation failed", errors={'product_ids': 'One or more products not found'}, status_code=422)
+
+    shared = {k: request.data.get(k) for k in ('discount_type', 'discount_value', 'note', 'start_date', 'end_date') if k in request.data}
+
+    created, errors = [], {}
+    for pid in product_ids:
+        s = DiscountSerializer(data={**shared, 'product': pid}, context={'request': request})
+        if s.is_valid():
+            created.append(s.save())
+        else:
+            errors[pid] = s.errors
+
+    return ApiResponse(
+        message=f"{len(created)} discount(s) created" + (f", {len(errors)} failed" if errors else ""),
+        data=DiscountSerializer(created, many=True, context={'request': request}).data,
+        errors=errors or None,
+        status_code=201 if created else 422,
+    )
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, has_permission('discounts', 'edit')])
 def toggle_discount(request, pk):
