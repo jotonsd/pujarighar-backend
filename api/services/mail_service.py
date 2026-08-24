@@ -333,17 +333,14 @@ def send_order_confirmed(order):
         or order.shipping_name_bn or order.shipping_name_en or ''
 
     if is_bn:
-        greeting = f"প্রিয় {name}, " if name else ""
-        sms_text = (
-            f"{greeting}আপনার অর্ডার #{order.order_number} নিশ্চিত করা হয়েছে। "
-            f"শীঘ্রই এটি প্রস্তুত করে পাঠানো হবে। - পূজারিঘর"
-        )
+        lines = [f"প্রিয় {name},"] if name else []
+        lines.append(f"আপনার অর্ডার #{order.order_number} নিশ্চিত করা হয়েছে। শীঘ্রই এটি প্রস্তুত করে পাঠানো হবে।")
+        lines.append("পূজারিঘর")
     else:
-        greeting = f"Dear {name}, " if name else ""
-        sms_text = (
-            f"{greeting}your order #{order.order_number} is confirmed and "
-            f"will be prepared and shipped shortly. - PujariGhar"
-        )
+        lines = [f"Dear {name},"] if name else []
+        lines.append(f"Your order #{order.order_number} is confirmed and will be prepared and shipped shortly.")
+        lines.append("PujariGhar")
+    sms_text = "\n".join(lines)
     send_sms(order.shipping_phone, sms_text, order=order)
 
 
