@@ -51,6 +51,55 @@ class OrderService:
             qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
         return qs
 
+    def get_sales_report(self, params: dict) -> dict:
+        """Order-level sales listing for the admin Reports menu — one row per
+        order (the natural unit for "what did we sell and to whom"), distinct
+        from Sales Summary (period-aggregated chart) and the Income Report
+        (ledger entries, not orders). Same date/payment filter conventions as
+        the other Reports-menu endpoints (purchases, supplier returns)."""
+        qs = SalesOrder.objects.select_related('customer').prefetch_related('items')
+
+        if params.get('from'):
+            qs = qs.filter(created_at__gte=local_day_start(params['from']))
+        if params.get('to'):
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
+        if params.get('payment_method'):
+            qs = qs.filter(payment_method=params['payment_method'])
+        if params.get('payment_status'):
+            qs = qs.filter(payment_status=params['payment_status'])
+        if params.get('status'):
+            qs = qs.filter(status=params['status'])
+
+        rows = []
+        total_amount = Decimal('0')
+        for order in qs.order_by('-created_at'):
+            total_amount += order.grand_total
+            rows.append({
+                'id': str(order.id),
+                'date': order.created_at.isoformat(),
+                'order_number': order.order_number,
+                'customer_name': order.shipping_name_bn or order.shipping_name_en,
+                'phone': order.shipping_phone,
+                'payment_method': order.payment_method,
+                'payment_status': order.payment_status,
+                'status': order.status,
+                # len(...all()) reuses the prefetch_related cache — .count()
+                # on a related manager always issues its own fresh query
+                # regardless of prefetching, which would mean one extra query
+                # per order in the report.
+                'items_count': len(order.items.all()),
+                'subtotal': str(order.subtotal),
+                'discount_amount': str(order.discount_amount),
+                'delivery_charge': str(order.delivery_charge),
+                'grand_total': str(order.grand_total),
+            })
+
+        return {
+            'rows': rows,
+            'total_orders': len(rows),
+            'total_amount': str(total_amount),
+        }
+
     def find_recent_shipping_by_phone(self, phone: str) -> SalesOrder | None:
         """POS auto-fill fallback for repeat guest customers — lookup_user_by_phone
         only finds people with an actual registered account, but most walk-in/

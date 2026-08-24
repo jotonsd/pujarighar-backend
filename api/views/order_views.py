@@ -430,3 +430,16 @@ def delete_order_item(request, pk, item_id):
     except Exception as e:
         logger.error(f'Delete order item error: {e}', exc_info=True)
         return api_error(e)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('reports_sales', 'view')])
+def get_sales_report(request):
+    data = _svc.get_sales_report({
+        'from':            request.query_params.get('from', ''),
+        'to':              request.query_params.get('to', ''),
+        'status':          request.query_params.get('status', ''),
+        'payment_status':  request.query_params.get('payment_status', ''),
+        'payment_method':  request.query_params.get('payment_method', ''),
+    })
+    return ApiResponse(message='Sales report retrieved', data=data)

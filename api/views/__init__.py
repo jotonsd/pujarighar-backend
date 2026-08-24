@@ -37,7 +37,7 @@ from .order_views import (
     confirm_order, pack_order, assign_delivery, dispatch_order,
     deliver_order, return_order, cancel_order, pos_create_order,
     mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
-    waive_delivery_charge, lookup_recent_order_by_phone,
+    waive_delivery_charge, lookup_recent_order_by_phone, get_sales_report,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
