@@ -511,9 +511,10 @@ class OrderService:
         original_total = sum(((i.original_unit_price or i.unit_price) * i.quantity for i in items), Decimal('0'))
         product_discount = original_total - raw_total
         staff_discount = order.staff_discount_amount or Decimal('0')
+        first_order_discount = order.first_order_discount_amount or Decimal('0')
 
-        order.subtotal        = raw_total - staff_discount
-        order.discount_amount = product_discount + staff_discount
+        order.subtotal        = raw_total - staff_discount - first_order_discount
+        order.discount_amount = product_discount + staff_discount + first_order_discount
         order.grand_total     = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
         order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
 

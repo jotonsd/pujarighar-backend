@@ -501,6 +501,12 @@ class SalesOrder(BaseModel):
     # still know how much staff discount to keep subtracting, since that
     # portion isn't stored on any item.
     staff_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Auto-applied welcome discount on a registered customer's very first
+    # order (SiteSetting.first_order_discount_percent) — tracked the same
+    # way as staff_discount_amount, so a later item edit's recalculation
+    # (_recalc_order_totals) keeps subtracting it correctly instead of
+    # silently losing it.
+    first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
@@ -927,6 +933,9 @@ class SiteSetting(models.Model):
     email_default_from = models.EmailField(blank=True, default='')
     # Referral
     referral_bonus_amount = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('8.00'))
+    # Auto-applied on a registered customer's very first order (self-checkout
+    # only) — 0 disables it.
+    first_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('20.00'))
     # Telegram admin notifications
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
