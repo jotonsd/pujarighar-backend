@@ -257,6 +257,12 @@ urlpatterns = [
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
 
+    # ─── SMS ────────────────────────────────────────────────────────────────────
+    path('sms/settings/',  views.get_sms_settings,    name='sms-settings-get'),
+    path('sms/settings/update/', views.update_sms_settings, name='sms-settings-update'),
+    path('sms/logs/',      views.list_sms_logs,       name='sms-logs'),
+    path('sms/stats/',     views.get_sms_stats,       name='sms-stats'),
+
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),
     path('blog/all/',              views.list_all_blog_posts,  name='blog-list-all'),

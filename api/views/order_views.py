@@ -173,7 +173,9 @@ def get_order_status_log(request, pk):
 def confirm_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(_svc.confirm(order, request.user), context={'request': request}).data)
+        confirmed = _svc.confirm(order, request.user)
+        mail_service.send_order_confirmed(confirmed)
+        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(confirmed, context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:

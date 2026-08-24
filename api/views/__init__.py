@@ -96,3 +96,6 @@ from .bayna_views import (
     update_booking as update_bayna_booking,
     list_my_bookings as list_my_bayna_bookings,
 )
+from .sms_views import (
+    get_sms_settings, update_sms_settings, list_sms_logs, get_sms_stats,
+)

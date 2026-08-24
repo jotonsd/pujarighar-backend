@@ -930,6 +930,9 @@ class SiteSetting(models.Model):
     # Telegram admin notifications
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
+    # SMS customer notifications (BulkSMSBD)
+    sms_api_key   = models.CharField(max_length=255, blank=True, default='')
+    sms_sender_id = models.CharField(max_length=32, blank=True, default='')
 
     class Meta:
         verbose_name = 'Site Setting'
@@ -938,6 +941,24 @@ class SiteSetting(models.Model):
     def get(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class SmsLog(models.Model):
+    STATUS_CHOICES = [
+        ('SUCCESS', 'সফল'),
+        ('FAILED',  'ব্যর্থ'),
+    ]
+    id            = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    order         = models.ForeignKey(SalesOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='sms_logs')
+    phone         = models.CharField(max_length=20)
+    message       = models.TextField()
+    status        = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    response_code = models.CharField(max_length=10, blank=True, default='')
+    response_text = models.CharField(max_length=255, blank=True, default='')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 # ─── Referral ─────────────────────────────────────────────────────────────────

@@ -46,6 +46,7 @@ def _nav_registry() -> list:
             item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview', 'dashboard_overview'),
             item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO', 'analytics'),
             item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier', 'courier'),
+            item('/admin/sms',        'message-square', 'এসএমএস',           'SMS', 'sms'),
         ]),
         group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
             group('package', 'পণ্য', 'Catalog', [
