@@ -36,10 +36,19 @@ _RESPONSE_MEANINGS = {
 }
 
 
+_BENGALI_DIGITS = str.maketrans('০১২৩৪৫৬৭৮৯', '0123456789')
+
+
 def _normalize_bd_phone(phone: str) -> str | None:
     """BulkSMSBD expects 8801XXXXXXXXX (13 digits, country code, no plus) —
-    every phone number in this app is stored in the local 01XXXXXXXXX form."""
-    digits = re.sub(r'\D', '', phone or '')
+    every phone number in this app is stored in the local 01XXXXXXXXX form,
+    but shipping/contact numbers are free-typed and sometimes come in via a
+    Bangla keyboard (০-৯) rather than Latin digits, so those are converted
+    first — Python's \\D doesn't strip them since re treats Unicode decimal
+    digits as \\d by default, so they'd otherwise sail through unnoticed and
+    fail normalization below."""
+    phone = (phone or '').translate(_BENGALI_DIGITS)
+    digits = re.sub(r'\D', '', phone)
     if digits.startswith('880') and len(digits) == 13:
         return digits
     if digits.startswith('0') and len(digits) == 11:
