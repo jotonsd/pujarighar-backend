@@ -9,6 +9,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from api.models import SiteSetting, User
+from api.services.sms_service import send_sms
 from api.services.telegram_service import send_telegram_message
 
 logger = logging.getLogger(__name__)
@@ -318,6 +319,32 @@ def send_order_created(order):
             f"Payment: {order.payment_method} — {order.payment_status}\n"
             f"Total: ৳{_fmt(order.grand_total)}"
         )
+
+
+def send_order_confirmed(order):
+    """Customer SMS only, fired when staff move an order PENDING → CONFIRMED
+    (not at initial placement, which already gets send_order_created's
+    email) — reaches every customer since it doesn't depend on having an
+    email on file."""
+    if not order.shipping_phone:
+        return
+    is_bn = _customer_lang(order) == 'bn'
+    name = (order.shipping_name_bn if is_bn else order.shipping_name_en) \
+        or order.shipping_name_bn or order.shipping_name_en or ''
+
+    if is_bn:
+        greeting = f"প্রিয় {name}, " if name else ""
+        sms_text = (
+            f"{greeting}আপনার অর্ডার #{order.order_number} নিশ্চিত করা হয়েছে। "
+            f"শীঘ্রই এটি প্রস্তুত করে পাঠানো হবে। - পূজারিঘর"
+        )
+    else:
+        greeting = f"Dear {name}, " if name else ""
+        sms_text = (
+            f"{greeting}your order #{order.order_number} is confirmed and "
+            f"will be prepared and shipped shortly. - PujariGhar"
+        )
+    send_sms(order.shipping_phone, sms_text, order=order)
 
 
 def send_order_cancelled(order):

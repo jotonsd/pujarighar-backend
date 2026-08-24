@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine
+from api.services import mail_service
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,7 @@ class SSLCommerzService:
             )
             self._create_payment_journal(order, admin)
 
+        mail_service.send_order_confirmed(order)
         logger.info(f'Payment confirmed for order {order.order_number}')
         return order
 

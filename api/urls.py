@@ -61,6 +61,7 @@ urlpatterns = [
     path('reports/supplier-returns/',          views.get_supplier_return_report, name='supplier-return-report'),
     path('reports/income/',                    views.get_income_report,          name='income-report'),
     path('reports/expenses/',                  views.get_expense_report,         name='expense-report'),
+    path('reports/sales/',                     views.get_sales_report,           name='sales-report'),
     path('products/<uuid:pk>/package-items/',  views.list_package_items, name='package-items'),
     path('products/<uuid:pk>/package-items/add/', views.add_package_item, name='package-item-add'),
     path('products/<uuid:pk>/package-items/<uuid:item_id>/delete/', views.delete_package_item, name='package-item-delete'),
@@ -255,6 +256,12 @@ urlpatterns = [
     path('courier/payments/',                       views.list_payments,            name='courier-payment-list'),
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
+
+    # ─── SMS ────────────────────────────────────────────────────────────────────
+    path('sms/settings/',  views.get_sms_settings,    name='sms-settings-get'),
+    path('sms/settings/update/', views.update_sms_settings, name='sms-settings-update'),
+    path('sms/logs/',      views.list_sms_logs,       name='sms-logs'),
+    path('sms/stats/',     views.get_sms_stats,       name='sms-stats'),
 
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),

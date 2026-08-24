@@ -46,6 +46,7 @@ def _nav_registry() -> list:
             item('/admin/dashboard',  'bar-chart',   'ওভারভিউ',              'Overview', 'dashboard_overview'),
             item('/admin/analytics',  'trending-up', 'অ্যানালিটিক্স ও এসইও', 'Analytics & SEO', 'analytics'),
             item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier', 'courier'),
+            item('/admin/sms',        'message-square', 'এসএমএস',           'SMS', 'sms'),
         ]),
         group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
             group('package', 'পণ্য', 'Catalog', [
@@ -81,6 +82,7 @@ def _nav_registry() -> list:
             item('/admin/settings/cashback',         'gift',  'ক্যাশব্যাক',      'Cashback', 'cashback'),
         ]),
         group('file-bar-chart', 'রিপোর্ট', 'Reports', [
+            item('/admin/reports/sales',                'shopping-bag',  'বিক্রয় রিপোর্ট',            'Sales Report', 'reports_sales'),
             item('/admin/reports/purchases',            'receipt',       'ক্রয় রিপোর্ট',              'Purchase Report', 'reports_purchases'),
             item('/admin/reports/supplier-returns',      'undo',         'সরবরাহকারীকে ফেরত রিপোর্ট', 'Supplier Return Report', 'reports_supplier_returns'),
             item('/admin/reports/supplier-outstanding',  'credit-card',  'সরবরাহকারী বকেয়া রিপোর্ট', 'Supplier Outstanding Report', 'reports_supplier_outstanding'),
