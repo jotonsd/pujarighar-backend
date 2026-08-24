@@ -69,10 +69,10 @@ class Role(BaseModel):
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, phone=None, password=None, **extra):
-        if not email:
-            raise ValueError('Email is required')
-        user = self.model(email=self.normalize_email(email), phone=phone, **extra)
+    def create_user(self, email=None, phone=None, password=None, **extra):
+        if not email and not phone:
+            raise ValueError('Email or phone is required')
+        user = self.model(email=self.normalize_email(email) if email else None, phone=phone, **extra)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -88,7 +88,10 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     id                 = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     username           = None
-    email              = models.EmailField(unique=True)
+    # Nullable — registration only requires one of email/phone, not both
+    # (see RegisterSerializer). unique=True still holds across non-null
+    # values; multiple NULLs are allowed by both Postgres and MySQL.
+    email              = models.EmailField(unique=True, null=True, blank=True)
     phone              = models.CharField(max_length=15, unique=True, null=True, blank=True)
     role               = models.ForeignKey(Role, on_delete=models.PROTECT, related_name='users')
     preferred_language = models.CharField(
