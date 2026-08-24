@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    ShippingAddress, Notification, User,
+    ShippingAddress, Notification, SiteSetting, User,
 )
 from api.services.notification_ws import broadcast_notifications
 from api.utils.order_number import generate_order_number
@@ -65,9 +65,27 @@ class CheckoutService:
 
         original_subtotal = sum(i.product.original_price * i.quantity for i in items)
         subtotal          = sum(i.product.effective_price * i.quantity for i in items)
-        discount_amount   = original_subtotal - subtotal
-        delivery          = _delivery_charge(s_district or '', delivery_zone)
-        grand_total       = subtotal + delivery
+        product_discount  = original_subtotal - subtotal
+
+        # Welcome discount — a registered customer's very first order only
+        # (guest/POS checkouts go through GuestCheckoutService, not here, so
+        # this never applies to them). "First" means no prior SalesOrder at
+        # all, regardless of its status, so cancel-and-reorder can't be used
+        # to re-earn it.
+        first_order_discount_amount = Decimal('0')
+        is_first_order = not SalesOrder.objects.filter(customer=user).exists()
+        if is_first_order:
+            pct = SiteSetting.get().first_order_discount_percent
+            if pct > 0:
+                first_order_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+
+        subtotal        = subtotal - first_order_discount_amount
+        discount_amount = product_discount + first_order_discount_amount
+        delivery         = _delivery_charge(s_district or '', delivery_zone)
+        grand_total      = subtotal + delivery
 
         # Auto-apply user's cashback balance
         profile          = user.profile
@@ -90,6 +108,7 @@ class CheckoutService:
             shipping_post_code  = s_post_code,
             subtotal            = subtotal,
             discount_amount     = discount_amount,
+            first_order_discount_amount = first_order_discount_amount,
             delivery_charge     = delivery,
             grand_total         = grand_total,
             cashback_used       = cashback_used,

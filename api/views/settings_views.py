@@ -14,7 +14,7 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
 INT_FIELDS         = ['email_port']
 BOOL_FIELDS        = ['email_use_tls']
 FILE_FIELDS        = ['logo', 'favicon']
-DECIMAL_FIELDS     = ['referral_bonus_amount']
+DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent']
 
 
 def _serialize(s: SiteSetting, request=None) -> dict:
@@ -46,6 +46,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'email_use_tls':            s.email_use_tls,
             'email_default_from':       s.email_default_from,
             'referral_bonus_amount':    str(s.referral_bonus_amount),
+            'first_order_discount_percent': str(s.first_order_discount_percent),
             'has_telegram_bot_token':   bool(s.telegram_bot_token),
             'telegram_chat_id':         s.telegram_chat_id,
         })
@@ -91,6 +92,8 @@ def update_site_settings(request):
         if field in request.data:
             try:
                 value = Decimal(str(request.data[field]))
+                if field == 'first_order_discount_percent' and value > 100:
+                    continue
                 if value >= 0:
                     setattr(s, field, value)
                     updated.append(field)
