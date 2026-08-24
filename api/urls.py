@@ -262,6 +262,8 @@ urlpatterns = [
     path('sms/settings/update/', views.update_sms_settings, name='sms-settings-update'),
     path('sms/logs/',      views.list_sms_logs,       name='sms-logs'),
     path('sms/stats/',     views.get_sms_stats,       name='sms-stats'),
+    path('sms/recipients/', views.list_sms_recipients, name='sms-recipients'),
+    path('sms/bulk-send/', views.send_bulk_sms_view,  name='sms-bulk-send'),
 
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),
