@@ -98,4 +98,5 @@ from .bayna_views import (
 )
 from .sms_views import (
     get_sms_settings, update_sms_settings, list_sms_logs, get_sms_stats,
+    list_sms_recipients, send_bulk_sms_view,
 )
