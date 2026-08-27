@@ -45,6 +45,7 @@ def pos_create_order(request):
         )
         order = _svc.confirm(order, request.user)
         mail_service.send_order_created(order)
+        mail_service.send_order_confirmed(order)
         return ApiResponse(
             message="POS order created",
             data=SalesOrderSerializer(order, context={'request': request}).data,
