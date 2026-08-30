@@ -36,8 +36,8 @@ def support_chat(request):
         )
 
     try:
-        reply = support_chat_service.answer(message, history)
-        return ApiResponse(message='Reply generated', data={'reply': reply})
+        result = support_chat_service.answer(message, history)
+        return ApiResponse(message='Reply generated', data=result)
     except Exception as e:
         logger.error(f'Support chat error: {e}', exc_info=True)
         return ApiResponse(message='Failed to generate a reply', errors=str(e), status_code=502)

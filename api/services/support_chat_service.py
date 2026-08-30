@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 
+from django.conf import settings as django_settings
 from django.db.models import Q
 from google import genai
 from google.genai import types
@@ -52,7 +53,7 @@ def _search_products(query: str) -> dict:
             Q(name_bn__icontains=query) | Q(name_en__icontains=query)
             | Q(description_bn__icontains=query) | Q(description_en__icontains=query)
         )
-        .select_related('category')[:8]
+        .select_related('category').prefetch_related('images')[:8]
     )
     results = []
     for p in products:
@@ -61,6 +62,10 @@ def _search_products(query: str) -> dict:
         discount_percent = None
         if original > 0 and effective < original:
             discount_percent = str((Decimal('100') * (1 - effective / original)).quantize(Decimal('0.1')))
+        # list(...all())[0] (not .first()) reuses the prefetch_related cache —
+        # .first() re-queries the DB regardless of prefetching.
+        product_images = list(p.images.all())
+        first_image = product_images[0] if product_images else None
         results.append({
             'name_bn': p.name_bn,
             'name_en': p.name_en,
@@ -69,6 +74,7 @@ def _search_products(query: str) -> dict:
             'discount_percent': discount_percent,
             'in_stock': p.stock_on_hand > 0,
             'url': f'/products/{p.slug}' if p.slug else None,
+            'image_url': f'{django_settings.BACKEND_URL}{first_image.image.url}' if first_image else None,
         })
     return {'products': results, 'count': len(results)}
 
@@ -188,10 +194,15 @@ def is_configured() -> bool:
     return bool(SiteSetting.get().gemini_api_key)
 
 
-def answer(message: str, history: list[dict] | None = None) -> str:
+def answer(message: str, history: list[dict] | None = None) -> dict:
     """Runs the manual tool-calling loop against Gemini, scoped to product/pricing/
     discount/delivery/referral/cashback/blog data pulled live from the DB. Every
-    function call the model makes is dispatched here, never executed by Gemini itself."""
+    function call the model makes is dispatched here, never executed by Gemini itself.
+
+    Returns {'reply': str, 'products': [...]}. Products shown to the customer are
+    collected from the actual search_products tool results (not parsed out of the
+    model's text), so the image/price/url the frontend renders is always real data,
+    never something the model could hallucinate."""
     s = SiteSetting.get()
     if not s.gemini_api_key:
         raise RuntimeError('Gemini API key is not configured')
@@ -212,14 +223,28 @@ def answer(message: str, history: list[dict] | None = None) -> str:
         tools=[types.Tool(function_declarations=_FUNCTION_DECLARATIONS)],
     )
 
+    # Full prompt visibility, on request — everything sent to Gemini for this
+    # turn: the fixed system instruction, the trimmed conversation history,
+    # and the new message.
+    logger.info(
+        'Support chat prompt | system_instruction=%r | history=%s | message=%r',
+        _SYSTEM_INSTRUCTION,
+        [{'role': t.get('role'), 'text': str(t.get('text', ''))[:2000]} for t in (history or [])[-_MAX_HISTORY_TURNS:]],
+        message[:2000],
+    )
+
     call_log: list[str] = []
+    shown_products: list[dict] = []
+    seen_urls: set[str] = set()
+
     for i in range(_MAX_TOOL_LOOPS):
         response = client.models.generate_content(model=model, contents=contents, config=config)
         calls = response.function_calls
         if not calls:
             if call_log:
                 logger.info(f'Support chat resolved after {i} tool call(s): {call_log}')
-            return response.text or ''
+            logger.info('Support chat final reply: %r', response.text or '')
+            return {'reply': response.text or '', 'products': shown_products}
 
         call_log.extend(f'{fc.name}({fc.args})' for fc in calls)
         contents.append(response.candidates[0].content)
@@ -232,8 +257,18 @@ def answer(message: str, history: list[dict] | None = None) -> str:
             except Exception as e:
                 logger.error(f'Support chat tool error ({fc.name}): {e}', exc_info=True)
                 result = {'error': str(e)}
+            logger.info('Support chat tool call | name=%s | args=%r | result=%r', fc.name, fc.args, result)
+            if fc.name == 'search_products' and isinstance(result, dict):
+                for prod in result.get('products', []):
+                    image_url = prod.get('image_url')
+                    if image_url and image_url not in seen_urls:
+                        seen_urls.add(image_url)
+                        shown_products.append(prod)
             response_parts.append(types.Part.from_function_response(name=fc.name, response=result))
         contents.append(types.Content(role='user', parts=response_parts))
 
     logger.warning(f'Support chat hit max tool-call loops without a final answer. Calls made: {call_log}')
-    return "Sorry, I'm having trouble answering that right now — please try again or contact support."
+    return {
+        'reply': "Sorry, I'm having trouble answering that right now — please try again or contact support.",
+        'products': shown_products,
+    }
