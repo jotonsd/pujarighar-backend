@@ -161,29 +161,45 @@ def _find_products(query: str, limit: int = 8) -> list:
         # a "|" separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
         return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
 
+    # Inverse-document-frequency weighting: a query word that appears on
+    # only a handful of products catalog-wide (e.g. "গণেশ" — a specific
+    # deity name) is decisive; a word that appears on a large fraction of
+    # the catalog (a generic connector like "ঠাকুর"/deity, "গোপালের"/this
+    # shop's whole product line, or "বিগ্রহ"/idol-sized — glued onto dozens
+    # of unrelated small accessories as a sizing descriptor) should barely
+    # move the score. Measured against the WHOLE active catalog, not just
+    # this query's candidate set — frequency within an already-filtered
+    # candidate set is unreliable, since a word can look "rare" there by
+    # coincidence while still being generic catalog-wide, which can flip
+    # the ranking the wrong way.
+    total_active = Product.objects.filter(is_active=True).count()
+    lw_words = list({w.lower() for w in all_words})
+    word_freq = {
+        w: Product.objects.filter(is_active=True).filter(
+            Q(name_bn__icontains=w) | Q(name_en__icontains=w)
+            | Q(description_bn__icontains=w) | Q(description_en__icontains=w)
+        ).count()
+        for w in lw_words
+    }
+
     def relevance(p):
         # Whole-word matching, not substring — "হার" (necklace) as a plain
         # substring check also matches inside unrelated words like "উপহার"
         # (gift, common boilerplate in nearly every product's description),
         # which was tying totally unrelated products (lamps, sweets, a
         # hairpiece) with the actual necklace and flooding the results.
-        #
-        # Name matches count for much more than description matches — a
-        # small accessory (e.g. a cloth garland) often mentions an unrelated
-        # deity's name in its OWN description as generic compatible-use text
-        # ("suitable for Ganesh idols too"), which is real but weak evidence
-        # compared to a product whose actual name is "Ganesh Idol". Without
-        # this weighting, such accessories tied with and flooded alongside
-        # the actual matching idols.
         prod_name_words = word_set(f'{p.name_bn} {p.name_en}')
         prod_desc_words = word_set(f'{p.description_bn} {p.description_en}')
-        score = 0
-        for w in all_words:
-            wl = w.lower()
-            if wl in prod_name_words:
-                score += 3
-            elif wl in prod_desc_words:
-                score += 1
+        score = 0.0
+        for w in lw_words:
+            weight = total_active / max(1, word_freq[w])
+            # Name matches still count for more than description matches —
+            # a product whose own name is the match is stronger evidence
+            # than a word merely mentioned in its description text.
+            if w in prod_name_words:
+                score += 3.0 * weight
+            elif w in prod_desc_words:
+                score += 1.0 * weight
         return score
 
     scored = [(relevance(p), p) for p in candidates]
@@ -193,8 +209,9 @@ def _find_products(query: str, limit: int = 8) -> list:
     # cotton dress) was returning EVERY color variant of the same base dress,
     # because they all match "khati"/"kotton"/"dress"; only the purple one
     # also matches "beguni", so only it (and anything else tied with it)
-    # should surface, not every same-word sibling product.
-    return [p for score, p in scored if score == best_score][:limit]
+    # should surface, not every same-word sibling product. Float scores now
+    # (from the IDF weighting), so compare with a small tolerance.
+    return [p for score, p in scored if score >= best_score - 1e-6][:limit]
 
 
 def _search_products(query: str) -> dict:
