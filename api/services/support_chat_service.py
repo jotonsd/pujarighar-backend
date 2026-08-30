@@ -1,11 +1,12 @@
 import logging
+import re
 from decimal import Decimal
 
 import requests
 from django.conf import settings as django_settings
 from django.contrib.postgres.search import TrigramSimilarity
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from google import genai
 from google.genai import types
 
@@ -104,17 +105,30 @@ def _find_products(query: str, limit: int = 8) -> list:
     name_words = [w for w in all_words if not w.isdigit()] or all_words
 
     word_filter = Q()
+    match_score = Value(0, output_field=IntegerField())
     for word in name_words:
-        word_filter |= (
+        word_q = (
             Q(name_bn__icontains=word) | Q(name_en__icontains=word)
             | Q(description_bn__icontains=word) | Q(description_en__icontains=word)
         )
+        word_filter |= word_q
+        match_score = match_score + Case(When(word_q, then=Value(1)), default=Value(0), output_field=IntegerField())
 
+    # Ordered by a DB-side match count before slicing — without this, a
+    # near-universal word like "গোপালের" (this shop's catalog is themed
+    # entirely around "Gopal" products) can match hundreds of rows, and an
+    # unordered LIMIT 50 could silently cut the actual best match before the
+    # more precise whole-word scoring below ever gets to see it. This
+    # ordering is still substring-based (not whole-word) so it's approximate,
+    # but it only decides what makes it into the top-50 candidate window —
+    # the whole-word relevance() scoring below remains the authority on the
+    # final result.
     candidates = list(
         Product.objects.filter(is_active=True)
         .filter(word_filter)
+        .annotate(match_score=match_score)
         .select_related('category').prefetch_related('images')
-        .distinct()[:50]
+        .distinct().order_by('-match_score')[:50]
     )
 
     # Exact/substring matching found nothing — try typo-tolerant matching
@@ -143,8 +157,16 @@ def _find_products(query: str, limit: int = 8) -> list:
         return candidates
 
     def relevance(p):
-        haystack = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
-        return sum(1 for w in all_words if w.lower() in haystack)
+        # Whole-word matching, not substring — "হার" (necklace) as a plain
+        # substring check also matches inside unrelated words like "উপহার"
+        # (gift, common boilerplate in nearly every product's description),
+        # which was tying totally unrelated products (lamps, sweets, a
+        # hairpiece) with the actual necklace and flooding the results. Split
+        # on punctuation too (not just whitespace), so a word glued to a "|"
+        # separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
+        text = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
+        haystack_words = set(re.split(r'[\s|।,.:;!?()\-]+', text))
+        return sum(1 for w in all_words if w.lower() in haystack_words)
 
     scored = [(relevance(p), p) for p in candidates]
     best_score = max(score for score, _ in scored)
