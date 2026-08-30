@@ -27,6 +27,9 @@ def support_chat(request):
     history = request.data.get('history') or []
     if not isinstance(history, list):
         history = []
+    pending_order = request.data.get('pending_order')
+    if not isinstance(pending_order, dict):
+        pending_order = None
 
     if not support_chat_service.is_configured():
         return ApiResponse(
@@ -36,7 +39,7 @@ def support_chat(request):
         )
 
     try:
-        result = support_chat_service.answer(message, history)
+        result = support_chat_service.answer(message, history, pending_order)
         return ApiResponse(message='Reply generated', data=result)
     except Exception as e:
         logger.error(f'Support chat error: {e}', exc_info=True)
