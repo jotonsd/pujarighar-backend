@@ -52,7 +52,10 @@ blog, or contact questions, and suggest they reach out via the contact options f
 several different things (e.g. both a product AND delivery charges). If a tool result is empty \
 or unhelpful, say so plainly instead of calling the same or a similar tool again — do not retry \
 searches with reworded queries hoping for a better result. As soon as you have enough \
-information to answer, answer immediately instead of calling more tools "to be thorough"."""
+information to answer, answer immediately instead of calling more tools "to be thorough".
+6. When search_products finds results, the app shows them automatically as picture cards BELOW \
+your reply — never say "above" or "উপরে" when referring to them, always "below" / "নিচে", and \
+don't re-describe every result's price/details in text since the cards already show that."""
 
 _ORDERING_INSTRUCTION = """
 
@@ -904,13 +907,16 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
             if call_log:
                 logger.info(f'Support chat resolved after {i} tool call(s): {call_log}')
             logger.info('Support chat final reply: %r', response.text or '')
-            # Once there's an active order preview, the order card itself is
-            # the single source of truth for which products are involved —
-            # a raw search_products carousel from an internal lookup made
-            # earlier this turn (e.g. checking crown color variants while
-            # resolving one specific item) would show products the reply
-            # text isn't actually talking about, which reads as a mismatch.
-            products = [] if pending_order else shown_products
+            # Suppress the raw search_products carousel ONLY on a turn where
+            # an order tool actually ran (order_updated) — the order card
+            # itself is the single source of truth then, and a search made
+            # purely to internally resolve one item (e.g. checking crown
+            # color variants) would otherwise show products the reply text
+            # isn't actually talking about. Gating on pending_order truthiness
+            # instead of order_updated was too broad: it also hid genuine,
+            # unrelated browsing (e.g. "show me some flutes") on any later
+            # turn just because an order happened to still be in progress.
+            products = [] if order_updated else shown_products
             return {
                 'reply': response.text or '', 'products': products,
                 'pending_order': pending_order, 'candidates': candidates,
