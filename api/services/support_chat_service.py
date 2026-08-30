@@ -1,4 +1,5 @@
 import logging
+import re
 from decimal import Decimal
 
 import requests
@@ -143,8 +144,16 @@ def _find_products(query: str, limit: int = 8) -> list:
         return candidates
 
     def relevance(p):
-        haystack = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
-        return sum(1 for w in all_words if w.lower() in haystack)
+        # Whole-word matching, not substring — "হার" (necklace) as a plain
+        # substring check also matches inside unrelated words like "উপহার"
+        # (gift, common boilerplate in nearly every product's description),
+        # which was tying totally unrelated products (lamps, sweets, a
+        # hairpiece) with the actual necklace and flooding the results. Split
+        # on punctuation too (not just whitespace), so a word glued to a "|"
+        # separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
+        text = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
+        haystack_words = set(re.split(r'[\s|।,.:;!?()\-]+', text))
+        return sum(1 for w in all_words if w.lower() in haystack_words)
 
     scored = [(relevance(p), p) for p in candidates]
     best_score = max(score for score, _ in scored)
