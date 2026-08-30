@@ -15,7 +15,12 @@ from api.services.sms_service import _normalize_bd_phone
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_LOOPS = 5
-_MAX_HISTORY_TURNS = 10
+# An ordering conversation naturally runs long — search, add a product,
+# propose_order, add another, propose_order again, then name/phone/address —
+# easily past a dozen turns before confirmation. 10 was cutting off the turns
+# where earlier products were unambiguously identified, leaving the model
+# with only a vague later reference (e.g. "the necklace") to go on.
+_MAX_HISTORY_TURNS = 30
 
 # Mirrors frontend/src/utils/contact.ts's FACEBOOK_PAGE_ID / DEFAULT_EMAIL —
 # there's no backend field for these yet, so keep both in sync if either ever changes.
@@ -69,8 +74,12 @@ acknowledge it and ask them to confirm, e.g. "Here's your order summary above �
 you called propose_order, and never call it speculatively.
 5. If the customer wants to add or change a product before confirming, call propose_order again \
 with the updated list — don't place a separate order per product.
-6. If propose_order or create_order returns an error (e.g. out of stock, product not found), \
-explain it plainly and ask what they'd like to do instead — do not retry blindly."""
+6. If propose_order or create_order returns an error (e.g. out of stock, product not found, or a \
+name matching several products), explain it plainly using ONLY the information already in that \
+error message and ask what they'd like to do instead. Never call search_products again to build a \
+fresh suggestion list for this — that shows the customer a second, different set of products than \
+the one you're describing in your reply, which is confusing. If the error already lists the \
+matching product names, just ask the customer to pick one of those by name."""
 
 
 def _find_products(query: str, limit: int = 8) -> list:
@@ -109,15 +118,24 @@ def _find_products(query: str, limit: int = 8) -> list:
     # "gopaler dress"). Postgres-only (pg_trgm, enabled via migration); on
     # MySQL this just no-ops and the search stays exact-match only.
     if not candidates and connection.vendor == 'postgresql':
-        candidates = list(
+        fuzzy = list(
             Product.objects.filter(is_active=True)
             .annotate(similarity=TrigramSimilarity('name_bn', query) + TrigramSimilarity('name_en', query))
             .filter(similarity__gt=0.15)
             .select_related('category').prefetch_related('images')
-            .order_by('-similarity')[:limit]
+            .order_by('-similarity')[:20]
         )
-        if candidates:
-            logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
+        if not fuzzy:
+            return []
+        # A real typo has one clear winner well above the rest (e.g.
+        # "golaper" vs "gopaler" dress). A product that simply doesn't exist
+        # (e.g. searching "crown" when nothing crown-shaped is in the
+        # catalog) instead produces a flat spread of weak, unrelated
+        # matches — without this, that spread was flooding results with
+        # random unrelated products instead of correctly finding nothing.
+        best = fuzzy[0].similarity
+        candidates = [p for p in fuzzy if p.similarity >= best - 0.03][:limit]
+        logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
         return candidates
 
     def relevance(p):
@@ -248,6 +266,31 @@ def _resolve_order_items(items: list):
     return resolved, None
 
 
+def _resolve_items_by_id(items: list):
+    """Resolves items by the exact product_id a prior propose_order call
+    already pinned down — no text search, so no ambiguity is possible. Used
+    by create_order in preference to re-guessing from the model's own
+    product_query text, which can drift from what was actually shown/agreed
+    to once the customer has answered a few more messages (e.g. the model
+    later refers to a product only by a generic word like "necklace", which
+    can match several real products even though the customer's exact pick
+    was already resolved earlier in the same order)."""
+    resolved = []
+    for entry in items:
+        try:
+            product = Product.objects.select_related('category').prefetch_related('images').get(
+                id=entry.get('product_id'), is_active=True,
+            )
+        except (Product.DoesNotExist, ValueError, TypeError):
+            return None, 'One of the previously selected products is no longer available. Please search for it again.'
+        try:
+            qty = max(1, int(entry.get('quantity') or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        resolved.append((product, qty))
+    return resolved, None
+
+
 def _propose_order(items: list, district: str) -> dict:
     """Resolves items and computes delivery charge/total WITHOUT placing the
     order — no DB writes, no stock deduction. Lets the frontend show a real
@@ -266,6 +309,7 @@ def _propose_order(items: list, district: str) -> dict:
         product_images = list(product.images.all())
         first_image = product_images[0] if product_images else None
         preview_items.append({
+            'product_id': str(product.id),
             'name_bn': product.name_bn,
             'name_en': product.name_en,
             'quantity': qty,
@@ -288,7 +332,10 @@ def _propose_order(items: list, district: str) -> dict:
     }
 
 
-def _create_order(items: list, customer_name: str, phone: str, address: str, district: str) -> dict:
+def _create_order(
+    items: list, customer_name: str, phone: str, address: str, district: str,
+    pending_items: list | None = None,
+) -> dict:
     """Places a real order — possibly multiple different products in one order,
     matching how a normal cart checkout works — by calling the existing public
     guest-checkout API (POST /api/guest/checkout/). Not a separate/duplicated
@@ -296,8 +343,21 @@ def _create_order(items: list, customer_name: str, phone: str, address: str, dis
     admin notifications as every other order in this app, and lands as
     PENDING for staff to review like any other order.
 
-    items: [{'product_query': str, 'quantity': int}, ...]"""
-    resolved, error = _resolve_order_items(items)
+    items: [{'product_query': str, 'quantity': int}, ...] — the model's own
+    guess at what's being ordered, used only as a fallback.
+
+    pending_items: [{'product_id': str, 'quantity': int}, ...] — the exact
+    products the customer already saw and agreed to in the last propose_order
+    preview (echoed back by the frontend). Preferred over `items` whenever
+    present: it's a resolved-by-ID snapshot the customer confirmed, so it
+    can't suffer the ambiguity a fresh text search can (e.g. the model later
+    referring to a product only as "the necklace", which may match several
+    real products even though the customer's exact pick was already pinned
+    down earlier in the same order)."""
+    if pending_items:
+        resolved, error = _resolve_items_by_id(pending_items)
+    else:
+        resolved, error = _resolve_order_items(items)
     if error:
         return {'error': error}
 
@@ -474,15 +534,22 @@ def is_configured() -> bool:
     return bool(SiteSetting.get().gemini_api_key)
 
 
-def answer(message: str, history: list[dict] | None = None) -> dict:
+def answer(message: str, history: list[dict] | None = None, incoming_pending_order: dict | None = None) -> dict:
     """Runs the manual tool-calling loop against Gemini, scoped to product/pricing/
     discount/delivery/referral/cashback/blog data pulled live from the DB. Every
     function call the model makes is dispatched here, never executed by Gemini itself.
 
-    Returns {'reply': str, 'products': [...]}. Products shown to the customer are
-    collected from the actual search_products tool results (not parsed out of the
-    model's text), so the image/price/url the frontend renders is always real data,
-    never something the model could hallucinate."""
+    incoming_pending_order: the last order preview the frontend showed the customer
+    (echoed back on every request). Used as the trusted, already-resolved source of
+    truth if the model calls create_order — never re-derived from the model's own
+    text guess — and also carried forward as the returned pending_order when this
+    turn doesn't touch the order at all, so the Confirm button doesn't vanish just
+    because the customer asked an unrelated question in between.
+
+    Returns {'reply': str, 'products': [...], 'pending_order': {...} | None}. Products
+    shown to the customer are collected from the actual search_products tool results
+    (not parsed out of the model's text), so the image/price/url the frontend renders
+    is always real data, never something the model could hallucinate."""
     s = SiteSetting.get()
     if not s.gemini_api_key:
         raise RuntimeError('Gemini API key is not configured')
@@ -523,7 +590,7 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
     call_log: list[str] = []
     shown_products: list[dict] = []
     seen_urls: set[str] = set()
-    pending_order = None
+    pending_order = incoming_pending_order
 
     for i in range(_MAX_TOOL_LOOPS):
         response = client.models.generate_content(model=model, contents=contents, config=config)
@@ -540,8 +607,14 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
         response_parts = []
         for fc in calls:
             handler = _TOOL_DISPATCH.get(fc.name)
+            call_args = dict(fc.args or {})
+            if fc.name == 'create_order' and incoming_pending_order and incoming_pending_order.get('items'):
+                # Trust the exact products the customer already saw and agreed
+                # to (echoed back by the frontend) over the model's own text
+                # guess at what "the necklace" or similar refers to now.
+                call_args['pending_items'] = incoming_pending_order['items']
             try:
-                result = handler(**(fc.args or {})) if handler else {'error': f'Unknown tool: {fc.name}'}
+                result = handler(**call_args) if handler else {'error': f'Unknown tool: {fc.name}'}
             except Exception as e:
                 logger.error(f'Support chat tool error ({fc.name}): {e}', exc_info=True)
                 result = {'error': str(e)}
