@@ -94,7 +94,11 @@ products, the app has already shown the customer those exact products as clickab
 NOT re-list their names yourself, just briefly suggest they look at them (e.g. "মনে হচ্ছে আপনি এদের \
 মধ্যে একটির কথা বলছেন — নিচে থেকে বেছে নিন।" / "Looks like you might mean one of these — pick \
 yours below."). Clicking sends you their exact name as a normal message, so just continue the \
-sequence from step 1 once you get it."""
+sequence from step 1 once you get it.
+7. If the customer asks to see their order/cart/summary again — e.g. after asking about \
+something unrelated in between — call show_order_summary instead of describing the items \
+yourself in text. The app only redraws the order card on turns where an order tool actually \
+runs, so without this the card just wouldn't reappear even though you're talking about it."""
 
 
 def _word_set(text: str) -> set:
@@ -550,6 +554,17 @@ def _remove_order_item(product_query: str, current_order: dict | None = None) ->
     )
 
 
+def _show_order_summary(current_order: dict | None = None) -> dict:
+    """Re-displays the order already being built, completely unchanged. The
+    frontend only redraws the order card on turns where an order tool is
+    actually called — so if the customer asks to see their order again after
+    talking about something else in between, without this the model has
+    nothing to call and the card just wouldn't reappear."""
+    if not current_order or not current_order.get('items'):
+        return {'error': 'No order in progress yet.'}
+    return current_order
+
+
 def _create_order(
     items: list, customer_name: str, phone: str, address: str, district: str,
     pending_items: list | None = None,
@@ -634,6 +649,7 @@ _TOOL_DISPATCH = {
     'propose_order': _propose_order,
     'add_order_item': _add_order_item,
     'remove_order_item': _remove_order_item,
+    'show_order_summary': _show_order_summary,
     'create_order': _create_order,
 }
 
@@ -759,6 +775,17 @@ _REMOVE_ORDER_ITEM_DECLARATION = types.FunctionDeclaration(
     },
 )
 
+_SHOW_ORDER_SUMMARY_DECLARATION = types.FunctionDeclaration(
+    name='show_order_summary',
+    description=(
+        "Re-displays the order that's already being built, completely unchanged. Use this "
+        "whenever the customer asks to see their order/cart/summary again — e.g. after asking "
+        "about something else in between — instead of describing the items yourself in text. "
+        "Takes no arguments."
+    ),
+    parameters={'type': 'object', 'properties': {}},
+)
+
 _CREATE_ORDER_DECLARATION = types.FunctionDeclaration(
     name='create_order',
     description=(
@@ -834,6 +861,7 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         function_declarations.append(_PROPOSE_ORDER_DECLARATION)
         function_declarations.append(_ADD_ORDER_ITEM_DECLARATION)
         function_declarations.append(_REMOVE_ORDER_ITEM_DECLARATION)
+        function_declarations.append(_SHOW_ORDER_SUMMARY_DECLARATION)
         function_declarations.append(_CREATE_ORDER_DECLARATION)
         system_instruction += _ORDERING_INSTRUCTION
 
@@ -857,6 +885,7 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
     seen_urls: set[str] = set()
     pending_order = incoming_pending_order
     candidates: list[dict] = []
+    order_updated = False
 
     for i in range(_MAX_TOOL_LOOPS):
         response = client.models.generate_content(model=model, contents=contents, config=config)
@@ -875,6 +904,7 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
             return {
                 'reply': response.text or '', 'products': products,
                 'pending_order': pending_order, 'candidates': candidates,
+                'order_updated': order_updated,
             }
 
         call_log.extend(f'{fc.name}({fc.args})' for fc in calls)
@@ -884,7 +914,7 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         for fc in calls:
             handler = _TOOL_DISPATCH.get(fc.name)
             call_args = dict(fc.args or {})
-            if fc.name in ('add_order_item', 'remove_order_item'):
+            if fc.name in ('add_order_item', 'remove_order_item', 'show_order_summary'):
                 # Use the LIVE pending_order (not the frozen snapshot from the
                 # start of this request) so these still work correctly if the
                 # model chains propose_order then add/remove_order_item
@@ -916,9 +946,16 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
                     if image_url and image_url not in seen_urls:
                         seen_urls.add(image_url)
                         shown_products.append(prod)
-            if fc.name in ('propose_order', 'add_order_item', 'remove_order_item') and isinstance(result, dict) and 'error' not in result:
+            if fc.name in ('propose_order', 'add_order_item', 'remove_order_item', 'show_order_summary') \
+                    and isinstance(result, dict) and 'error' not in result:
                 pending_order = result
                 candidates = []
+                # Distinct from "pending_order carried forward unchanged" —
+                # this specifically means an order tool actually ran THIS
+                # turn, so the frontend should draw the card even if the
+                # resulting order is identical to before (e.g. the customer
+                # just asked to see it again via show_order_summary).
+                order_updated = True
             if fc.name in ('propose_order', 'add_order_item', 'remove_order_item', 'create_order') \
                     and isinstance(result, dict) and result.get('candidates'):
                 # An ambiguous product name — surfaced as clickable options
@@ -940,4 +977,5 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         'products': shown_products,
         'pending_order': pending_order,
         'candidates': candidates,
+        'order_updated': order_updated,
     }
