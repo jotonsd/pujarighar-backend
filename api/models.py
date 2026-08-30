@@ -942,6 +942,10 @@ class SiteSetting(models.Model):
     # SMS customer notifications (BulkSMSBD)
     sms_api_key   = models.CharField(max_length=255, blank=True, default='')
     sms_sender_id = models.CharField(max_length=32, blank=True, default='')
+    # AI product support chat (Gemini) — model name is admin-editable (not
+    # hardcoded) since Google renames/retires free-tier model ids over time.
+    gemini_api_key = models.CharField(max_length=255, blank=True, default='')
+    gemini_model   = models.CharField(max_length=64, blank=True, default='gemini-3.6-flash')
 
     class Meta:
         verbose_name = 'Site Setting'

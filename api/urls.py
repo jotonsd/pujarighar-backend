@@ -266,6 +266,9 @@ urlpatterns = [
     path('sms/recipients/', views.list_sms_recipients, name='sms-recipients'),
     path('sms/bulk-send/', views.send_bulk_sms_view,  name='sms-bulk-send'),
 
+    # ─── AI Support Chat ────────────────────────────────────────────────────────
+    path('support/chat/', views.support_chat, name='support-chat'),
+
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),
     path('blog/all/',              views.list_all_blog_posts,  name='blog-list-all'),
