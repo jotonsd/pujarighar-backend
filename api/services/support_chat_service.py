@@ -64,10 +64,14 @@ a guessed or ambiguous product name. If the customer wants several different pro
 every one of them first.
 2. Collect the customer's full name, phone number, delivery address, and district (the district \
 is required — it determines the delivery charge automatically, inside vs. outside Dhaka).
-3. Call propose_order(items, district) to build a preview. The app shows this preview to the \
-customer automatically — product images, prices, delivery charge, grand total — with its own \
-Confirm button, so do NOT repeat that price breakdown yourself in your reply. Just briefly \
-acknowledge it and ask them to confirm, e.g. "Here's your order summary above — shall I place it?"
+3. Call propose_order(items, district) to build a preview — it's fine to call it before you have \
+the customer's name/phone/address (e.g. just to show prices first), but before asking for final \
+confirmation you must call it again including customer_name, phone, and address, so the preview \
+shown to the customer also includes the full delivery summary, not just the product list. The app \
+shows this preview to the customer automatically — product images, prices, delivery charge, grand \
+total, and delivery info — with its own Confirm button, so do NOT repeat that price breakdown \
+yourself in your reply. Just briefly acknowledge it and ask them to confirm, e.g. "Here's your \
+order summary above — shall I place it?"
 4. Only call create_order after the customer replies with a clear yes/confirmation \
 ("হ্যাঁ", "confirm", "order koro", etc.) in a later message, OR after clicking the Confirm button \
 (which arrives as a message from them like any other). Never call create_order in the same turn \
@@ -291,11 +295,20 @@ def _resolve_items_by_id(items: list):
     return resolved, None
 
 
-def _propose_order(items: list, district: str) -> dict:
+def _propose_order(
+    items: list, district: str,
+    customer_name: str | None = None, phone: str | None = None, address: str | None = None,
+) -> dict:
     """Resolves items and computes delivery charge/total WITHOUT placing the
     order — no DB writes, no stock deduction. Lets the frontend show a real
-    preview (product images, prices, delivery charge, grand total) plus a
-    Confirm button before the customer commits to anything."""
+    preview (product images, prices, delivery charge, grand total, and the
+    delivery name/phone/address once known) plus a Confirm button before the
+    customer commits to anything.
+
+    customer_name/phone/address are optional since an early preview (before
+    those are collected) is still useful for showing prices — but once known,
+    echoing them back here is what lets the preview show a full delivery
+    summary, not just the product list."""
     resolved, error = _resolve_order_items(items)
     if error:
         return {'error': error}
@@ -329,6 +342,10 @@ def _propose_order(items: list, district: str) -> dict:
         'delivery_charge': str(delivery),
         'grand_total': str(grand_total),
         'payment_method': 'COD (Cash on Delivery)',
+        'customer_name': (customer_name or '').strip() or None,
+        'phone': (phone or '').strip() or None,
+        'address': (address or '').strip() or None,
+        'district': (district or '').strip() or None,
     }
 
 
@@ -473,7 +490,10 @@ _PROPOSE_ORDER_DECLARATION = types.FunctionDeclaration(
         "Confirm button, so do NOT repeat the full price breakdown yourself in your reply — "
         "just briefly reference it (e.g. \"Here's your order summary above, shall I place it?\"). "
         "Always call this before create_order, once every product is identified and you have "
-        "the customer's delivery district."
+        "the customer's delivery district. Once you also know the customer's name, phone, and "
+        "address, ALWAYS pass those too (call propose_order again with them if you called it "
+        "earlier without them) — the preview then also shows the full delivery summary, not just "
+        "the product list, so the customer can review everything together before confirming."
     ),
     parameters={
         'type': 'object',
@@ -491,6 +511,9 @@ _PROPOSE_ORDER_DECLARATION = types.FunctionDeclaration(
                 },
             },
             'district': {'type': 'string', 'description': 'District, e.g. Dhaka, Chattogram — determines the delivery charge'},
+            'customer_name': {'type': 'string', 'description': "Customer's full name, once known"},
+            'phone': {'type': 'string', 'description': 'Bangladeshi mobile number, once known'},
+            'address': {'type': 'string', 'description': 'Full delivery address, once known'},
         },
         'required': ['items', 'district'],
     },
@@ -608,11 +631,20 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         for fc in calls:
             handler = _TOOL_DISPATCH.get(fc.name)
             call_args = dict(fc.args or {})
-            if fc.name == 'create_order' and incoming_pending_order and incoming_pending_order.get('items'):
-                # Trust the exact products the customer already saw and agreed
-                # to (echoed back by the frontend) over the model's own text
-                # guess at what "the necklace" or similar refers to now.
-                call_args['pending_items'] = incoming_pending_order['items']
+            if fc.name == 'create_order' and incoming_pending_order:
+                if incoming_pending_order.get('items'):
+                    # Trust the exact products the customer already saw and
+                    # agreed to (echoed back by the frontend) over the model's
+                    # own text guess at what "the necklace" or similar refers
+                    # to now.
+                    call_args['pending_items'] = incoming_pending_order['items']
+                # Same reasoning for the delivery details: place the order
+                # against exactly what was shown in the last preview the
+                # customer confirmed, not a value the model re-typed from
+                # memory that could have drifted.
+                for field in ('customer_name', 'phone', 'address', 'district'):
+                    if incoming_pending_order.get(field):
+                        call_args[field] = incoming_pending_order[field]
             try:
                 result = handler(**call_args) if handler else {'error': f'Unknown tool: {fc.name}'}
             except Exception as e:
