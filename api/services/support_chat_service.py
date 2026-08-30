@@ -2,6 +2,7 @@ import logging
 import re
 from decimal import Decimal
 
+import avro
 import requests
 from django.conf import settings as django_settings
 from django.contrib.postgres.search import TrigramSimilarity
@@ -137,7 +138,20 @@ def _find_products(query: str, limit: int = 8) -> list:
     # never let a bare number qualify a product on its own — a garland whose
     # description says "3 feet long" would otherwise match a "size 3 dress"
     # query, since a lone digit is meaningless without the word next to it.
-    all_words = [w for w in query.strip().split() if len(w) > 1 or w.isdigit()] or [query.strip()]
+    #
+    # Bangladeshi customers very commonly type Bengali words spelled out in
+    # Roman letters ("Banglish", e.g. "dhuti" for ধুতি) using the same
+    # phonetic conventions as the popular Avro Keyboard — the catalog is
+    # stored in Bengali script, so a raw Roman query never matches via
+    # substring (completely different Unicode scripts) unless something
+    # transliterates it first. Relying on the model to always remember to
+    # translate before calling this tool has been observed to be
+    # inconsistent, so transliterate deterministically here instead —
+    # already-Bengali or plain-English input passes through avro.parse()
+    # close to unchanged, so adding it alongside the original is safe.
+    transliterated = avro.parse(query)
+    search_text = f'{query} {transliterated}' if transliterated != query else query
+    all_words = [w for w in search_text.strip().split() if len(w) > 1 or w.isdigit()] or [search_text.strip()]
     name_words = [w for w in all_words if not w.isdigit()] or all_words
 
     word_filter = Q()
@@ -174,7 +188,12 @@ def _find_products(query: str, limit: int = 8) -> list:
     if not candidates and connection.vendor == 'postgresql':
         fuzzy = list(
             Product.objects.filter(is_active=True)
-            .annotate(similarity=TrigramSimilarity('name_bn', query) + TrigramSimilarity('name_en', query))
+            # name_bn against the transliterated Bengali form, not the raw
+            # Latin query — Avro's phonetic conversion is close but not
+            # always byte-exact (e.g. missing a nukta/chandrabindu mark), so
+            # this is what lets typo-tolerant matching still catch it; name_en
+            # stays against the original query since that field is Latin.
+            .annotate(similarity=TrigramSimilarity('name_bn', transliterated) + TrigramSimilarity('name_en', query))
             .filter(similarity__gt=0.15)
             .select_related('category').prefetch_related('images')
             .order_by('-similarity')[:20]
