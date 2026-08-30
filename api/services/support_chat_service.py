@@ -72,7 +72,7 @@ shown to the customer also includes the full delivery summary, not just the prod
 shows this preview to the customer automatically — product images, prices, delivery charge, grand \
 total, and delivery info — with its own Confirm button, so do NOT repeat that price breakdown \
 yourself in your reply. Just briefly acknowledge it and ask them to confirm, e.g. "Here's your \
-order summary above — shall I place it?"
+order summary below — shall I place it?"
 4. Only call create_order after the customer replies with a clear yes/confirmation \
 ("হ্যাঁ", "confirm", "order koro", etc.) in a later message, OR after clicking the Confirm button \
 (which arrives as a message from them like any other). Never call create_order in the same turn \
@@ -83,8 +83,12 @@ with the updated list — don't place a separate order per product.
 name matching several products), explain it plainly using ONLY the information already in that \
 error message and ask what they'd like to do instead. Never call search_products again to build a \
 fresh suggestion list for this — that shows the customer a second, different set of products than \
-the one you're describing in your reply, which is confusing. If the error already lists the \
-matching product names, just ask the customer to pick one of those by name."""
+the one you're describing in your reply, which is confusing. When the error lists several matching \
+products, the app has already shown the customer those exact products as clickable buttons — do \
+NOT re-list their names yourself, just briefly suggest they look at them (e.g. "মনে হচ্ছে আপনি এদের \
+মধ্যে একটির কথা বলছেন — নিচে থেকে বেছে নিন।" / "Looks like you might mean one of these — pick \
+yours below."). Clicking sends you their exact name as a normal message, so just continue the \
+sequence from step 1 once you get it."""
 
 
 def _find_products(query: str, limit: int = 8) -> list:
@@ -161,29 +165,45 @@ def _find_products(query: str, limit: int = 8) -> list:
         # a "|" separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
         return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
 
+    # Inverse-document-frequency weighting: a query word that appears on
+    # only a handful of products catalog-wide (e.g. "গণেশ" — a specific
+    # deity name) is decisive; a word that appears on a large fraction of
+    # the catalog (a generic connector like "ঠাকুর"/deity, "গোপালের"/this
+    # shop's whole product line, or "বিগ্রহ"/idol-sized — glued onto dozens
+    # of unrelated small accessories as a sizing descriptor) should barely
+    # move the score. Measured against the WHOLE active catalog, not just
+    # this query's candidate set — frequency within an already-filtered
+    # candidate set is unreliable, since a word can look "rare" there by
+    # coincidence while still being generic catalog-wide, which can flip
+    # the ranking the wrong way.
+    total_active = Product.objects.filter(is_active=True).count()
+    lw_words = list({w.lower() for w in all_words})
+    word_freq = {
+        w: Product.objects.filter(is_active=True).filter(
+            Q(name_bn__icontains=w) | Q(name_en__icontains=w)
+            | Q(description_bn__icontains=w) | Q(description_en__icontains=w)
+        ).count()
+        for w in lw_words
+    }
+
     def relevance(p):
         # Whole-word matching, not substring — "হার" (necklace) as a plain
         # substring check also matches inside unrelated words like "উপহার"
         # (gift, common boilerplate in nearly every product's description),
         # which was tying totally unrelated products (lamps, sweets, a
         # hairpiece) with the actual necklace and flooding the results.
-        #
-        # Name matches count for much more than description matches — a
-        # small accessory (e.g. a cloth garland) often mentions an unrelated
-        # deity's name in its OWN description as generic compatible-use text
-        # ("suitable for Ganesh idols too"), which is real but weak evidence
-        # compared to a product whose actual name is "Ganesh Idol". Without
-        # this weighting, such accessories tied with and flooded alongside
-        # the actual matching idols.
         prod_name_words = word_set(f'{p.name_bn} {p.name_en}')
         prod_desc_words = word_set(f'{p.description_bn} {p.description_en}')
-        score = 0
-        for w in all_words:
-            wl = w.lower()
-            if wl in prod_name_words:
-                score += 3
-            elif wl in prod_desc_words:
-                score += 1
+        score = 0.0
+        for w in lw_words:
+            weight = total_active / max(1, word_freq[w])
+            # Name matches still count for more than description matches —
+            # a product whose own name is the match is stronger evidence
+            # than a word merely mentioned in its description text.
+            if w in prod_name_words:
+                score += 3.0 * weight
+            elif w in prod_desc_words:
+                score += 1.0 * weight
         return score
 
     scored = [(relevance(p), p) for p in candidates]
@@ -193,8 +213,9 @@ def _find_products(query: str, limit: int = 8) -> list:
     # cotton dress) was returning EVERY color variant of the same base dress,
     # because they all match "khati"/"kotton"/"dress"; only the purple one
     # also matches "beguni", so only it (and anything else tied with it)
-    # should surface, not every same-word sibling product.
-    return [p for score, p in scored if score == best_score][:limit]
+    # should surface, not every same-word sibling product. Float scores now
+    # (from the IDF weighting), so compare with a small tolerance.
+    return [p for score, p in scored if score >= best_score - 1e-6][:limit]
 
 
 def _search_products(query: str) -> dict:
@@ -284,30 +305,53 @@ def _get_contact_info() -> dict:
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
 
+def _serialize_candidate(p) -> dict:
+    product_images = list(p.images.all())
+    first_image = product_images[0] if product_images else None
+    return {
+        'product_id': str(p.id),
+        'name_bn': p.name_bn,
+        'name_en': p.name_en,
+        'price': str(p.effective_price),
+        'image_url': f'{django_settings.BACKEND_URL}{first_image.image.url}' if first_image else None,
+    }
+
+
 def _resolve_order_items(items: list):
     """Resolves each {'product_query', 'quantity'} entry to a real (Product,
-    qty) pair, or returns an error string. Shared by propose_order (preview
-    only, no DB writes) and create_order (the real thing) so both agree on
-    exactly which product an ambiguous or fuzzy query resolves to."""
+    qty) pair, or returns an error. Shared by propose_order (preview only, no
+    DB writes) and create_order (the real thing) so both agree on exactly
+    which product an ambiguous or fuzzy query resolves to.
+
+    Returns (resolved, error_message, candidates) — candidates is a list of
+    brief product dicts (product_id, name, price, image) the frontend can
+    render as clickable options, populated only when error_message is an
+    ambiguous-match error; None otherwise."""
     if not items:
-        return None, 'At least one product is required to place an order.'
+        return None, 'At least one product is required to place an order.', None
     resolved = []
     for entry in items:
         product_query = str(entry.get('product_query', '')).strip()
         if not product_query:
-            return None, 'Each item needs a product name.'
+            return None, 'Each item needs a product name.', None
         matches = _find_products(product_query, limit=5)
         if not matches:
-            return None, f'No product found matching "{product_query}". Try search_products again with a different name.'
+            return None, f'No product found matching "{product_query}". Try search_products again with a different name.', None
         if len(matches) > 1:
             names = [p.name_en or p.name_bn for p in matches]
-            return None, f'"{product_query}" matches multiple products: {names}. Ask the customer which exact one they want.'
+            return (
+                None,
+                f'"{product_query}" matches multiple products: {names}. The customer has already '
+                f'been shown these as clickable options in the app — just briefly ask them to pick '
+                f'one, do not re-list the product names yourself.',
+                [_serialize_candidate(p) for p in matches],
+            )
         try:
             qty = max(1, int(entry.get('quantity') or 1))
         except (TypeError, ValueError):
             qty = 1
         resolved.append((matches[0], qty))
-    return resolved, None
+    return resolved, None, None
 
 
 def _resolve_items_by_id(items: list):
@@ -318,7 +362,11 @@ def _resolve_items_by_id(items: list):
     to once the customer has answered a few more messages (e.g. the model
     later refers to a product only by a generic word like "necklace", which
     can match several real products even though the customer's exact pick
-    was already resolved earlier in the same order)."""
+    was already resolved earlier in the same order).
+
+    Returns (resolved, error_message, candidates) — candidates is always
+    None here (id-based lookup can't be ambiguous), kept only so callers can
+    unpack both resolvers the same way."""
     resolved = []
     for entry in items:
         try:
@@ -326,13 +374,13 @@ def _resolve_items_by_id(items: list):
                 id=entry.get('product_id'), is_active=True,
             )
         except (Product.DoesNotExist, ValueError, TypeError):
-            return None, 'One of the previously selected products is no longer available. Please search for it again.'
+            return None, 'One of the previously selected products is no longer available. Please search for it again.', None
         try:
             qty = max(1, int(entry.get('quantity') or 1))
         except (TypeError, ValueError):
             qty = 1
         resolved.append((product, qty))
-    return resolved, None
+    return resolved, None, None
 
 
 def _propose_order(
@@ -349,9 +397,9 @@ def _propose_order(
     those are collected) is still useful for showing prices — but once known,
     echoing them back here is what lets the preview show a full delivery
     summary, not just the product list."""
-    resolved, error = _resolve_order_items(items)
+    resolved, error, candidates = _resolve_order_items(items)
     if error:
-        return {'error': error}
+        return {'error': error, 'candidates': candidates} if candidates else {'error': error}
 
     preview_items = []
     subtotal = Decimal('0')
@@ -412,11 +460,11 @@ def _create_order(
     real products even though the customer's exact pick was already pinned
     down earlier in the same order)."""
     if pending_items:
-        resolved, error = _resolve_items_by_id(pending_items)
+        resolved, error, candidates = _resolve_items_by_id(pending_items)
     else:
-        resolved, error = _resolve_order_items(items)
+        resolved, error, candidates = _resolve_order_items(items)
     if error:
-        return {'error': error}
+        return {'error': error, 'candidates': candidates} if candidates else {'error': error}
 
     resolved_items = [{'product_id': str(product.id), 'quantity': qty} for product, qty in resolved]
     order_summary = [{'product': product.name_en or product.name_bn, 'quantity': qty} for product, qty in resolved]
@@ -528,7 +576,7 @@ _PROPOSE_ORDER_DECLARATION = types.FunctionDeclaration(
         "charge, and grand total — WITHOUT placing anything (no stock deduction, nothing "
         "saved). The frontend shows this preview to the customer automatically with a "
         "Confirm button, so do NOT repeat the full price breakdown yourself in your reply — "
-        "just briefly reference it (e.g. \"Here's your order summary above, shall I place it?\"). "
+        "just briefly reference it (e.g. \"Here's your order summary below, shall I place it?\"). "
         "Always call this before create_order, once every product is identified and you have "
         "the customer's delivery district. Once you also know the customer's name, phone, and "
         "address, ALWAYS pass those too (call propose_order again with them if you called it "
@@ -654,6 +702,7 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
     shown_products: list[dict] = []
     seen_urls: set[str] = set()
     pending_order = incoming_pending_order
+    candidates: list[dict] = []
 
     for i in range(_MAX_TOOL_LOOPS):
         response = client.models.generate_content(model=model, contents=contents, config=config)
@@ -669,7 +718,10 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
             # resolving one specific item) would show products the reply
             # text isn't actually talking about, which reads as a mismatch.
             products = [] if pending_order else shown_products
-            return {'reply': response.text or '', 'products': products, 'pending_order': pending_order}
+            return {
+                'reply': response.text or '', 'products': products,
+                'pending_order': pending_order, 'candidates': candidates,
+            }
 
         call_log.extend(f'{fc.name}({fc.args})' for fc in calls)
         contents.append(response.candidates[0].content)
@@ -706,12 +758,18 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
                         shown_products.append(prod)
             if fc.name == 'propose_order' and isinstance(result, dict) and 'error' not in result:
                 pending_order = result
+                candidates = []
+            if fc.name in ('propose_order', 'create_order') and isinstance(result, dict) and result.get('candidates'):
+                # An ambiguous product name — surfaced as clickable options
+                # instead of making the customer retype the exact name.
+                candidates = result['candidates']
             if fc.name == 'create_order' and isinstance(result, dict) and result.get('success'):
                 # A real order was just placed — the earlier preview no longer
                 # reflects reality (it hasn't been ordered yet), so drop it
                 # rather than showing a stale "Confirm" button for an order
                 # that's already been created.
                 pending_order = None
+                candidates = []
             response_parts.append(types.Part.from_function_response(name=fc.name, response=result))
         contents.append(types.Content(role='user', parts=response_parts))
 
@@ -720,4 +778,5 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         'reply': "Sorry, I'm having trouble answering that right now — please try again or contact support.",
         'products': shown_products,
         'pending_order': pending_order,
+        'candidates': candidates,
     }
