@@ -644,7 +644,14 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
             if call_log:
                 logger.info(f'Support chat resolved after {i} tool call(s): {call_log}')
             logger.info('Support chat final reply: %r', response.text or '')
-            return {'reply': response.text or '', 'products': shown_products, 'pending_order': pending_order}
+            # Once there's an active order preview, the order card itself is
+            # the single source of truth for which products are involved —
+            # a raw search_products carousel from an internal lookup made
+            # earlier this turn (e.g. checking crown color variants while
+            # resolving one specific item) would show products the reply
+            # text isn't actually talking about, which reads as a mismatch.
+            products = [] if pending_order else shown_products
+            return {'reply': response.text or '', 'products': products, 'pending_order': pending_order}
 
         call_log.extend(f'{fc.name}({fc.args})' for fc in calls)
         contents.append(response.candidates[0].content)
