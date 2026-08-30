@@ -21,7 +21,7 @@ from .stock_views import (
 )
 from .cart_views import (
     get_cart, add_to_cart, update_cart_item,
-    clear_cart, checkout,
+    clear_cart, checkout, get_cart_report,
 )
 from .guest_views import guest_checkout
 from .shipping_views import (
