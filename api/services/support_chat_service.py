@@ -77,9 +77,15 @@ order summary below — shall I place it?"
 ("হ্যাঁ", "confirm", "order koro", etc.) in a later message, OR after clicking the Confirm button \
 (which arrives as a message from them like any other). Never call create_order in the same turn \
 you called propose_order, and never call it speculatively.
-5. If the customer wants to add or change a product before confirming, call propose_order again \
-with the updated list — don't place a separate order per product.
-6. If propose_order or create_order returns an error (e.g. out of stock, product not found, or a \
+5. If the customer wants to add or remove a product before confirming, use add_order_item or \
+remove_order_item — NEVER call propose_order again with a hand-typed full item list to do this, \
+even though propose_order's parameters would technically allow it. Re-typing the full list \
+requires you to correctly remember and re-list every item already in the order from earlier in \
+the conversation, and you have been observed getting this wrong (dropping an item that was \
+already added). add_order_item/remove_order_item only need the ONE item that's changing — \
+everything else in the order carries forward automatically and correctly.
+6. If propose_order, add_order_item, remove_order_item, or create_order returns an error (e.g. \
+out of stock, product not found, or a \
 name matching several products), explain it plainly using ONLY the information already in that \
 error message and ask what they'd like to do instead. Never call search_products again to build a \
 fresh suggestion list for this — that shows the customer a second, different set of products than \
@@ -383,24 +389,14 @@ def _resolve_items_by_id(items: list):
     return resolved, None, None
 
 
-def _propose_order(
-    items: list, district: str,
+def _build_order_preview(
+    resolved: list, district: str | None,
     customer_name: str | None = None, phone: str | None = None, address: str | None = None,
 ) -> dict:
-    """Resolves items and computes delivery charge/total WITHOUT placing the
-    order — no DB writes, no stock deduction. Lets the frontend show a real
-    preview (product images, prices, delivery charge, grand total, and the
-    delivery name/phone/address once known) plus a Confirm button before the
-    customer commits to anything.
-
-    customer_name/phone/address are optional since an early preview (before
-    those are collected) is still useful for showing prices — but once known,
-    echoing them back here is what lets the preview show a full delivery
-    summary, not just the product list."""
-    resolved, error, candidates = _resolve_order_items(items)
-    if error:
-        return {'error': error, 'candidates': candidates} if candidates else {'error': error}
-
+    """Turns a resolved (Product, qty) list into the preview dict the frontend
+    renders — product images, prices, delivery charge, grand total, and the
+    delivery summary once known. Shared by propose_order and the incremental
+    add/remove-item tools below, so all three build the identical shape."""
     preview_items = []
     subtotal = Decimal('0')
     for product, qty in resolved:
@@ -435,6 +431,104 @@ def _propose_order(
         'address': (address or '').strip() or None,
         'district': (district or '').strip() or None,
     }
+
+
+def _propose_order(
+    items: list, district: str,
+    customer_name: str | None = None, phone: str | None = None, address: str | None = None,
+) -> dict:
+    """Resolves items and computes delivery charge/total WITHOUT placing the
+    order — no DB writes, no stock deduction. Lets the frontend show a real
+    preview (product images, prices, delivery charge, grand total, and the
+    delivery name/phone/address once known) plus a Confirm button before the
+    customer commits to anything.
+
+    customer_name/phone/address are optional since an early preview (before
+    those are collected) is still useful for showing prices — but once known,
+    echoing them back here is what lets the preview show a full delivery
+    summary, not just the product list."""
+    resolved, error, candidates = _resolve_order_items(items)
+    if error:
+        return {'error': error, 'candidates': candidates} if candidates else {'error': error}
+    return _build_order_preview(resolved, district, customer_name, phone, address)
+
+
+def _add_order_item(product_query: str, quantity, current_order: dict | None = None) -> dict:
+    """Adds ONE product to the order already being built, merging
+    deterministically with whatever is already in current_order (the last
+    preview shown to the customer, echoed back by the frontend) — the model
+    never has to re-list every item already in the cart from memory, which
+    it has been observed to silently drop items doing when composing a full
+    propose_order call by hand."""
+    if not current_order or not current_order.get('items'):
+        return {'error': 'No order in progress yet — call propose_order first (with the district) to start one.'}
+
+    matches = _find_products(product_query, limit=5)
+    if not matches:
+        return {'error': f'No product found matching "{product_query}". Try search_products again with a different name.'}
+    if len(matches) > 1:
+        return {
+            'error': (
+                f'"{product_query}" matches multiple products. The customer has already been '
+                f'shown these as clickable options — just briefly ask them to pick one.'
+            ),
+            'candidates': [_serialize_candidate(p) for p in matches],
+        }
+    try:
+        qty = max(1, int(quantity or 1))
+    except (TypeError, ValueError):
+        qty = 1
+
+    id_items = [{'product_id': it['product_id'], 'quantity': it['quantity']} for it in current_order['items']]
+    new_id = str(matches[0].id)
+    for it in id_items:
+        if it['product_id'] == new_id:
+            it['quantity'] += qty
+            break
+    else:
+        id_items.append({'product_id': new_id, 'quantity': qty})
+
+    resolved, error, _ = _resolve_items_by_id(id_items)
+    if error:
+        return {'error': error}
+    return _build_order_preview(
+        resolved, current_order.get('district'),
+        current_order.get('customer_name'), current_order.get('phone'), current_order.get('address'),
+    )
+
+
+def _remove_order_item(product_query: str, current_order: dict | None = None) -> dict:
+    """Removes ONE product from the order already being built, identified by
+    name against what's currently IN the cart (not the whole catalog) — the
+    rest of the order carries forward automatically, same reasoning as
+    add_order_item."""
+    if not current_order or not current_order.get('items'):
+        return {'error': 'No order in progress to remove an item from.'}
+
+    query_words = set(re.split(r'[\s|।,.:;!?()\-]+', product_query.lower()))
+    matches_in_cart = [
+        it for it in current_order['items']
+        if query_words & set(re.split(r'[\s|।,.:;!?()\-]+', f"{it['name_bn']} {it['name_en']}".lower()))
+    ]
+    if not matches_in_cart:
+        return {'error': f'"{product_query}" is not in the current order.'}
+    if len(matches_in_cart) > 1:
+        return {'error': f'"{product_query}" matches more than one item currently in the order — ask the customer to name the exact one to remove.'}
+    if len(current_order['items']) == 1:
+        return {'error': "That's the only item in the order — if the customer no longer wants to order at all, just don't call create_order."}
+
+    remove_id = matches_in_cart[0]['product_id']
+    id_items = [
+        {'product_id': it['product_id'], 'quantity': it['quantity']}
+        for it in current_order['items'] if it['product_id'] != remove_id
+    ]
+    resolved, error, _ = _resolve_items_by_id(id_items)
+    if error:
+        return {'error': error}
+    return _build_order_preview(
+        resolved, current_order.get('district'),
+        current_order.get('customer_name'), current_order.get('phone'), current_order.get('address'),
+    )
 
 
 def _create_order(
@@ -519,6 +613,8 @@ _TOOL_DISPATCH = {
     'search_blog_posts': _search_blog_posts,
     'get_contact_info': _get_contact_info,
     'propose_order': _propose_order,
+    'add_order_item': _add_order_item,
+    'remove_order_item': _remove_order_item,
     'create_order': _create_order,
 }
 
@@ -607,6 +703,43 @@ _PROPOSE_ORDER_DECLARATION = types.FunctionDeclaration(
     },
 )
 
+_ADD_ORDER_ITEM_DECLARATION = types.FunctionDeclaration(
+    name='add_order_item',
+    description=(
+        "Adds ONE product to the order that's already being built (i.e. propose_order has "
+        "already been called at least once this conversation). ALWAYS prefer this over calling "
+        "propose_order again with a full item list when the customer just wants to add one more "
+        "thing — propose_order's full list requires you to correctly remember and re-type every "
+        "item already in the order, which is error-prone over a long conversation; this only "
+        "needs the ONE new item, everything else already in the order carries forward "
+        "automatically and correctly. Returns the updated preview, same shape as propose_order."
+    ),
+    parameters={
+        'type': 'object',
+        'properties': {
+            'product_query': {'type': 'string', 'description': 'Exact product name to add'},
+            'quantity': {'type': 'integer', 'description': 'Number of units to add'},
+        },
+        'required': ['product_query', 'quantity'],
+    },
+)
+
+_REMOVE_ORDER_ITEM_DECLARATION = types.FunctionDeclaration(
+    name='remove_order_item',
+    description=(
+        "Removes ONE product from the order that's already being built. Identify it by the "
+        "name it was ordered under — everything else already in the order carries forward "
+        "automatically. Returns the updated preview, same shape as propose_order."
+    ),
+    parameters={
+        'type': 'object',
+        'properties': {
+            'product_query': {'type': 'string', 'description': 'Name of the product to remove, as it appears in the order'},
+        },
+        'required': ['product_query'],
+    },
+)
+
 _CREATE_ORDER_DECLARATION = types.FunctionDeclaration(
     name='create_order',
     description=(
@@ -680,6 +813,8 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
     system_instruction = _SYSTEM_INSTRUCTION_BASE
     if s.ai_ordering_enabled:
         function_declarations.append(_PROPOSE_ORDER_DECLARATION)
+        function_declarations.append(_ADD_ORDER_ITEM_DECLARATION)
+        function_declarations.append(_REMOVE_ORDER_ITEM_DECLARATION)
         function_declarations.append(_CREATE_ORDER_DECLARATION)
         system_instruction += _ORDERING_INSTRUCTION
 
@@ -730,6 +865,12 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         for fc in calls:
             handler = _TOOL_DISPATCH.get(fc.name)
             call_args = dict(fc.args or {})
+            if fc.name in ('add_order_item', 'remove_order_item'):
+                # Use the LIVE pending_order (not the frozen snapshot from the
+                # start of this request) so these still work correctly if the
+                # model chains propose_order then add/remove_order_item
+                # within the same turn, not just across separate messages.
+                call_args['current_order'] = pending_order
             if fc.name == 'create_order' and incoming_pending_order:
                 if incoming_pending_order.get('items'):
                     # Trust the exact products the customer already saw and
@@ -756,10 +897,11 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
                     if image_url and image_url not in seen_urls:
                         seen_urls.add(image_url)
                         shown_products.append(prod)
-            if fc.name == 'propose_order' and isinstance(result, dict) and 'error' not in result:
+            if fc.name in ('propose_order', 'add_order_item', 'remove_order_item') and isinstance(result, dict) and 'error' not in result:
                 pending_order = result
                 candidates = []
-            if fc.name in ('propose_order', 'create_order') and isinstance(result, dict) and result.get('candidates'):
+            if fc.name in ('propose_order', 'add_order_item', 'remove_order_item', 'create_order') \
+                    and isinstance(result, dict) and result.get('candidates'):
                 # An ambiguous product name — surfaced as clickable options
                 # instead of making the customer retype the exact name.
                 candidates = result['candidates']
