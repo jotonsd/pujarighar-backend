@@ -97,6 +97,12 @@ yours below."). Clicking sends you their exact name as a normal message, so just
 sequence from step 1 once you get it."""
 
 
+def _word_set(text: str) -> set:
+    # Split on punctuation too (not just whitespace), so a word glued to a
+    # "|" separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
+    return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
+
+
 def _find_products(query: str, limit: int = 8) -> list:
     # Product names here are often long/compound (e.g. "পিতলের গণেশ ঠাকুর – ৫
     # ইঞ্চি | ১০০০ গ্রাম" — material + subject + size + weight all in one
@@ -166,11 +172,6 @@ def _find_products(query: str, limit: int = 8) -> list:
         logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
         return candidates
 
-    def word_set(text):
-        # Split on punctuation too (not just whitespace), so a word glued to
-        # a "|" separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
-        return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
-
     # Inverse-document-frequency weighting: a query word that appears on
     # only a handful of products catalog-wide (e.g. "গণেশ" — a specific
     # deity name) is decisive; a word that appears on a large fraction of
@@ -198,8 +199,8 @@ def _find_products(query: str, limit: int = 8) -> list:
         # (gift, common boilerplate in nearly every product's description),
         # which was tying totally unrelated products (lamps, sweets, a
         # hairpiece) with the actual necklace and flooding the results.
-        prod_name_words = word_set(f'{p.name_bn} {p.name_en}')
-        prod_desc_words = word_set(f'{p.description_bn} {p.description_en}')
+        prod_name_words = _word_set(f'{p.name_bn} {p.name_en}')
+        prod_desc_words = _word_set(f'{p.description_bn} {p.description_en}')
         score = 0.0
         for w in lw_words:
             weight = total_active / max(1, word_freq[w])
@@ -505,11 +506,29 @@ def _remove_order_item(product_query: str, current_order: dict | None = None) ->
     if not current_order or not current_order.get('items'):
         return {'error': 'No order in progress to remove an item from.'}
 
-    query_words = set(re.split(r'[\s|।,.:;!?()\-]+', product_query.lower()))
-    matches_in_cart = [
+    query_norm = product_query.strip().lower()
+    # Exact match first (handles clicking a candidate button, which sends
+    # back the item's exact stored name — should always resolve to exactly
+    # one item, unambiguously).
+    exact = [
         it for it in current_order['items']
-        if query_words & set(re.split(r'[\s|।,.:;!?()\-]+', f"{it['name_bn']} {it['name_en']}".lower()))
+        if query_norm in (it['name_bn'].strip().lower(), it['name_en'].strip().lower())
     ]
+    if len(exact) == 1:
+        matches_in_cart = exact
+    else:
+        # Fall back to whole-word scoring (same principle as _find_products'
+        # relevance ranking) — NOT a plain "any shared word" check, which
+        # falsely tied together every item that merely shared a generic
+        # connector word like "ডিজাইনার" (designer) or "ও" (and), even when
+        # the customer specified one item's full, distinct name.
+        query_words = _word_set(product_query)
+        scored = [
+            (len(query_words & _word_set(f"{it['name_bn']} {it['name_en']}")), it)
+            for it in current_order['items']
+        ]
+        best_score = max(score for score, _ in scored)
+        matches_in_cart = [it for score, it in scored if score == best_score] if best_score > 0 else []
     if not matches_in_cart:
         return {'error': f'"{product_query}" is not in the current order.'}
     if len(matches_in_cart) > 1:
