@@ -156,17 +156,35 @@ def _find_products(query: str, limit: int = 8) -> list:
         logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
         return candidates
 
+    def word_set(text):
+        # Split on punctuation too (not just whitespace), so a word glued to
+        # a "|" separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
+        return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
+
     def relevance(p):
         # Whole-word matching, not substring — "হার" (necklace) as a plain
         # substring check also matches inside unrelated words like "উপহার"
         # (gift, common boilerplate in nearly every product's description),
         # which was tying totally unrelated products (lamps, sweets, a
-        # hairpiece) with the actual necklace and flooding the results. Split
-        # on punctuation too (not just whitespace), so a word glued to a "|"
-        # separator or a Bengali দাঁড়ি ("।") still tokenizes correctly.
-        text = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
-        haystack_words = set(re.split(r'[\s|।,.:;!?()\-]+', text))
-        return sum(1 for w in all_words if w.lower() in haystack_words)
+        # hairpiece) with the actual necklace and flooding the results.
+        #
+        # Name matches count for much more than description matches — a
+        # small accessory (e.g. a cloth garland) often mentions an unrelated
+        # deity's name in its OWN description as generic compatible-use text
+        # ("suitable for Ganesh idols too"), which is real but weak evidence
+        # compared to a product whose actual name is "Ganesh Idol". Without
+        # this weighting, such accessories tied with and flooded alongside
+        # the actual matching idols.
+        prod_name_words = word_set(f'{p.name_bn} {p.name_en}')
+        prod_desc_words = word_set(f'{p.description_bn} {p.description_en}')
+        score = 0
+        for w in all_words:
+            wl = w.lower()
+            if wl in prod_name_words:
+                score += 3
+            elif wl in prod_desc_words:
+                score += 1
+        return score
 
     scored = [(relevance(p), p) for p in candidates]
     best_score = max(score for score, _ in scored)
