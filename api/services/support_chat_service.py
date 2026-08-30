@@ -50,24 +50,27 @@ information to answer, answer immediately instead of calling more tools "to be t
 
 _ORDERING_INSTRUCTION = """
 
-You can also place real Cash-on-Delivery orders for the customer using create_order — the \
-customer can order MULTIPLE different products together in one order, exactly like a normal \
-cart checkout, not just one at a time. Follow this exact sequence, never skip a step:
-1. Identify each exact product via search_products first — never call create_order on a guessed \
-or ambiguous product name. If the customer wants several different products, resolve every one \
-of them before proposing the order.
+You can also place real Cash-on-Delivery orders for the customer using propose_order and \
+create_order — the customer can order MULTIPLE different products together in one order, \
+exactly like a normal cart checkout, not just one at a time. Follow this exact sequence, never \
+skip a step:
+1. Identify each exact product via search_products first — never propose or create an order on \
+a guessed or ambiguous product name. If the customer wants several different products, resolve \
+every one of them first.
 2. Collect the customer's full name, phone number, delivery address, and district (the district \
 is required — it determines the delivery charge automatically, inside vs. outside Dhaka).
-3. Before calling create_order, show the customer a clear summary in your reply: every product \
-with its quantity and unit price, the delivery address, and that payment is Cash on Delivery — \
-and explicitly ask them to confirm (e.g. "Shall I place this order?").
+3. Call propose_order(items, district) to build a preview. The app shows this preview to the \
+customer automatically — product images, prices, delivery charge, grand total — with its own \
+Confirm button, so do NOT repeat that price breakdown yourself in your reply. Just briefly \
+acknowledge it and ask them to confirm, e.g. "Here's your order summary above — shall I place it?"
 4. Only call create_order after the customer replies with a clear yes/confirmation \
-("হ্যাঁ", "confirm", "order koro", etc.) in a later message. Never call it in the same turn you \
-first proposed the order, and never call it speculatively.
-5. If the customer wants to add another product to an order they haven't confirmed yet, update \
-the summary and re-ask for confirmation — don't place a separate order per product.
-6. If create_order returns an error (e.g. out of stock, product not found), explain it plainly \
-and ask what they'd like to do instead — do not retry blindly."""
+("হ্যাঁ", "confirm", "order koro", etc.) in a later message, OR after clicking the Confirm button \
+(which arrives as a message from them like any other). Never call create_order in the same turn \
+you called propose_order, and never call it speculatively.
+5. If the customer wants to add or change a product before confirming, call propose_order again \
+with the updated list — don't place a separate order per product.
+6. If propose_order or create_order returns an error (e.g. out of stock, product not found), \
+explain it plainly and ask what they'd like to do instead — do not retry blindly."""
 
 
 def _find_products(query: str, limit: int = 8) -> list:
@@ -216,6 +219,75 @@ def _get_contact_info() -> dict:
     }
 
 
+_DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
+
+
+def _resolve_order_items(items: list):
+    """Resolves each {'product_query', 'quantity'} entry to a real (Product,
+    qty) pair, or returns an error string. Shared by propose_order (preview
+    only, no DB writes) and create_order (the real thing) so both agree on
+    exactly which product an ambiguous or fuzzy query resolves to."""
+    if not items:
+        return None, 'At least one product is required to place an order.'
+    resolved = []
+    for entry in items:
+        product_query = str(entry.get('product_query', '')).strip()
+        if not product_query:
+            return None, 'Each item needs a product name.'
+        matches = _find_products(product_query, limit=5)
+        if not matches:
+            return None, f'No product found matching "{product_query}". Try search_products again with a different name.'
+        if len(matches) > 1:
+            names = [p.name_en or p.name_bn for p in matches]
+            return None, f'"{product_query}" matches multiple products: {names}. Ask the customer which exact one they want.'
+        try:
+            qty = max(1, int(entry.get('quantity') or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        resolved.append((matches[0], qty))
+    return resolved, None
+
+
+def _propose_order(items: list, district: str) -> dict:
+    """Resolves items and computes delivery charge/total WITHOUT placing the
+    order — no DB writes, no stock deduction. Lets the frontend show a real
+    preview (product images, prices, delivery charge, grand total) plus a
+    Confirm button before the customer commits to anything."""
+    resolved, error = _resolve_order_items(items)
+    if error:
+        return {'error': error}
+
+    preview_items = []
+    subtotal = Decimal('0')
+    for product, qty in resolved:
+        effective = product.effective_price
+        line_total = effective * qty
+        subtotal += line_total
+        product_images = list(product.images.all())
+        first_image = product_images[0] if product_images else None
+        preview_items.append({
+            'name_bn': product.name_bn,
+            'name_en': product.name_en,
+            'quantity': qty,
+            'unit_price': str(effective),
+            'line_total': str(line_total),
+            'in_stock': product.stock_on_hand >= qty,
+            'image_url': f'{django_settings.BACKEND_URL}{first_image.image.url}' if first_image else None,
+        })
+
+    dc = DeliveryCharge.get()
+    delivery = dc.inside_dhaka if (district or '').strip().lower() in _DHAKA_DISTRICTS else dc.outside_dhaka
+    grand_total = subtotal + delivery
+
+    return {
+        'items': preview_items,
+        'subtotal': str(subtotal),
+        'delivery_charge': str(delivery),
+        'grand_total': str(grand_total),
+        'payment_method': 'COD (Cash on Delivery)',
+    }
+
+
 def _create_order(items: list, customer_name: str, phone: str, address: str, district: str) -> dict:
     """Places a real order — possibly multiple different products in one order,
     matching how a normal cart checkout works — by calling the existing public
@@ -225,29 +297,12 @@ def _create_order(items: list, customer_name: str, phone: str, address: str, dis
     PENDING for staff to review like any other order.
 
     items: [{'product_query': str, 'quantity': int}, ...]"""
-    if not items:
-        return {'error': 'At least one product is required to place an order.'}
+    resolved, error = _resolve_order_items(items)
+    if error:
+        return {'error': error}
 
-    resolved_items = []
-    order_summary = []
-    for entry in items:
-        product_query = str(entry.get('product_query', '')).strip()
-        if not product_query:
-            return {'error': 'Each item needs a product name.'}
-        matches = _find_products(product_query, limit=5)
-        if not matches:
-            return {'error': f'No product found matching "{product_query}". Try search_products again with a different name.'}
-        if len(matches) > 1:
-            names = [p.name_en or p.name_bn for p in matches]
-            return {'error': f'"{product_query}" matches multiple products: {names}. Ask the customer which exact one they want.'}
-
-        product = matches[0]
-        try:
-            qty = max(1, int(entry.get('quantity') or 1))
-        except (TypeError, ValueError):
-            qty = 1
-        resolved_items.append({'product_id': str(product.id), 'quantity': qty})
-        order_summary.append({'product': product.name_en or product.name_bn, 'quantity': qty})
+    resolved_items = [{'product_id': str(product.id), 'quantity': qty} for product, qty in resolved]
+    order_summary = [{'product': product.name_en or product.name_bn, 'quantity': qty} for product, qty in resolved]
 
     if not (customer_name and str(customer_name).strip() and phone and str(phone).strip() and address and str(address).strip()):
         return {'error': 'Name, phone, and address are all required before placing an order.'}
@@ -298,6 +353,7 @@ _TOOL_DISPATCH = {
     'get_cashback_tiers': _get_cashback_tiers,
     'search_blog_posts': _search_blog_posts,
     'get_contact_info': _get_contact_info,
+    'propose_order': _propose_order,
     'create_order': _create_order,
 }
 
@@ -348,6 +404,38 @@ _FUNCTION_DECLARATIONS = [
 # SiteSetting.ai_ordering_enabled is on — see answer() below. Placing a real
 # order is meaningfully riskier than the read-only lookups above, so it's
 # opt-in rather than available the moment a Gemini key is configured.
+_PROPOSE_ORDER_DECLARATION = types.FunctionDeclaration(
+    name='propose_order',
+    description=(
+        "Builds an order PREVIEW — resolved products with images, unit prices, delivery "
+        "charge, and grand total — WITHOUT placing anything (no stock deduction, nothing "
+        "saved). The frontend shows this preview to the customer automatically with a "
+        "Confirm button, so do NOT repeat the full price breakdown yourself in your reply — "
+        "just briefly reference it (e.g. \"Here's your order summary above, shall I place it?\"). "
+        "Always call this before create_order, once every product is identified and you have "
+        "the customer's delivery district."
+    ),
+    parameters={
+        'type': 'object',
+        'properties': {
+            'items': {
+                'type': 'array',
+                'description': 'One entry per distinct product the customer wants to order',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'product_query': {'type': 'string', 'description': 'Exact product name to order'},
+                        'quantity': {'type': 'integer', 'description': 'Number of units to order'},
+                    },
+                    'required': ['product_query', 'quantity'],
+                },
+            },
+            'district': {'type': 'string', 'description': 'District, e.g. Dhaka, Chattogram — determines the delivery charge'},
+        },
+        'required': ['items', 'district'],
+    },
+)
+
 _CREATE_ORDER_DECLARATION = types.FunctionDeclaration(
     name='create_order',
     description=(
@@ -413,6 +501,7 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
     function_declarations = list(_FUNCTION_DECLARATIONS)
     system_instruction = _SYSTEM_INSTRUCTION_BASE
     if s.ai_ordering_enabled:
+        function_declarations.append(_PROPOSE_ORDER_DECLARATION)
         function_declarations.append(_CREATE_ORDER_DECLARATION)
         system_instruction += _ORDERING_INSTRUCTION
 
@@ -434,6 +523,7 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
     call_log: list[str] = []
     shown_products: list[dict] = []
     seen_urls: set[str] = set()
+    pending_order = None
 
     for i in range(_MAX_TOOL_LOOPS):
         response = client.models.generate_content(model=model, contents=contents, config=config)
@@ -442,7 +532,7 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
             if call_log:
                 logger.info(f'Support chat resolved after {i} tool call(s): {call_log}')
             logger.info('Support chat final reply: %r', response.text or '')
-            return {'reply': response.text or '', 'products': shown_products}
+            return {'reply': response.text or '', 'products': shown_products, 'pending_order': pending_order}
 
         call_log.extend(f'{fc.name}({fc.args})' for fc in calls)
         contents.append(response.candidates[0].content)
@@ -462,6 +552,14 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
                     if image_url and image_url not in seen_urls:
                         seen_urls.add(image_url)
                         shown_products.append(prod)
+            if fc.name == 'propose_order' and isinstance(result, dict) and 'error' not in result:
+                pending_order = result
+            if fc.name == 'create_order' and isinstance(result, dict) and result.get('success'):
+                # A real order was just placed — the earlier preview no longer
+                # reflects reality (it hasn't been ordered yet), so drop it
+                # rather than showing a stale "Confirm" button for an order
+                # that's already been created.
+                pending_order = None
             response_parts.append(types.Part.from_function_response(name=fc.name, response=result))
         contents.append(types.Content(role='user', parts=response_parts))
 
@@ -469,4 +567,5 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
     return {
         'reply': "Sorry, I'm having trouble answering that right now — please try again or contact support.",
         'products': shown_products,
+        'pending_order': pending_order,
     }
