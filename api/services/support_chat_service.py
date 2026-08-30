@@ -3,6 +3,8 @@ from decimal import Decimal
 
 import requests
 from django.conf import settings as django_settings
+from django.contrib.postgres.search import TrigramSimilarity
+from django.db import connection
 from django.db.models import Q
 from google import genai
 from google.genai import types
@@ -68,15 +70,62 @@ the summary and re-ask for confirmation — don't place a separate order per pro
 and ask what they'd like to do instead — do not retry blindly."""
 
 
-def _search_products(query: str) -> dict:
-    products = (
-        Product.objects.filter(is_active=True)
-        .filter(
-            Q(name_bn__icontains=query) | Q(name_en__icontains=query)
-            | Q(description_bn__icontains=query) | Q(description_en__icontains=query)
+def _find_products(query: str, limit: int = 8) -> list:
+    # Product names here are often long/compound (e.g. "পিতলের গণেশ ঠাকুর – ৫
+    # ইঞ্চি | ১০০০ গ্রাম" — material + subject + size + weight all in one
+    # field), so a literal substring match on the FULL query string misses
+    # anything the customer phrases even slightly differently. Match word by
+    # word instead (any word present = a candidate), then rank candidates by
+    # how many of the query's words they actually contain, so the closest
+    # match surfaces first instead of an arbitrary DB-order pick. Shared by
+    # _search_products (browsing) and _create_order (must resolve to exactly
+    # one product), so both see the same, better matching.
+    # Keep single-digit tokens (e.g. "3" in "size 3 dress") for RANKING, but
+    # never let a bare number qualify a product on its own — a garland whose
+    # description says "3 feet long" would otherwise match a "size 3 dress"
+    # query, since a lone digit is meaningless without the word next to it.
+    all_words = [w for w in query.strip().split() if len(w) > 1 or w.isdigit()] or [query.strip()]
+    name_words = [w for w in all_words if not w.isdigit()] or all_words
+
+    word_filter = Q()
+    for word in name_words:
+        word_filter |= (
+            Q(name_bn__icontains=word) | Q(name_en__icontains=word)
+            | Q(description_bn__icontains=word) | Q(description_en__icontains=word)
         )
-        .select_related('category').prefetch_related('images')[:8]
+
+    candidates = list(
+        Product.objects.filter(is_active=True)
+        .filter(word_filter)
+        .select_related('category').prefetch_related('images')
+        .distinct()[:50]
     )
+
+    # Exact/substring matching found nothing — try typo-tolerant matching
+    # before giving up (e.g. "golaper dress" when the real product is
+    # "gopaler dress"). Postgres-only (pg_trgm, enabled via migration); on
+    # MySQL this just no-ops and the search stays exact-match only.
+    if not candidates and connection.vendor == 'postgresql':
+        candidates = list(
+            Product.objects.filter(is_active=True)
+            .annotate(similarity=TrigramSimilarity('name_bn', query) + TrigramSimilarity('name_en', query))
+            .filter(similarity__gt=0.15)
+            .select_related('category').prefetch_related('images')
+            .order_by('-similarity')[:limit]
+        )
+        if candidates:
+            logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
+        return candidates
+
+    def relevance(p):
+        haystack = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
+        return sum(1 for w in all_words if w.lower() in haystack)
+
+    return sorted(candidates, key=relevance, reverse=True)[:limit]
+
+
+def _search_products(query: str) -> dict:
+    products = _find_products(query)
     results = []
     for p in products:
         original = p.original_price
@@ -177,18 +226,14 @@ def _create_order(items: list, customer_name: str, phone: str, address: str, dis
         product_query = str(entry.get('product_query', '')).strip()
         if not product_query:
             return {'error': 'Each item needs a product name.'}
-        matches = (
-            Product.objects.filter(is_active=True)
-            .filter(Q(name_bn__icontains=product_query) | Q(name_en__icontains=product_query))
-        )
-        count = matches.count()
-        if count == 0:
+        matches = _find_products(product_query, limit=5)
+        if not matches:
             return {'error': f'No product found matching "{product_query}". Try search_products again with a different name.'}
-        if count > 1:
-            names = list(matches.values_list('name_en', flat=True)[:5])
+        if len(matches) > 1:
+            names = [p.name_en or p.name_bn for p in matches]
             return {'error': f'"{product_query}" matches multiple products: {names}. Ask the customer which exact one they want.'}
 
-        product = matches.first()
+        product = matches[0]
         try:
             qty = max(1, int(entry.get('quantity') or 1))
         except (TypeError, ValueError):
