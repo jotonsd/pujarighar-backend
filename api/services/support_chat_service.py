@@ -1,12 +1,11 @@
 import logging
 import re
 from decimal import Decimal
+from difflib import SequenceMatcher
 
 import avro
 import requests
 from django.conf import settings as django_settings
-from django.contrib.postgres.search import TrigramSimilarity
-from django.db import connection
 from django.db.models import Case, IntegerField, Q, Value, When
 from google import genai
 from google.genai import types
@@ -181,35 +180,58 @@ def _find_products(query: str, limit: int = 8) -> list:
         .distinct().order_by('-match_score')[:50]
     )
 
-    # Exact/substring matching found nothing — try typo-tolerant matching
-    # before giving up (e.g. "golaper dress" when the real product is
-    # "gopaler dress"). Postgres-only (pg_trgm, enabled via migration); on
-    # MySQL this just no-ops and the search stays exact-match only.
-    if not candidates and connection.vendor == 'postgresql':
-        fuzzy = list(
-            Product.objects.filter(is_active=True)
-            # name_bn against the transliterated Bengali form, not the raw
-            # Latin query — Avro's phonetic conversion is close but not
-            # always byte-exact (e.g. missing a nukta/chandrabindu mark), so
-            # this is what lets typo-tolerant matching still catch it; name_en
-            # stays against the original query since that field is Latin.
-            .annotate(similarity=TrigramSimilarity('name_bn', transliterated) + TrigramSimilarity('name_en', query))
-            .filter(similarity__gt=0.15)
-            .select_related('category').prefetch_related('images')
-            .order_by('-similarity')[:20]
-        )
-        if not fuzzy:
+    if not candidates:
+        # Exact/substring matching found nothing — try typo-tolerant matching
+        # before giving up (e.g. "golaper dress" when the real product is
+        # "gopaler dress", or Avro's phonetic transliteration landing one
+        # diacritic off — "bashi" → "বাশি" missing the chandrabindu the real
+        # spelling "বাঁশি" has). Scored in Python with difflib, not Postgres's
+        # pg_trgm: plain TrigramSimilarity compares the WHOLE name field as
+        # one blob, which dilutes badly against this catalog's long compound
+        # names (scored the "বাশি"/"বাঁশি" pair only ~0.09, well under any
+        # sane threshold, purely because the surrounding name is long).
+        # Postgres's word_similarity() fixes that dilution but turned out to
+        # hit a suspiciously uniform ~0.5 "noise floor" against completely
+        # unrelated short words, making it useless for separating real
+        # matches from noise at this string length. difflib.ratio() per WORD
+        # pair, tested directly, was well-behaved instead: genuine
+        # near-matches scored 0.75-1.0, unrelated words 0.0-0.4 — a clean gap
+        # a fixed threshold can actually rely on. This also works identically
+        # on MySQL now, so no vendor guard is needed.
+        translit_words = [w for w in _word_set(transliterated) if len(w) > 1] or [transliterated]
+        orig_words = [w for w in _word_set(query) if len(w) > 1] or [query]
+        fuzzy_query_words = translit_words + orig_words
+
+        # Only light fields for scoring every active product cheaply; the
+        # winners get re-fetched with images below.
+        light_rows = Product.objects.filter(is_active=True).values('id', 'name_bn', 'name_en')
+        scored = []
+        for row in light_rows:
+            prod_words = _word_set(f"{row['name_bn']} {row['name_en']}")
+            best_ratio = max(
+                (SequenceMatcher(None, pw, qw).ratio() for pw in prod_words for qw in fuzzy_query_words),
+                default=0.0,
+            )
+            scored.append((best_ratio, row['id']))
+
+        best_score = max((s for s, _ in scored), default=0.0)
+        if best_score < 0.7:
             return []
-        # A real typo has one clear winner well above the rest (e.g.
-        # "golaper" vs "gopaler" dress). A product that simply doesn't exist
-        # (e.g. searching "crown" when nothing crown-shaped is in the
-        # catalog) instead produces a flat spread of weak, unrelated
-        # matches — without this, that spread was flooding results with
-        # random unrelated products instead of correctly finding nothing.
-        best = fuzzy[0].similarity
-        candidates = [p for p in fuzzy if p.similarity >= best - 0.03][:limit]
+        # A real typo/near-miss has one clear winner well above the rest. A
+        # product that simply doesn't exist (e.g. searching "crown" when
+        # nothing crown-shaped is in the catalog) instead produces a flat
+        # spread of weak, unrelated matches — the best_score floor above
+        # already excludes that case entirely, and this keeps only the
+        # winning cluster among what's left.
+        winner_ids = [pid for s, pid in scored if s >= best_score - 0.1]
+        score_by_id = dict((pid, s) for s, pid in scored)
+        fuzzy = list(
+            Product.objects.filter(id__in=winner_ids)
+            .select_related('category').prefetch_related('images')
+        )
+        fuzzy.sort(key=lambda p: -score_by_id.get(p.id, 0))
         logger.info(f'Support chat product search: exact match failed, fuzzy match used for {query!r}')
-        return candidates
+        return fuzzy[:limit]
 
     # Inverse-document-frequency weighting: a query word that appears on
     # only a handful of products catalog-wide (e.g. "গণেশ" — a specific
