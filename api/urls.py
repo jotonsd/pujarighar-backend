@@ -62,6 +62,7 @@ urlpatterns = [
     path('reports/income/',                    views.get_income_report,          name='income-report'),
     path('reports/expenses/',                  views.get_expense_report,         name='expense-report'),
     path('reports/sales/',                     views.get_sales_report,           name='sales-report'),
+    path('reports/carts/',                     views.get_cart_report,            name='cart-report'),
     path('products/<uuid:pk>/package-items/',  views.list_package_items, name='package-items'),
     path('products/<uuid:pk>/package-items/add/', views.add_package_item, name='package-item-add'),
     path('products/<uuid:pk>/package-items/<uuid:item_id>/delete/', views.delete_package_item, name='package-item-delete'),

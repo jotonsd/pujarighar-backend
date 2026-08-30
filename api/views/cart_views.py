@@ -12,7 +12,7 @@ from api.services import mail_service
 from django.conf import settings as django_settings
 from api.serializers.order_serializers import SalesOrderSerializer
 from api.utils.response import ApiResponse
-from api.permissions import IsCustomer
+from api.permissions import IsCustomer, has_permission
 
 logger = logging.getLogger(__name__)
 _cart_svc     = CartService()
@@ -104,3 +104,10 @@ def checkout(request):
     except Exception as e:
         logger.error(f"Checkout error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('reports_carts', 'view')])
+def get_cart_report(request):
+    data = _cart_svc.get_cart_report({'search': request.query_params.get('search', '')})
+    return ApiResponse(message='Cart report retrieved', data=data)
