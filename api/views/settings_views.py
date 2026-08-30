@@ -13,7 +13,7 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
                       'telegram_bot_token', 'telegram_chat_id',
                       'gemini_api_key', 'gemini_model']
 INT_FIELDS         = ['email_port']
-BOOL_FIELDS        = ['email_use_tls']
+BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled']
 FILE_FIELDS        = ['logo', 'favicon']
 DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent']
 
@@ -52,6 +52,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'telegram_chat_id':         s.telegram_chat_id,
             'has_gemini_api_key':       bool(s.gemini_api_key),
             'gemini_model':             s.gemini_model,
+            'ai_ordering_enabled':      s.ai_ordering_enabled,
         })
 
     return data

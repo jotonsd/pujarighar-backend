@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 
+import requests
 from django.conf import settings as django_settings
 from django.db.models import Q
 from google import genai
@@ -19,7 +20,7 @@ _MAX_HISTORY_TURNS = 10
 _FACEBOOK_PAGE_ID = 'pujarighar'
 _DEFAULT_EMAIL = 'pujarigharbd@gmail.com'
 
-_SYSTEM_INSTRUCTION = """You are Brahman AI, PujariGhar's product support assistant, embedded in \
+_SYSTEM_INSTRUCTION_BASE = """You are Brahman AI, PujariGhar's product support assistant, embedded in \
 a Bangladeshi religious/puja goods e-commerce storefront. If asked your name, you are "Brahman AI" \
 ("ব্রাহ্মণ এআই" in Bangla). You ONLY help customers with:
 - Product information, pricing, and current discounts
@@ -44,6 +45,27 @@ several different things (e.g. both a product AND delivery charges). If a tool r
 or unhelpful, say so plainly instead of calling the same or a similar tool again — do not retry \
 searches with reworded queries hoping for a better result. As soon as you have enough \
 information to answer, answer immediately instead of calling more tools "to be thorough"."""
+
+_ORDERING_INSTRUCTION = """
+
+You can also place real Cash-on-Delivery orders for the customer using create_order — the \
+customer can order MULTIPLE different products together in one order, exactly like a normal \
+cart checkout, not just one at a time. Follow this exact sequence, never skip a step:
+1. Identify each exact product via search_products first — never call create_order on a guessed \
+or ambiguous product name. If the customer wants several different products, resolve every one \
+of them before proposing the order.
+2. Collect the customer's full name, phone number, delivery address, and district (the district \
+is required — it determines the delivery charge automatically, inside vs. outside Dhaka).
+3. Before calling create_order, show the customer a clear summary in your reply: every product \
+with its quantity and unit price, the delivery address, and that payment is Cash on Delivery — \
+and explicitly ask them to confirm (e.g. "Shall I place this order?").
+4. Only call create_order after the customer replies with a clear yes/confirmation \
+("হ্যাঁ", "confirm", "order koro", etc.) in a later message. Never call it in the same turn you \
+first proposed the order, and never call it speculatively.
+5. If the customer wants to add another product to an order they haven't confirmed yet, update \
+the summary and re-ask for confirmation — don't place a separate order per product.
+6. If create_order returns an error (e.g. out of stock, product not found), explain it plainly \
+and ask what they'd like to do instead — do not retry blindly."""
 
 
 def _search_products(query: str) -> dict:
@@ -137,6 +159,85 @@ def _get_contact_info() -> dict:
     }
 
 
+def _create_order(items: list, customer_name: str, phone: str, address: str, district: str) -> dict:
+    """Places a real order — possibly multiple different products in one order,
+    matching how a normal cart checkout works — by calling the existing public
+    guest-checkout API (POST /api/guest/checkout/). Not a separate/duplicated
+    code path: this gets exactly the same validation, stock deduction, and
+    admin notifications as every other order in this app, and lands as
+    PENDING for staff to review like any other order.
+
+    items: [{'product_query': str, 'quantity': int}, ...]"""
+    if not items:
+        return {'error': 'At least one product is required to place an order.'}
+
+    resolved_items = []
+    order_summary = []
+    for entry in items:
+        product_query = str(entry.get('product_query', '')).strip()
+        if not product_query:
+            return {'error': 'Each item needs a product name.'}
+        matches = (
+            Product.objects.filter(is_active=True)
+            .filter(Q(name_bn__icontains=product_query) | Q(name_en__icontains=product_query))
+        )
+        count = matches.count()
+        if count == 0:
+            return {'error': f'No product found matching "{product_query}". Try search_products again with a different name.'}
+        if count > 1:
+            names = list(matches.values_list('name_en', flat=True)[:5])
+            return {'error': f'"{product_query}" matches multiple products: {names}. Ask the customer which exact one they want.'}
+
+        product = matches.first()
+        try:
+            qty = max(1, int(entry.get('quantity') or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        resolved_items.append({'product_id': str(product.id), 'quantity': qty})
+        order_summary.append({'product': product.name_en or product.name_bn, 'quantity': qty})
+
+    if not (customer_name and str(customer_name).strip() and phone and str(phone).strip() and address and str(address).strip()):
+        return {'error': 'Name, phone, and address are all required before placing an order.'}
+
+    payload = {
+        'items': resolved_items,
+        'name_bn': customer_name,
+        'name_en': customer_name,
+        'phone': phone,
+        'address_bn': address,
+        'address_en': address,
+        'district': district or '',
+        'payment_method': 'COD',
+    }
+    try:
+        resp = requests.post(f'{django_settings.BACKEND_URL}/api/cart/guest-checkout/', json=payload, timeout=15)
+    except Exception as e:
+        logger.error(f'Support chat order creation request failed (connection): {e}', exc_info=True)
+        return {'error': 'Could not reach the order system right now. Please ask the customer to try again shortly.'}
+
+    try:
+        body = resp.json()
+    except ValueError:
+        logger.error(
+            f'Support chat order creation got a non-JSON response | status={resp.status_code} | '
+            f'url={resp.url} | body={resp.text[:1000]!r}'
+        )
+        return {'error': 'The order system returned an unexpected response. Please ask the customer to try again shortly.'}
+
+    if resp.status_code >= 400:
+        return {'error': body.get('errors') or body.get('message') or 'Order could not be placed.'}
+
+    data = body.get('data', {})
+    return {
+        'success': True,
+        'order_number': data.get('order_number'),
+        'items': order_summary,
+        'grand_total': data.get('grand_total'),
+        'payment_method': 'COD (Cash on Delivery)',
+        'status': data.get('status'),
+    }
+
+
 _TOOL_DISPATCH = {
     'search_products': _search_products,
     'get_delivery_charges': _get_delivery_charges,
@@ -144,6 +245,7 @@ _TOOL_DISPATCH = {
     'get_cashback_tiers': _get_cashback_tiers,
     'search_blog_posts': _search_blog_posts,
     'get_contact_info': _get_contact_info,
+    'create_order': _create_order,
 }
 
 _FUNCTION_DECLARATIONS = [
@@ -189,6 +291,43 @@ _FUNCTION_DECLARATIONS = [
     ),
 ]
 
+# Kept separate from _FUNCTION_DECLARATIONS and only appended when
+# SiteSetting.ai_ordering_enabled is on — see answer() below. Placing a real
+# order is meaningfully riskier than the read-only lookups above, so it's
+# opt-in rather than available the moment a Gemini key is configured.
+_CREATE_ORDER_DECLARATION = types.FunctionDeclaration(
+    name='create_order',
+    description=(
+        "Places a real Cash-on-Delivery order — one or MORE different products in a single "
+        "order, same as a normal cart checkout. Only call this after every product has been "
+        "identified via search_products, the customer has provided their name, phone, address, "
+        "and district, AND has explicitly confirmed they want to order in a follow-up message "
+        "after seeing a summary. Never call this speculatively."
+    ),
+    parameters={
+        'type': 'object',
+        'properties': {
+            'items': {
+                'type': 'array',
+                'description': 'One entry per distinct product the customer wants to order',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'product_query': {'type': 'string', 'description': 'Exact product name to order'},
+                        'quantity': {'type': 'integer', 'description': 'Number of units to order'},
+                    },
+                    'required': ['product_query', 'quantity'],
+                },
+            },
+            'customer_name': {'type': 'string', 'description': "Customer's full name"},
+            'phone': {'type': 'string', 'description': 'Bangladeshi mobile number, e.g. 01XXXXXXXXX'},
+            'address': {'type': 'string', 'description': 'Full delivery address'},
+            'district': {'type': 'string', 'description': 'District, e.g. Dhaka, Chattogram — determines the delivery charge'},
+        },
+        'required': ['items', 'customer_name', 'phone', 'address', 'district'],
+    },
+)
+
 
 def is_configured() -> bool:
     return bool(SiteSetting.get().gemini_api_key)
@@ -218,9 +357,15 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
             contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
     contents.append(types.Content(role='user', parts=[types.Part(text=message[:2000])]))
 
+    function_declarations = list(_FUNCTION_DECLARATIONS)
+    system_instruction = _SYSTEM_INSTRUCTION_BASE
+    if s.ai_ordering_enabled:
+        function_declarations.append(_CREATE_ORDER_DECLARATION)
+        system_instruction += _ORDERING_INSTRUCTION
+
     config = types.GenerateContentConfig(
-        system_instruction=_SYSTEM_INSTRUCTION,
-        tools=[types.Tool(function_declarations=_FUNCTION_DECLARATIONS)],
+        system_instruction=system_instruction,
+        tools=[types.Tool(function_declarations=function_declarations)],
     )
 
     # Full prompt visibility, on request — everything sent to Gemini for this
@@ -228,7 +373,7 @@ def answer(message: str, history: list[dict] | None = None) -> dict:
     # and the new message.
     logger.info(
         'Support chat prompt | system_instruction=%r | history=%s | message=%r',
-        _SYSTEM_INSTRUCTION,
+        system_instruction,
         [{'role': t.get('role'), 'text': str(t.get('text', ''))[:2000]} for t in (history or [])[-_MAX_HISTORY_TURNS:]],
         message[:2000],
     )

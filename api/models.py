@@ -946,6 +946,10 @@ class SiteSetting(models.Model):
     # hardcoded) since Google renames/retires free-tier model ids over time.
     gemini_api_key = models.CharField(max_length=255, blank=True, default='')
     gemini_model   = models.CharField(max_length=64, blank=True, default='gemini-3.6-flash')
+    # Off by default — placing real orders (stock deduction, DB writes) is a
+    # materially bigger risk than the read-only Q&A tools, so this needs an
+    # explicit admin opt-in rather than working the moment a key is added.
+    ai_ordering_enabled = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = 'Site Setting'
