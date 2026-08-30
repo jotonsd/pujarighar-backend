@@ -6,7 +6,7 @@ import requests
 from django.conf import settings as django_settings
 from django.contrib.postgres.search import TrigramSimilarity
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from google import genai
 from google.genai import types
 
@@ -105,17 +105,30 @@ def _find_products(query: str, limit: int = 8) -> list:
     name_words = [w for w in all_words if not w.isdigit()] or all_words
 
     word_filter = Q()
+    match_score = Value(0, output_field=IntegerField())
     for word in name_words:
-        word_filter |= (
+        word_q = (
             Q(name_bn__icontains=word) | Q(name_en__icontains=word)
             | Q(description_bn__icontains=word) | Q(description_en__icontains=word)
         )
+        word_filter |= word_q
+        match_score = match_score + Case(When(word_q, then=Value(1)), default=Value(0), output_field=IntegerField())
 
+    # Ordered by a DB-side match count before slicing — without this, a
+    # near-universal word like "গোপালের" (this shop's catalog is themed
+    # entirely around "Gopal" products) can match hundreds of rows, and an
+    # unordered LIMIT 50 could silently cut the actual best match before the
+    # more precise whole-word scoring below ever gets to see it. This
+    # ordering is still substring-based (not whole-word) so it's approximate,
+    # but it only decides what makes it into the top-50 candidate window —
+    # the whole-word relevance() scoring below remains the authority on the
+    # final result.
     candidates = list(
         Product.objects.filter(is_active=True)
         .filter(word_filter)
+        .annotate(match_score=match_score)
         .select_related('category').prefetch_related('images')
-        .distinct()[:50]
+        .distinct().order_by('-match_score')[:50]
     )
 
     # Exact/substring matching found nothing — try typo-tolerant matching
