@@ -121,7 +121,15 @@ def _find_products(query: str, limit: int = 8) -> list:
         haystack = f'{p.name_bn} {p.name_en} {p.description_bn} {p.description_en}'.lower()
         return sum(1 for w in all_words if w.lower() in haystack)
 
-    return sorted(candidates, key=relevance, reverse=True)[:limit]
+    scored = [(relevance(p), p) for p in candidates]
+    best_score = max(score for score, _ in scored)
+    # Keep only the best-matching tier, not everything that shares even one
+    # generic word — e.g. searching "beguni khati kotton dress" (purple pure
+    # cotton dress) was returning EVERY color variant of the same base dress,
+    # because they all match "khati"/"kotton"/"dress"; only the purple one
+    # also matches "beguni", so only it (and anything else tied with it)
+    # should surface, not every same-word sibling product.
+    return [p for score, p in scored if score == best_score][:limit]
 
 
 def _search_products(query: str) -> dict:
