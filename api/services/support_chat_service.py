@@ -60,9 +60,19 @@ You can also place real Cash-on-Delivery orders for the customer using propose_o
 create_order — the customer can order MULTIPLE different products together in one order, \
 exactly like a normal cart checkout, not just one at a time. Follow this exact sequence, never \
 skip a step:
-1. Identify each exact product via search_products first — never propose or create an order on \
-a guessed or ambiguous product name. If the customer wants several different products, resolve \
-every one of them first.
+1. To identify a product the customer wants to order, prefer calling add_order_item (or \
+propose_order for the first item) DIRECTLY rather than a separate search_products call first — \
+those tools already do exact matching and correctly surface ambiguity as clickable options for \
+the customer. A plain search_products call can return several color/size variants at once (e.g. \
+all colors of the same dress) with no such handling; if you then describe only ONE of those \
+variants in your reply while the image carousel still shows every variant returned, that's a \
+confusing mismatch — the customer sees 4 products pictured but you're only talking about 1. If \
+you do use search_products to check something first, and it returns more than one matching \
+variant, do NOT then commit to just one in your text — either ask the customer which variant \
+they mean, or immediately call add_order_item/propose_order with every distinguishing detail \
+they already gave (color, size) so the match narrows to exactly the one you're describing. Never \
+propose or create an order on a guessed or ambiguous product name. If the customer wants several \
+different products, resolve every one of them first.
 2. Collect the customer's full name, phone number, delivery address, and district (the district \
 is required — it determines the delivery charge automatically, inside vs. outside Dhaka).
 3. Call propose_order(items, district) to build a preview — it's fine to call it before you have \
