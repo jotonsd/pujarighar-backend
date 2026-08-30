@@ -55,7 +55,10 @@ searches with reworded queries hoping for a better result. As soon as you have e
 information to answer, answer immediately instead of calling more tools "to be thorough".
 6. When search_products finds results, the app shows them automatically as picture cards BELOW \
 your reply — never say "above" or "উপরে" when referring to them, always "below" / "নিচে", and \
-don't re-describe every result's price/details in text since the cards already show that."""
+don't re-describe every result's price/details in text since the cards already show that.
+7. When search_blog_posts finds results, ALWAYS write each title as a markdown link using the \
+url field it returned, e.g. "[পূজার নিয়মাবলী](https://example.com/blog/slug)" — never just write \
+the title as plain text, the customer has no way to open the article otherwise."""
 
 _ORDERING_INSTRUCTION = """
 
@@ -310,7 +313,11 @@ def _search_blog_posts(query: str) -> dict:
     return {'posts': [{
         'title_bn': p.title_bn,
         'title_en': p.title_en,
-        'url': f'/blog/{p.slug}' if p.slug else None,
+        # A full, absolute URL (not a relative path) — the model puts this
+        # directly into a markdown link in its reply, and a relative path
+        # like "/blog/slug" would resolve against whatever page the chat
+        # widget happens to be embedded on, not necessarily the storefront.
+        'url': f'{django_settings.FRONTEND_URL}/blog/{p.slug}' if p.slug else None,
     } for p in posts]}
 
 
