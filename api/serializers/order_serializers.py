@@ -138,6 +138,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         model  = SalesOrder
         fields = [
             'id', 'order_number', 'customer', 'customer_email', 'status', 'status_label',
+            'source',
             'payment_method', 'payment_status',
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_address_en',

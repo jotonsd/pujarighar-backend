@@ -465,6 +465,12 @@ PAYMENT_STATUS_CHOICES = [
     ('PAID',   'পরিশোধিত'),
 ]
 
+ORDER_SOURCE_CHOICES = [
+    ('WEBSITE',    'ওয়েবসাইট'),
+    ('AI_CHATBOT', 'ব্রাহ্মণ AI'),
+    ('POS',        'POS'),
+]
+
 ALLOWED_TRANSITIONS = {
     'PENDING':    ['CONFIRMED', 'CANCELLED'],
     'CONFIRMED':  ['PACKED',    'CANCELLED'],
@@ -514,6 +520,11 @@ class SalesOrder(BaseModel):
     cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     notes_bn            = models.TextField(blank=True)
     notes_en            = models.TextField(blank=True)
+    # Which channel placed this order — lets admin staff tell an AI-placed
+    # order, a staff POS sale, and a normal website checkout apart at a
+    # glance. WEBSITE covers both a real anonymous guest and a logged-in
+    # customer's own self-checkout.
+    source              = models.CharField(max_length=20, choices=ORDER_SOURCE_CHOICES, default='WEBSITE')
 
     class Meta:
         ordering = ['-created_at']
