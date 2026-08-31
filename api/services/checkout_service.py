@@ -106,6 +106,7 @@ class CheckoutService:
             shipping_district   = s_district,
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
+            source              = 'WEBSITE',
             subtotal            = subtotal,
             discount_amount     = discount_amount,
             first_order_discount_amount = first_order_discount_amount,

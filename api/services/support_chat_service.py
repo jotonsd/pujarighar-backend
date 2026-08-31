@@ -670,6 +670,7 @@ def _create_order(
         'address_en': address,
         'district': district or '',
         'payment_method': 'COD',
+        'placed_via_ai': True,
     }
     try:
         resp = requests.post(f'{django_settings.BACKEND_URL}/api/cart/guest-checkout/', json=payload, timeout=15)

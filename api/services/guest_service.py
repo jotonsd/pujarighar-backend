@@ -35,6 +35,16 @@ class GuestCheckoutService:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
+        # is_pos identifies a staff POS sale unambiguously (passed by the
+        # caller, never by request data); placed_via_ai is the AI chatbot's
+        # own signal on the same public endpoint a real guest also uses, so
+        # it's the only way to tell those two apart here.
+        if is_pos:
+            source = 'POS'
+        elif validated_data.get('placed_via_ai'):
+            source = 'AI_CHATBOT'
+        else:
+            source = 'WEBSITE'
 
         # Validate stock for all items
         for item in items:
@@ -80,6 +90,7 @@ class GuestCheckoutService:
             shipping_thana      = shipping['thana'],
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
+            source                = source,
             subtotal              = subtotal,
             discount_amount       = discount_amount,
             staff_discount_amount = extra_discount,
