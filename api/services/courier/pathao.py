@@ -51,7 +51,13 @@ class PathaoCourierService(BaseCourierService):
             detail = resp.text[:300]
             try:
                 body = resp.json()
-                detail = body.get('message') or body.get('error') or str(body)
+                message = body.get('message') or body.get('error') or str(body)
+                # A 422 "Please fix the given errors" on its own says nothing
+                # — Pathao's validation responses (Laravel-style) put the
+                # actual field-level reasons in a separate "errors" object,
+                # e.g. {"errors": {"recipient_city": ["invalid city id"]}}.
+                errors = body.get('errors')
+                detail = f'{message} — {errors}' if errors else message
             except ValueError:
                 pass
             logger.error(f'Pathao request failed: {method} {url} — {resp.status_code} {detail}', exc_info=True)
