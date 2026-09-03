@@ -328,13 +328,14 @@ class CourierService:
         URL is reachable and correctly configured), so this is purely an
         informational ping for admins, not tied to any order."""
         admins = User.objects.filter(role__code='ADMIN', is_active=True)
+        provider_short = provider.code.title()
         notifications = [
             Notification(
                 user=admin,
-                title_bn=f'ওয়েবহুক ভেরিফাই হয়েছে — {provider.name}',
-                title_en=f'Webhook Verified — {provider.name}',
-                body_bn=f'{provider.name} আপনার ওয়েবহুক ইউআরএল সফলভাবে ভেরিফাই করেছে।',
-                body_en=f'{provider.name} successfully verified your webhook URL.',
+                title_bn=f'ওয়েবহুক ভেরিফাই হয়েছে — {provider_short}',
+                title_en=f'Webhook Verified — {provider_short}',
+                body_bn=f'{provider_short}: আপনার ওয়েবহুক ইউআরএল সফলভাবে ভেরিফাই করেছে।',
+                body_en=f'{provider_short}: successfully verified your webhook URL.',
                 reference_type='COURIER_WEBHOOK_VERIFIED',
             )
             for admin in admins
@@ -346,13 +347,14 @@ class CourierService:
         admins = User.objects.filter(role__code='ADMIN', is_active=True)
         order = consignment.order
         label_bn, label_en = self._PATHAO_EVENT_LABELS.get(consignment.status, (consignment.status, consignment.status))
+        provider_short = consignment.provider.code.title()
         notifications = [
             Notification(
                 user=admin,
                 title_bn=f'কুরিয়ার স্ট্যাটাস — {order.order_number}',
                 title_en=f'Courier Status — {order.order_number}',
-                body_bn=f'{consignment.provider.name} জানিয়েছে: অর্ডার #{order.order_number} এখন **{label_bn}**।',
-                body_en=f'{consignment.provider.name} reports order #{order.order_number} is now **{label_en}**.',
+                body_bn=f'{provider_short}: অর্ডার #{order.order_number} এখন **{label_bn}**।',
+                body_en=f'{provider_short}: Order #{order.order_number} is now **{label_en}**.',
                 reference_type='COURIER_STATUS',
                 reference_id=order.id,
             )
