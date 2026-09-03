@@ -430,6 +430,28 @@ def send_order_delivered(order):
         )
 
 
+def send_order_returned(order):
+    """Admin notification only (email + Telegram) — no customer email, no
+    SMS, unlike send_order_cancelled/send_order_delivered."""
+    admins = _admin_emails()
+    if admins:
+        body = _base_html(
+            f"Order Returned #{order.order_number}",
+            f"""
+            <p>An order has been marked as returned.</p>
+            <p><strong>Order #:</strong> {order.order_number}<br>
+            <strong>Customer:</strong> {_customer_display(order)}</p>
+            {_order_summary_html(order, False)}
+            """
+        )
+        _send_async(f"[PujariGhar] Order #{order.order_number} Returned", body, admins)
+
+    send_telegram_message(
+        f"↩️ <b>Order Returned #{order.order_number}</b>\n"
+        f"Customer: {_customer_display(order)}"
+    )
+
+
 # ── Promotional / marketing emails ──────────────────────────────────────────────
 
 _PROMO_PREF_FIELD = {

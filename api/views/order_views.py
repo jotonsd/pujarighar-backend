@@ -254,9 +254,11 @@ def return_order(request, pk):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         note_bn = request.data.get('note_bn', '')
         note_en = request.data.get('note_en', '')
+        returned = _svc.return_order(order, request.user, note_bn, note_en)
+        mail_service.send_order_returned(returned)
         return ApiResponse(
             message="Order returned",
-            data=SalesOrderSerializer(_svc.return_order(order, request.user, note_bn, note_en), context={'request': request}).data,
+            data=SalesOrderSerializer(returned, context={'request': request}).data,
         )
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
