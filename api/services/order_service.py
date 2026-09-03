@@ -24,7 +24,27 @@ class OrderService:
 
     def list_orders(self, user: User, params: dict):
         role = user.role.code
-        qs   = SalesOrder.objects.select_related('customer', 'delivery').prefetch_related('items', 'status_logs')
+        # Matched to exactly what SalesOrderSerializer walks for a list page:
+        # items -> product -> images (product_image) and -> package_items ->
+        # component (for package products), delivery -> delivery_person ->
+        # profile, courier_consignment -> provider and -> events (tracking
+        # history). Without these, each was a separate query PER ORDER ROW
+        # (N+1 — some of them N+1 *inside* an N+1, for package items) — the
+        # actual cause of a slow list page, not the page size itself.
+        # status_logs was being prefetched here too but the list serializer
+        # never reads it — that was a wasted query on every single page load.
+        qs = (
+            SalesOrder.objects
+            .select_related(
+                'customer', 'delivery', 'delivery__delivery_person', 'delivery__delivery_person__profile',
+                'courier_consignment', 'courier_consignment__provider',
+            )
+            .prefetch_related(
+                'items__product__images',
+                'items__product__package_items__component',
+                'courier_consignment__events',
+            )
+        )
 
         if role == 'CUSTOMER':
             qs = qs.filter(customer=user)
