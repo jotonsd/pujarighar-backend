@@ -322,6 +322,26 @@ class CourierService:
         if event != 'order.created':
             self._notify_admins(consignment)
 
+    def notify_webhook_verified(self, provider: CourierProvider) -> None:
+        """Fired for the one-time webhook_integration handshake — no order/
+        consignment involved (Pathao's dashboard just pinging to confirm the
+        URL is reachable and correctly configured), so this is purely an
+        informational ping for admins, not tied to any order."""
+        admins = User.objects.filter(role__code='ADMIN', is_active=True)
+        notifications = [
+            Notification(
+                user=admin,
+                title_bn=f'ওয়েবহুক ভেরিফাই হয়েছে — {provider.name}',
+                title_en=f'Webhook Verified — {provider.name}',
+                body_bn=f'{provider.name} আপনার ওয়েবহুক ইউআরএল সফলভাবে ভেরিফাই করেছে।',
+                body_en=f'{provider.name} successfully verified your webhook URL.',
+                reference_type='COURIER_WEBHOOK_VERIFIED',
+            )
+            for admin in admins
+        ]
+        Notification.objects.bulk_create(notifications)
+        broadcast_notifications(notifications)
+
     def _notify_admins(self, consignment: CourierConsignment) -> None:
         admins = User.objects.filter(role__code='ADMIN', is_active=True)
         order = consignment.order

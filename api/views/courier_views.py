@@ -299,6 +299,7 @@ def pathao_webhook(request):
         if not provider.webhook_verification_secret:
             logger.warning('Pathao webhook verification failed: no webhook_verification_secret configured for this provider')
             return ApiResponse(message='Not configured', errors='webhook_verification_secret is not set', status_code=500)
+        _svc.notify_webhook_verified(provider)
         return ApiResponse(
             message='Webhook verified',
             status_code=202,
