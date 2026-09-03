@@ -69,7 +69,8 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'পেন্ডিং', 'CONFIRMED': 'নিশ্চিত',
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'ডেলিভারিম্যান নির্ধারিত',
-            'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে', 'CANCELLED': 'বাতিল',
+            'PICKED': 'পিকআপ হয়েছে', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে',
+            'RETURNED': 'ফেরত', 'CANCELLED': 'বাতিল',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=True)
@@ -81,7 +82,8 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'Pending', 'CONFIRMED': 'Confirmed',
             'PACKED': 'Packed', 'ASSIGNED': 'Assigned',
-            'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered', 'CANCELLED': 'Cancelled',
+            'PICKED': 'Picked Up', 'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered',
+            'RETURNED': 'Returned', 'CANCELLED': 'Cancelled',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=False)
@@ -166,14 +168,40 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 
 STATUS_LABELS_BN = {
     'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
-    'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'ON_THE_WAY':'পথে আছে',
+    'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'PICKED':'পিকআপ হয়েছে', 'ON_THE_WAY':'পথে আছে',
     'DELIVERED':'ডেলিভারি হয়েছে', 'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
 }
 STATUS_LABELS_EN = {
     'PENDING':'Pending', 'CONFIRMED':'Confirmed', 'PACKED':'Packed',
-    'ASSIGNED':'Assigned', 'ON_THE_WAY':'On the Way',
+    'ASSIGNED':'Assigned', 'PICKED':'Picked Up', 'ON_THE_WAY':'On the Way',
     'DELIVERED':'Delivered', 'RETURNED':'Returned', 'CANCELLED':'Cancelled',
 }
+
+
+def _mask_phone(phone: str) -> str:
+    """Keeps the edges, masks exactly the middle 6 characters — for a
+    standard 11-digit BD number ("01712345678") that's "017******78"."""
+    if not phone:
+        return phone
+    n = len(phone)
+    if n <= 6:
+        return '*' * n
+    keep_total = n - 6
+    keep_start = (keep_total + 1) // 2
+    keep_end = keep_total - keep_start
+    return phone[:keep_start] + '*' * 6 + phone[n - keep_end:]
+
+
+def _mask_name(name: str) -> str:
+    """Keeps the first word as-is, masks only the last word — a middle
+    word (if any) is left alone too, only the surname is hidden."""
+    if not name:
+        return name
+    words = name.split()
+    if len(words) <= 1:
+        return name
+    words[-1] = '*' * len(words[-1])
+    return ' '.join(words)
 
 
 class OrderTrackingSerializer(serializers.ModelSerializer):
@@ -184,6 +212,13 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
     payment_method_label_en = serializers.SerializerMethodField()
     delivery_info           = serializers.SerializerMethodField()
     courier_tracking_url    = serializers.SerializerMethodField()
+    # Publicly reachable with no login (by order id, or by order number +
+    # phone) — mask the customer's PII before it ever leaves the server,
+    # rather than just hiding it in the UI while still shipping it over
+    # the wire.
+    shipping_name_bn        = serializers.SerializerMethodField()
+    shipping_name_en        = serializers.SerializerMethodField()
+    shipping_phone          = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
@@ -197,6 +232,15 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
             'delivery_info', 'courier_tracking_url',
             'timeline',
         ]
+
+    def get_shipping_name_bn(self, obj):
+        return _mask_name(obj.shipping_name_bn)
+
+    def get_shipping_name_en(self, obj):
+        return _mask_name(obj.shipping_name_en)
+
+    def get_shipping_phone(self, obj):
+        return _mask_phone(obj.shipping_phone)
 
     def get_status_label_bn(self, obj):
         if obj.status == 'ASSIGNED':

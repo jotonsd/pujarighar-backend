@@ -257,6 +257,7 @@ urlpatterns = [
     path('courier/payments/',                       views.list_payments,            name='courier-payment-list'),
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
+    path('courier/webhooks/pathao/',                views.pathao_webhook,           name='courier-webhook-pathao'),
 
     # ─── SMS ────────────────────────────────────────────────────────────────────
     path('sms/settings/',  views.get_sms_settings,    name='sms-settings-get'),

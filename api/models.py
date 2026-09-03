@@ -449,6 +449,7 @@ ORDER_STATUS = [
     ('CONFIRMED',  'নিশ্চিত'),
     ('PACKED',     'প্যাক হয়েছে'),
     ('ASSIGNED',   'ডেলিভারিম্যান নির্ধারিত'),
+    ('PICKED',     'পিকআপ হয়েছে'),
     ('ON_THE_WAY', 'পথে আছে'),
     ('DELIVERED',  'ডেলিভারি হয়েছে'),
     ('RETURNED',   'ফেরত'),
@@ -475,7 +476,13 @@ ALLOWED_TRANSITIONS = {
     'PENDING':    ['CONFIRMED', 'CANCELLED'],
     'CONFIRMED':  ['PACKED',    'CANCELLED'],
     'PACKED':     ['ASSIGNED',  'CANCELLED'],
-    'ASSIGNED':   ['ON_THE_WAY'],
+    # PICKED is an optional waypoint, not a mandatory one — a courier that
+    # reports a distinct pickup event (Pathao) passes through it, but
+    # internal delivery (one admin action, no separate "picked up" click)
+    # and couriers with no such granularity (Steadfast) still go straight
+    # from ASSIGNED to ON_THE_WAY exactly as before.
+    'ASSIGNED':   ['PICKED', 'ON_THE_WAY'],
+    'PICKED':     ['ON_THE_WAY'],
     'ON_THE_WAY': ['DELIVERED'],
     'DELIVERED':  ['RETURNED'],
 }
@@ -1162,6 +1169,15 @@ class CourierProvider(models.Model):
     api_key_encrypted        = models.TextField(blank=True, default='')
     secret_key_encrypted     = models.TextField(blank=True, default='')
     webhook_secret_encrypted = models.TextField(blank=True, default='')
+    # Pathao's webhook setup has its own one-time verification challenge,
+    # separate from webhook_secret_encrypted above (which WE generate and
+    # give to the courier, checked via X-PATHAO-Signature on every real
+    # event) — this one Pathao generates and shows on ITS dashboard when the
+    # webhook URL is registered; our endpoint has to echo it straight back
+    # as a response header to prove we control the URL. Not encrypted: its
+    # confidentiality protects nothing (it's an echo-back token, not a
+    # credential that grants access), unlike the other secret fields here.
+    webhook_verification_secret = models.CharField(max_length=100, blank=True, default='')
     is_active                = models.BooleanField(default=False)
     # OAuth providers (e.g. Pathao) — api_key/secret_key above double as
     # client_id/client_secret for these; username/password are the merchant

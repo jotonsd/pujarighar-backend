@@ -80,7 +80,7 @@ from .courier_views import (
     providers, update_provider, provider_balance, provider_police_stations,
     send_to_courier, courier_status, list_consignments, get_consignment,
     create_return_request, get_return_request, list_return_requests,
-    list_payments, get_payment, steadfast_webhook,
+    list_payments, get_payment, steadfast_webhook, pathao_webhook,
 )
 from .blog_views import (
     list_blog_posts, list_all_blog_posts, get_blog_post_by_slug, get_blog_post,
