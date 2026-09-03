@@ -88,6 +88,27 @@ def update_provider(request, pk):
     return ApiResponse(message='Provider updated', data=CourierProviderSerializer(provider).data)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('courier', 'edit')])
+def regenerate_webhook_secret(request, pk):
+    """Issues a brand-new webhook secret and returns it in plaintext once —
+    same as at provider creation. Needed because there was previously no way
+    to ever see the secret again after that first moment, so if it wasn't
+    copied into the courier's own dashboard correctly at creation time,
+    there was no way to fix a mismatch short of this: get a fresh, known
+    value and paste it into both places."""
+    try:
+        provider = CourierProvider.objects.get(pk=pk)
+    except CourierProvider.DoesNotExist:
+        return ApiResponse(message='Provider not found', errors='Not found', status_code=404)
+
+    provider.webhook_secret_encrypted = encrypt_token(secrets.token_urlsafe(32))
+    provider.save(update_fields=['webhook_secret_encrypted', 'updated_at'])
+    payload = CourierProviderSerializer(provider).data
+    payload['webhook_secret'] = decrypt_token(provider.webhook_secret_encrypted)
+    return ApiResponse(message='Webhook secret regenerated', data=payload)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, has_permission('courier', 'view')])
 def provider_balance(request, pk):

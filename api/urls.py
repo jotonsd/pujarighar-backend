@@ -247,6 +247,7 @@ urlpatterns = [
     # ─── Courier ────────────────────────────────────────────────────────────────
     path('courier/providers/',                    views.providers,                 name='courier-providers'),
     path('courier/providers/<int:pk>/update/',    views.update_provider,           name='courier-provider-update'),
+    path('courier/providers/<int:pk>/regenerate-webhook-secret/', views.regenerate_webhook_secret, name='courier-provider-regenerate-webhook-secret'),
     path('courier/providers/<int:pk>/balance/',   views.provider_balance,          name='courier-provider-balance'),
     path('courier/providers/<int:pk>/police-stations/', views.provider_police_stations, name='courier-provider-police-stations'),
     path('courier/consignments/',                  views.list_consignments,        name='courier-consignment-list'),
