@@ -212,6 +212,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
     payment_method_label_en = serializers.SerializerMethodField()
     delivery_info           = serializers.SerializerMethodField()
     courier_tracking_url    = serializers.SerializerMethodField()
+    is_courier              = serializers.SerializerMethodField()
     # Publicly reachable with no login (by order id, or by order number +
     # phone) — mask the customer's PII before it ever leaves the server,
     # rather than just hiding it in the UI while still shipping it over
@@ -229,9 +230,16 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_district', 'shipping_thana',
             'grand_total', 'created_at',
-            'delivery_info', 'courier_tracking_url',
+            'delivery_info', 'courier_tracking_url', 'is_courier',
             'timeline',
         ]
+
+    def get_is_courier(self, obj):
+        # NOT the same as courier_tracking_url being non-null — Steadfast
+        # has no public tracking page (build_courier_tracking_url returns
+        # None for it), so that field alone can't tell "no courier" apart
+        # from "courier with no public tracker".
+        return bool(getattr(obj, 'courier_consignment', None))
 
     def get_shipping_name_bn(self, obj):
         return _mask_name(obj.shipping_name_bn)
