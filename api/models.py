@@ -528,6 +528,16 @@ class SalesOrder(BaseModel):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # Matches Meta.ordering — the admin order list's default sort,
+            # otherwise a full sequential scan + sort on every page load as
+            # the table grows.
+            models.Index(fields=['-created_at']),
+            # The other columns the admin order list commonly filters by.
+            models.Index(fields=['status']),
+            models.Index(fields=['payment_status']),
+            models.Index(fields=['shipping_phone']),
+        ]
 
     def __str__(self):
         return self.order_number

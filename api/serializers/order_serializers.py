@@ -26,6 +26,11 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
     def get_package_items(self, obj):
         if not obj.product.is_package:
             return []
+        # Plain .all() (not .select_related(...).all()) so this actually
+        # reads from the prefetch_related('items__product__package_items__component')
+        # cache instead of silently re-querying — calling select_related() or
+        # any other filter on a prefetched related manager bypasses the
+        # prefetch cache and always hits the DB fresh.
         return [
             {
                 'component_name_bn': pi.component.name_bn,
@@ -33,7 +38,7 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
                 'component_sku':     pi.component.sku,
                 'quantity':          str(pi.quantity),
             }
-            for pi in obj.product.package_items.select_related('component').all()
+            for pi in obj.product.package_items.all()
         ]
 
 
