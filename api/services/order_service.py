@@ -179,10 +179,21 @@ class OrderService:
         logger.info(f'Delivery charge recalculated for order {order.order_number}: ৳{new_charge} (weight={weight}kg, zone={zone})')
         return order
 
-    def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
-        order = self._transition(order, 'ON_THE_WAY', user)
+    def pick_up(self, order: SalesOrder, user: User) -> SalesOrder:
+        order = self._transition(order, 'PICKED', user)
         order.delivery.picked_up_at = timezone.now()
         order.delivery.save(update_fields=['picked_up_at'])
+        return order
+
+    def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
+        order = self._transition(order, 'ON_THE_WAY', user)
+        # Only set picked_up_at here if pick_up() didn't already (ASSIGNED
+        # can go straight to ON_THE_WAY, skipping PICKED entirely — see
+        # ALLOWED_TRANSITIONS) — don't clobber the real, earlier pickup
+        # timestamp with "now" if it was already recorded.
+        if not order.delivery.picked_up_at:
+            order.delivery.picked_up_at = timezone.now()
+            order.delivery.save(update_fields=['picked_up_at'])
         return order
 
     @transaction.atomic

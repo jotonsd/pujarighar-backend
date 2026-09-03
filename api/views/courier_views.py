@@ -43,6 +43,7 @@ def providers(request):
         base_url=data.get('base_url', ''),
         is_active=bool(data.get('is_active', False)),
         store_id=data.get('store_id', ''),
+        webhook_verification_secret=data.get('webhook_verification_secret', ''),
     )
     if data.get('api_key'):
         provider.api_key_encrypted = encrypt_token(data['api_key'])
@@ -70,7 +71,7 @@ def update_provider(request, pk):
         return ApiResponse(message='Provider not found', errors='Not found', status_code=404)
 
     data = request.data
-    for field in ('name', 'base_url', 'store_id'):
+    for field in ('name', 'base_url', 'store_id', 'webhook_verification_secret'):
         if field in data:
             setattr(provider, field, data[field])
     if 'is_active' in data:
@@ -275,4 +276,43 @@ def steadfast_webhook(request):
         return ApiResponse(message='Webhook received successfully.')
     except Exception as e:
         logger.error(f'Courier webhook error: {e}', exc_info=True)
+        return ApiResponse(message='Failed to process webhook', errors=str(e), status_code=400)
+
+
+@api_view(['POST'])
+@authentication_classes([])  # same reasoning as steadfast_webhook above — this
+                             # endpoint's auth is Pathao's own signature header,
+                             # not one of our JWTs
+@permission_classes([AllowAny])
+def pathao_webhook(request):
+    logger.info(f'Pathao webhook received: {request.data}')
+    provider = CourierProvider.objects.filter(code='PATHAO').first()
+    if not provider:
+        logger.warning('Pathao webhook rejected: no PATHAO provider configured')
+        return ApiResponse(message='Invalid or missing signature', errors='Unauthorized', status_code=401)
+
+    # One-time dashboard verification handshake, sent when the webhook URL is
+    # first registered (and whenever Pathao re-checks it) — not signed the
+    # same way real events are, just has to echo back the value their
+    # dashboard shows, proving we control this URL.
+    if request.data.get('event') == 'webhook_integration':
+        if not provider.webhook_verification_secret:
+            logger.warning('Pathao webhook verification failed: no webhook_verification_secret configured for this provider')
+            return ApiResponse(message='Not configured', errors='webhook_verification_secret is not set', status_code=500)
+        return ApiResponse(
+            message='Webhook verified',
+            status_code=202,
+            headers={'X-Pathao-Merchant-Webhook-Integration-Secret': provider.webhook_verification_secret},
+        )
+
+    signature = request.META.get('HTTP_X_PATHAO_SIGNATURE', '')
+    if not signature or decrypt_token(provider.webhook_secret_encrypted) != signature:
+        logger.warning(f'Pathao webhook rejected: signature mismatch (got {signature[:8] + "..." if signature else "(empty)"})')
+        return ApiResponse(message='Invalid or missing signature', errors='Unauthorized', status_code=401)
+
+    try:
+        _svc.handle_pathao_webhook(request.data)
+        return ApiResponse(message='Webhook received successfully.')
+    except Exception as e:
+        logger.error(f'Pathao webhook error: {e}', exc_info=True)
         return ApiResponse(message='Failed to process webhook', errors=str(e), status_code=400)

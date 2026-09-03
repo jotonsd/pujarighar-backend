@@ -224,7 +224,7 @@ def popular_by_category(request):
         sold_sq = Subquery(
             SalesOrderItem.objects.filter(
                 product_id=OuterRef('pk'),
-                order__status__in=['CONFIRMED', 'PACKED', 'ASSIGNED', 'ON_THE_WAY', 'DELIVERED'],
+                order__status__in=['CONFIRMED', 'PACKED', 'ASSIGNED', 'PICKED', 'ON_THE_WAY', 'DELIVERED'],
             ).values('product_id').annotate(total=Sum('quantity')).values('total')[:1],
             output_field=DecimalField(max_digits=12, decimal_places=2),
         )
