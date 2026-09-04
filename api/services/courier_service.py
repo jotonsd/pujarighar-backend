@@ -8,6 +8,7 @@ from api.models import (
     CourierConsignment, CourierProvider, CourierReturnRequest, CourierTrackingEvent,
     Notification, SalesOrder, User,
 )
+from api.services import mail_service
 from api.services.courier.registry import get_courier_service
 from api.services.notification_ws import broadcast_notifications
 from api.services.order_service import OrderService
@@ -233,9 +234,11 @@ class CourierService:
             elif action == 'DELIVER' and order.status in ('ASSIGNED', 'PICKED', 'ON_THE_WAY'):
                 if order.status in ('ASSIGNED', 'PICKED'):
                     order = order_svc.dispatch(order, user)
-                order_svc.deliver(order, user)
+                delivered = order_svc.deliver(order, user)
+                mail_service.send_order_delivered(delivered)
             elif action == 'RETURN' and order.status == 'DELIVERED':
-                order_svc.return_order(order, user)
+                returned = order_svc.return_order(order, user)
+                mail_service.send_order_returned(returned)
         except Exception as e:
             logger.warning(f'Courier webhook: could not auto-apply {action} to order {order.order_number}: {e}')
 
