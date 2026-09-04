@@ -1242,6 +1242,26 @@ class CourierReturnRequest(BaseModel):
     created_by           = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
 
 
+# ─── Short Links ──────────────────────────────────────────────────────────────
+# Self-hosted URL shortener — used to fit long links (e.g. a UUID-keyed order
+# tracking URL) into SMS without eating extra segments, without depending on
+# a third-party shortening service.
+
+def _gen_short_code():
+    chars = string.ascii_letters + string.digits
+    while True:
+        code = ''.join(secrets.choice(chars) for _ in range(7))
+        if not ShortLink.objects.filter(code=code).exists():
+            return code
+
+
+class ShortLink(models.Model):
+    code       = models.CharField(max_length=12, unique=True, default=_gen_short_code, editable=False)
+    target_url = models.URLField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+    hits       = models.PositiveIntegerField(default=0)
+
+
 # ─── Blog ───────────────────────────────────────────────────────────────────────
 # Content-marketing pages (festival guides, buying guides, FAQs) — the guide's
 # "biggest opportunity" since this kind of content ranks easier than product pages.

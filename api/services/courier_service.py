@@ -172,14 +172,21 @@ class CourierService:
 
     # Pathao's webhook "event" values -> the same action vocabulary as above,
     # now with 'PICK' for the dedicated ASSIGNED -> PICKED waypoint —
-    # order.picked is the rider physically picking the package up from us,
-    # distinct from order.in-transit/assigned-for-delivery (later, -> ON_THE_WAY).
+    # order.picked is the rider physically picking the package up from us.
+    # order.at-the-sorting-hub also maps to PICK: Pathao doesn't reliably
+    # send a discrete order.picked event for every parcel (confirmed from
+    # real traffic), but reaching the sorting hub is itself proof the rider
+    # already picked it up, so it's just as valid a signal — this way
+    # PICKED shows up as soon as that happens rather than waiting for the
+    # next event (in-transit/assigned-for-delivery, -> ON_THE_WAY) to
+    # backfill it retroactively.
     # order.returned-to-merchant is the terminal event of Pathao's more
     # granular return flow (return-id-created -> return-in-transit ->
     # returned-to-merchant) and maps to the same RETURN action as the plain
     # order.returned event — whichever one a given store actually fires.
     _PATHAO_EVENT_ACTIONS = {
         'order.picked': 'PICK',
+        'order.at-the-sorting-hub': 'PICK',
         'order.in-transit': 'DISPATCH',
         'order.assigned-for-delivery': 'DISPATCH',
         'order.delivered': 'DELIVER',
@@ -257,8 +264,17 @@ class CourierService:
             if action == 'PICK' and order.status == 'ASSIGNED':
                 order_svc.pick_up(order, user)
             elif action == 'DISPATCH' and order.status in ('ASSIGNED', 'PICKED'):
+                # A later-stage event (in-transit, at-the-sorting-hub, ...)
+                # arriving while still ASSIGNED means the courier skipped
+                # sending a discrete pickup event — the package obviously
+                # was picked up regardless, so backfill PICKED first rather
+                # than jumping straight to ON_THE_WAY and losing that step.
+                if order.status == 'ASSIGNED':
+                    order = order_svc.pick_up(order, user)
                 order_svc.dispatch(order, user)
             elif action == 'DELIVER' and order.status in ('ASSIGNED', 'PICKED', 'ON_THE_WAY'):
+                if order.status == 'ASSIGNED':
+                    order = order_svc.pick_up(order, user)
                 if order.status in ('ASSIGNED', 'PICKED'):
                     order = order_svc.dispatch(order, user)
                 delivered = order_svc.deliver(order, user)
