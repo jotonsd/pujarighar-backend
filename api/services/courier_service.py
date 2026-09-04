@@ -278,11 +278,17 @@ class CourierService:
         )
         logger.info(f'Courier webhook applied to consignment {consignment.id} ({notification_type})')
 
+        # Auto-transition only applies for a real status payload
+        # (delivery_status) — any other notification_type has no actual
+        # status in it, just stale/leftover data, so it must never drive an
+        # order transition. Notifying admins, on the other hand, happens for
+        # every webhook hit no matter the type — _notify_admins shows the
+        # real tracking message when there's no status change to report
+        # (e.g. tracking_update), or the usual "now **status**" wording when
+        # there is one.
         if notification_type == 'delivery_status':
             self._apply_courier_status_to_order(consignment, self._STEADFAST_STATUS_ACTIONS.get(raw_status))
-            # Only fan out a notification for real status changes, not every
-            # low-signal tracking_update ping (e.g. "arrived at sorting center").
-            self._notify_admins(consignment)
+        self._notify_admins(consignment, tracking_message='' if notification_type == 'delivery_status' else message)
 
     @transaction.atomic
     def handle_pathao_webhook(self, payload: dict) -> None:
@@ -319,8 +325,11 @@ class CourierService:
         logger.info(f'Pathao webhook applied to consignment {consignment.id} ({event})')
 
         self._apply_courier_status_to_order(consignment, self._PATHAO_EVENT_ACTIONS.get(event))
-        if event != 'order.created':
-            self._notify_admins(consignment)
+        # Every webhook hit notifies admins, no exceptions — including
+        # order.created, even though that moment is also visible immediately
+        # in the UI response to "Send to Courier" (this is Pathao's own
+        # independent confirmation of the same thing, worth surfacing too).
+        self._notify_admins(consignment)
 
     def notify_webhook_verified(self, provider: CourierProvider) -> None:
         """Fired for the one-time webhook_integration handshake — no order/
@@ -343,18 +352,31 @@ class CourierService:
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
 
-    def _notify_admins(self, consignment: CourierConsignment) -> None:
+    def _notify_admins(self, consignment: CourierConsignment, tracking_message: str = '') -> None:
+        """tracking_message: for a low-signal update with no actual status
+        change (Steadfast's notification_type=tracking_update — a note like
+        "customer asked to deliver to the office" rather than a status
+        transition), showing that note is far more useful than repeating an
+        unchanged status label. Falls back to the usual "now **status**"
+        wording when there's no such note (the normal delivery_status /
+        Pathao-event case)."""
         admins = User.objects.filter(role__code='ADMIN', is_active=True)
         order = consignment.order
-        label_bn, label_en = self._PATHAO_EVENT_LABELS.get(consignment.status, (consignment.status, consignment.status))
         provider_short = consignment.provider.code.title()
+        if tracking_message:
+            body_bn = f'{provider_short}: অর্ডার #{order.order_number} — {tracking_message}'
+            body_en = f'{provider_short}: Order #{order.order_number} — {tracking_message}'
+        else:
+            label_bn, label_en = self._PATHAO_EVENT_LABELS.get(consignment.status, (consignment.status, consignment.status))
+            body_bn = f'{provider_short}: অর্ডার #{order.order_number} এখন **{label_bn}**।'
+            body_en = f'{provider_short}: Order #{order.order_number} is now **{label_en}**.'
         notifications = [
             Notification(
                 user=admin,
                 title_bn=f'কুরিয়ার স্ট্যাটাস — {order.order_number}',
                 title_en=f'Courier Status — {order.order_number}',
-                body_bn=f'{provider_short}: অর্ডার #{order.order_number} এখন **{label_bn}**।',
-                body_en=f'{provider_short}: Order #{order.order_number} is now **{label_en}**.',
+                body_bn=body_bn,
+                body_en=body_en,
                 reference_type='COURIER_STATUS',
                 reference_id=order.id,
             )
