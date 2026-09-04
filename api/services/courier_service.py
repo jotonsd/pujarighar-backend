@@ -172,14 +172,19 @@ class CourierService:
 
     # Pathao's webhook "event" values -> the same action vocabulary as above,
     # now with 'PICK' for the dedicated ASSIGNED -> PICKED waypoint —
-    # order.pickup is the rider physically picking the package up from us,
+    # order.picked is the rider physically picking the package up from us,
     # distinct from order.in-transit/assigned-for-delivery (later, -> ON_THE_WAY).
+    # order.returned-to-merchant is the terminal event of Pathao's more
+    # granular return flow (return-id-created -> return-in-transit ->
+    # returned-to-merchant) and maps to the same RETURN action as the plain
+    # order.returned event — whichever one a given store actually fires.
     _PATHAO_EVENT_ACTIONS = {
-        'order.pickup': 'PICK',
+        'order.picked': 'PICK',
         'order.in-transit': 'DISPATCH',
         'order.assigned-for-delivery': 'DISPATCH',
         'order.delivered': 'DELIVER',
         'order.returned': 'RETURN',
+        'order.returned-to-merchant': 'RETURN',
     }
 
     # Pathao's raw event slugs read poorly in an admin notification
@@ -190,7 +195,7 @@ class CourierService:
         'order.updated': ('অর্ডার আপডেট হয়েছে', 'Order Updated'),
         'order.pickup-requested': ('পিকআপ অনুরোধ করা হয়েছে', 'Pickup Requested'),
         'order.assigned-for-pickup': ('পিকআপের জন্য নির্ধারিত', 'Assigned For Pickup'),
-        'order.pickup': ('পিকআপ হয়েছে', 'Picked Up'),
+        'order.picked': ('পিকআপ হয়েছে', 'Picked Up'),
         'order.pickup-failed': ('পিকআপ ব্যর্থ হয়েছে', 'Pickup Failed'),
         'order.pickup-cancelled': ('পিকআপ বাতিল হয়েছে', 'Pickup Cancelled'),
         'order.at-the-sorting-hub': ('সর্টিং হাবে পৌঁছেছে', 'At the Sorting Hub'),
@@ -202,10 +207,32 @@ class CourierService:
         'order.returned': ('ফেরত এসেছে', 'Returned'),
         'order.delivery-failed': ('ডেলিভারি ব্যর্থ হয়েছে', 'Delivery Failed'),
         'order.on-hold': ('হোল্ডে আছে', 'On Hold'),
-        'order.payment-invoice': ('পেমেন্ট ইনভয়েস', 'Payment Invoice'),
+        'order.paid': ('পেমেন্ট হয়েছে', 'Paid'),
         'order.paid-return': ('পেইড রিটার্ন', 'Paid Return'),
-        'order.exchange': ('এক্সচেঞ্জ', 'Exchange'),
+        'order.exchanged': ('এক্সচেঞ্জ হয়েছে', 'Exchanged'),
+        'order.return-id-created': ('রিটার্ন আইডি তৈরি হয়েছে', 'Return ID Created'),
+        'order.return-in-transit': ('রিটার্ন ট্রানজিটে আছে', 'Return In Transit'),
+        'order.returned-to-merchant': ('মার্চেন্টের কাছে ফেরত এসেছে', 'Returned to Merchant'),
     }
+
+    # Structural/noise fields present on every Pathao webhook payload (either
+    # already parsed explicitly, or carrying no useful per-event info, like
+    # updated_at/timestamp/store_id) — anything else Pathao includes
+    # (invoice_id, return_consignment_id, return_type, etc.) is unknown ahead
+    # of time and varies by event, so rather than guessing field names we
+    # surface whatever's left over verbatim (see _pathao_extra_note below)
+    # instead of silently dropping it.
+    _PATHAO_KNOWN_KEYS = {
+        'consignment_id', 'merchant_order_id', 'event', 'collected_amount',
+        'delivery_fee', 'reason', 'updated_at', 'timestamp', 'store_id',
+    }
+
+    def _pathao_extra_note(self, payload: dict) -> str:
+        extra = {
+            k: v for k, v in payload.items()
+            if k not in self._PATHAO_KNOWN_KEYS and v not in (None, '', [], {})
+        }
+        return ', '.join(f'{k.replace("_", " ").title()}: {v}' for k, v in extra.items())
 
     def _get_system_user(self) -> User:
         return User.objects.filter(role__code='ADMIN').first()
@@ -319,10 +346,12 @@ class CourierService:
         consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
         consignment.save()
 
+        extra_note = self._pathao_extra_note(payload)
+        message = payload.get('reason', '') or extra_note
         CourierTrackingEvent.objects.create(
             consignment=consignment,
             status=event,
-            message=payload.get('reason', ''),
+            message=message,
             source='WEBHOOK',
         )
         logger.info(f'Pathao webhook applied to consignment {consignment.id} ({event})')
@@ -332,7 +361,9 @@ class CourierService:
         # order.created, even though that moment is also visible immediately
         # in the UI response to "Send to Courier" (this is Pathao's own
         # independent confirmation of the same thing, worth surfacing too).
-        self._notify_admins(consignment)
+        # extra_note surfaces any extra field Pathao sent on this event
+        # (rider info, hub, etc.) alongside the usual "now **status**" label.
+        self._notify_admins(consignment, extra_note=extra_note)
 
     def notify_webhook_verified(self, provider: CourierProvider) -> None:
         """Fired for the one-time webhook_integration handshake — no order/
@@ -355,14 +386,16 @@ class CourierService:
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
 
-    def _notify_admins(self, consignment: CourierConsignment, tracking_message: str = '') -> None:
+    def _notify_admins(self, consignment: CourierConsignment, tracking_message: str = '', extra_note: str = '') -> None:
         """tracking_message: for a low-signal update with no actual status
         change (Steadfast's notification_type=tracking_update — a note like
         "customer asked to deliver to the office" rather than a status
         transition), showing that note is far more useful than repeating an
         unchanged status label. Falls back to the usual "now **status**"
         wording when there's no such note (the normal delivery_status /
-        Pathao-event case)."""
+        Pathao-event case). extra_note: additional detail (e.g. rider name/
+        phone Pathao included on this event) appended alongside whichever
+        wording above was used, rather than replacing it."""
         admins = User.objects.filter(role__code='ADMIN', is_active=True)
         order = consignment.order
         provider_short = consignment.provider.code.title()
@@ -373,6 +406,9 @@ class CourierService:
             label_bn, label_en = self._PATHAO_EVENT_LABELS.get(consignment.status, (consignment.status, consignment.status))
             body_bn = f'{provider_short}: অর্ডার #{order.order_number} এখন **{label_bn}**।'
             body_en = f'{provider_short}: Order #{order.order_number} is now **{label_en}**.'
+        if extra_note:
+            body_bn += f' ({extra_note})'
+            body_en += f' ({extra_note})'
         notifications = [
             Notification(
                 user=admin,
