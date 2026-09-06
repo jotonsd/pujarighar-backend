@@ -452,6 +452,7 @@ ORDER_STATUS = [
     ('PICKED',     'পিকআপ হয়েছে'),
     ('ON_THE_WAY', 'পথে আছে'),
     ('DELIVERED',  'ডেলিভারি হয়েছে'),
+    ('PARTIALLY_DELIVERED', 'আংশিক ডেলিভারি হয়েছে'),
     ('RETURNED',   'ফেরত'),
     ('CANCELLED',  'বাতিল'),
 ]
@@ -483,8 +484,14 @@ ALLOWED_TRANSITIONS = {
     # from ASSIGNED to ON_THE_WAY exactly as before.
     'ASSIGNED':   ['PICKED', 'ON_THE_WAY'],
     'PICKED':     ['ON_THE_WAY'],
-    'ON_THE_WAY': ['DELIVERED'],
-    'DELIVERED':  ['RETURNED'],
+    # PARTIALLY_DELIVERED covers two real cases: the courier reports it
+    # directly while still ON_THE_WAY, or (more common in practice) an order
+    # already marked DELIVERED turns out on reconciliation to have had some
+    # items rejected/returned — partial_deliver() (order_service.py) handles
+    # both, reversing the already-posted payment/cashback/referral journals
+    # in the second case rather than assuming a clean slate.
+    'ON_THE_WAY': ['DELIVERED', 'PARTIALLY_DELIVERED'],
+    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED'],
 }
 
 

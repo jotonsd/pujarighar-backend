@@ -9,7 +9,7 @@ from api.services.guest_service import GuestCheckoutService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
-    AddOrderItemSerializer,
+    AddOrderItemSerializer, PartialDeliverSerializer,
 )
 from api.services.order_service import OrderService
 from api.services import mail_service
@@ -242,6 +242,34 @@ def deliver_order(request, pk):
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
+def partial_deliver_order(request, pk):
+    try:
+        order = _svc.get_order(pk)
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+            return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message="Order not found", errors="Not found", status_code=404)
+
+    serializer = PartialDeliverSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+    try:
+        d = serializer.validated_data
+        updated = _svc.partial_deliver(
+            order, request.user, d['items'],
+            d.get('note_bn', ''), d.get('note_en', ''),
+        )
+        return ApiResponse(
+            message="Order marked as partially delivered",
+            data=SalesOrderSerializer(updated, context={'request': request}).data,
+        )
+    except Exception as e:
+        logger.error(f"Partial deliver error: {e}", exc_info=True)
         return api_error(e)
 
 

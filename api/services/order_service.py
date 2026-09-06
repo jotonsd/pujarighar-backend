@@ -446,6 +446,91 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def partial_deliver(self, order: SalesOrder, user: User, returned_items: list,
+                        note_bn: str = '', note_en: str = '') -> SalesOrder:
+        """returned_items: [{'item_id': <SalesOrderItem id>, 'quantity': Decimal}, ...] —
+        the items (and how much of each) that did NOT actually reach the
+        customer. Always a manual, admin-picked call — couriers only ever
+        report a lump collected_amount, never which item failed, so there's
+        nothing to auto-drive this from a webhook.
+
+        Reachable from ON_THE_WAY (courier reports the shortfall directly)
+        or from an already-DELIVERED order (the more common real case: full
+        delivery got recorded first, and the gap only surfaces once COD is
+        reconciled) — the latter has already posted the full payment/
+        cashback/referral journals via deliver(), so those get reversed for
+        just the returned slice here rather than assuming a clean slate.
+
+        No cashback or referral bonus for the delivered portion either way
+        (deliberately skipped, not prorated) — mirrors return_order()'s
+        all-or-nothing treatment rather than inventing a partial-credit rule.
+        """
+        came_from_delivered = order.status == 'DELIVERED'
+
+        # Validate + resolve every returned line BEFORE transitioning, so the
+        # auto-generated item summary can be appended to the status log's
+        # note in the same _transition() call that creates it (rather than
+        # editing the log row after the fact).
+        items_by_id = {str(i.id): i for i in order.items.select_related('product')}
+        resolved = []
+        for entry in returned_items:
+            item = items_by_id.get(str(entry['item_id']))
+            if not item:
+                raise ValidationError({
+                    'message_bn': 'অর্ডারে এই আইটেম পাওয়া যায়নি',
+                    'message_en': 'Item not found on this order',
+                })
+            qty = Decimal(str(entry['quantity']))
+            if qty <= 0 or qty > item.quantity:
+                raise ValidationError({
+                    'message_bn': f'{item.product_name_bn} এর জন্য সঠিক পরিমাণ দিন',
+                    'message_en': f'Enter a valid quantity for {item.product_name_en}',
+                })
+            resolved.append((item, qty))
+
+        summary_bn = 'ফেরত: ' + ', '.join(f'{i.product_name_bn} x{q}' for i, q in resolved)
+        summary_en = 'Returned: ' + ', '.join(f'{i.product_name_en or i.product_name_bn} x{q}' for i, q in resolved)
+        full_note_bn = f'{note_bn} — {summary_bn}' if note_bn else summary_bn
+        full_note_en = f'{note_en} — {summary_en}' if note_en else summary_en
+
+        order = self._transition(order, 'PARTIALLY_DELIVERED', user, full_note_bn, full_note_en)
+        if not order.delivery.delivered_at:
+            order.delivery.delivered_at = timezone.now()
+            order.delivery.save(update_fields=['delivered_at'])
+
+        returned_value = Decimal('0')
+        returned_cogs = Decimal('0')
+        for item, qty in resolved:
+            StockMovement.objects.create(
+                product=item.product, movement_type='RETURN',
+                quantity=qty, reference_id=order.id, created_by=user,
+            )
+            returned_value += item.unit_price * qty
+            returned_cogs += item.product.cost_price * qty
+
+        if came_from_delivered:
+            # Full payment already posted — reverse just the returned slice,
+            # then claw back any cashback/referral that order's DELIVERED
+            # transition already credited.
+            self._create_partial_return_journal(order, user, returned_value, returned_cogs)
+            self._reverse_cashback(order, user)
+            self._reverse_referral_bonus(order, user)
+        else:
+            # Fresh from ON_THE_WAY — nothing posted yet, so post one
+            # payment journal scoped to what was actually delivered.
+            if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
+                order.payment_status = 'PAID'
+                order.save(update_fields=['payment_status'])
+            if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+                self._create_partial_payment_journal(order, user, returned_value, returned_cogs)
+
+        logger.info(
+            f'Order {order.order_number} partially delivered by {user.email} '
+            f'(returned value ৳{returned_value}, from {"DELIVERED" if came_from_delivered else "ON_THE_WAY"})'
+        )
+        return order
+
+    @transaction.atomic
     def cancel(self, order: SalesOrder, user: User, note_bn: str = '', note_en: str = '') -> SalesOrder:
         order = self._transition(order, 'CANCELLED', user, note_bn, note_en)
         # Reverse stock
@@ -693,6 +778,34 @@ class OrderService:
         bonus.delete()  # allow bonus to fire again if referred user places a new delivered order
         logger.info(f'Referral bonus ৳{amount} reversed from {referrer.email} for returned order {order.order_number}')
 
+    def _reverse_cashback(self, order: SalesOrder, actor: User) -> None:
+        """Claws back the cashback deliver() credited, for the partial_deliver()
+        case where an order already went through DELIVERED before the
+        shortfall surfaced. No-ops if deliver() never actually credited any
+        (guest order, no customer, or cashback_amount was 0)."""
+        if not JournalEntry.objects.filter(reference_type='CASHBACK', reference_id=order.id).exists():
+            return
+        amount = Decimal(str(order.cashback_amount or 0))
+        if amount <= 0 or order.is_guest or not order.customer_id:
+            return
+        order.customer.profile.cashback_balance = F('cashback_balance') - amount
+        order.customer.profile.save(update_fields=['cashback_balance'])
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='CASHBACK_REVERSAL',
+            reference_id=order.id,
+            description_bn=f'ক্যাশব্যাক বিপরীত — {order.order_number}',
+            description_en=f'Cashback Reversed — {order.order_number}',
+            created_by=actor, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('2250', amount,         Decimal('0')),  # Dr Cashback Payable (liability cleared)
+            ('6350', Decimal('0'),   amount),        # Cr Cashback Expense (reversed)
+        ]:
+            acct = self._acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+        logger.info(f'Cashback ৳{amount} reversed for partially-returned order {order.order_number}')
+
     def _create_return_journal(self, order: SalesOrder, user: User) -> None:
         cogs = sum(
             item.product.cost_price * item.quantity
@@ -712,6 +825,65 @@ class OrderService:
             ('1000', Decimal('0'),  revenue),       # Cr Cash (refund)
             ('5000', Decimal('0'),  cogs),          # Cr COGS (reversal)
         ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_partial_return_journal(self, order: SalesOrder, user: User,
+                                       returned_value: Decimal, returned_cogs: Decimal) -> None:
+        """Same shape as _create_return_journal, scoped to just the returned
+        items' slice — used when partial_deliver() is correcting an order
+        that already went through deliver() (full payment journal already
+        posted for the whole order), so only the shortfall gets reversed."""
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='RETURN',
+            reference_id=order.id,
+            description_bn=f'আংশিক ফেরত — {order.order_number}',
+            description_en=f'Partial Return — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('4000', returned_value, Decimal('0')),  # Dr Sales Revenue (reversal, returned slice only)
+            ('1300', returned_cogs,  Decimal('0')),  # Dr Inventory (stock back)
+            ('1000', Decimal('0'),   returned_value),# Cr Cash (refund, returned slice only)
+            ('5000', Decimal('0'),   returned_cogs), # Cr COGS (reversal)
+        ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_partial_payment_journal(self, order: SalesOrder, user: User,
+                                        returned_value: Decimal, returned_cogs: Decimal) -> None:
+        """Same shape as _create_payment_journal, scoped to only what was
+        actually delivered — used when partial_deliver() applies fresh from
+        ON_THE_WAY (no payment journal posted yet), so revenue/COGS/cash are
+        recognized for the delivered portion only, never the returned one."""
+        full_cogs = sum(item.product.cost_price * item.quantity for item in order.items.select_related('product'))
+        delivered_revenue = order.subtotal - returned_value  # subtotal already net of discount
+        delivered_cogs = full_cogs - returned_cogs
+        cb_used = Decimal(str(order.cashback_used or 0))
+        # Mirrors grand_total's own formula (revenue + delivery - cashback_used),
+        # just scoped to the delivered slice, so the entry balances exactly
+        # the same way _create_payment_journal's full-order version does.
+        cash_received = delivered_revenue + Decimal(str(order.delivery_charge)) - cb_used
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='PAYMENT',
+            reference_id=order.id,
+            description_bn=f'আংশিক পেমেন্ট — {order.order_number}',
+            description_en=f'Partial Payment — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('1000', cash_received,   Decimal('0')),                        # Dr Cash (delivered slice + delivery fee)
+            ('5000', delivered_cogs,  Decimal('0')),                        # Dr COGS (delivered slice only)
+            ('4000', Decimal('0'),    delivered_revenue),                   # Cr Revenue (delivered slice only)
+            ('4200', Decimal('0'),    Decimal(str(order.delivery_charge))), # Cr Delivery Income
+            ('1300', Decimal('0'),    delivered_cogs),                      # Cr Inventory (delivered slice only)
+        ]
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable (discharged)
         for code, debit, credit in lines:
             acct = self._acct(code)
             if acct and (debit or credit):
