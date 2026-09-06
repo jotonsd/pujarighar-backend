@@ -36,18 +36,12 @@ def verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
     return hmac.compare_digest(expected, sig)
 
 
-def send_whatsapp_message(to: str, text: str) -> None:
+def _post_message(payload: dict) -> None:
     s = SiteSetting.get()
     if not is_configured():
         logger.warning('WhatsApp send skipped: not configured')
         return
     url = f'https://graph.facebook.com/{_API_VERSION}/{s.whatsapp_phone_number_id}/messages'
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': to,
-        'type': 'text',
-        'text': {'body': text[:_MAX_WHATSAPP_TEXT]},
-    }
     try:
         resp = requests.post(
             url, json=payload,
@@ -58,6 +52,24 @@ def send_whatsapp_message(to: str, text: str) -> None:
             logger.error(f'WhatsApp send failed: {resp.status_code} {resp.text}')
     except requests.RequestException as e:
         logger.error(f'WhatsApp send error: {e}', exc_info=True)
+
+
+def send_whatsapp_message(to: str, text: str) -> None:
+    _post_message({
+        'messaging_product': 'whatsapp',
+        'to': to,
+        'type': 'text',
+        'text': {'body': text[:_MAX_WHATSAPP_TEXT]},
+    })
+
+
+def send_whatsapp_image(to: str, image_url: str, caption: str = '') -> None:
+    _post_message({
+        'messaging_product': 'whatsapp',
+        'to': to,
+        'type': 'image',
+        'image': {'link': image_url, 'caption': caption[:1024]},
+    })
 
 
 @transaction.atomic
@@ -122,18 +134,22 @@ def handle_incoming_message(payload: dict) -> None:
 
     reply = result.get('reply') or ''
     products = result.get('products') or []
-    if products:
-        # WhatsApp text messages can't render the image/price cards the
-        # website widget shows — append a plain-text product list instead so
-        # the customer still gets the same information.
-        lines = [reply, '']
-        for p in products[:8]:
-            name = p.get('name_bn') or p.get('name_en') or ''
-            price = p.get('price')
-            lines.append(f'• {name} — ৳{price}' if price else f'• {name}')
-        reply = '\n'.join(lines)
-
     send_whatsapp_message(wa_id, reply or '...')
+
+    # Send each product as a real WhatsApp image message (name + price as
+    # the caption) rather than a plain-text list — WhatsApp can't render the
+    # website widget's clickable image/price cards, but it can send actual
+    # photos, which reads far better than a text bullet list. Capped at 5 to
+    # avoid flooding the chat on a broad search.
+    for p in products[:5]:
+        name = p.get('name_bn') or p.get('name_en') or ''
+        price = p.get('price')
+        caption = f'{name} — ৳{price}' if price else name
+        image_url = p.get('image_url')
+        if image_url:
+            send_whatsapp_image(wa_id, image_url, caption)
+        else:
+            send_whatsapp_message(wa_id, f'• {caption}')
 
     history = list(conversation.history or [])
     history.append({'role': 'user', 'text': text})
