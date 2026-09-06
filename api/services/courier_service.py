@@ -165,9 +165,17 @@ class CourierService:
     # reachable transition once ASSIGNED (see ALLOWED_TRANSITIONS), and
     # "approval pending" isn't final yet, so those stay visible only in the
     # tracking timeline until an admin acts.
+    #
+    # partial_delivered deliberately maps to nothing too (not DELIVER) —
+    # Steadfast only reports a lump collected amount (e.g. "Amount has been
+    # changed from 690 to 130"), never which item failed, so auto-applying
+    # DELIVER here would wrongly credit full COD/cashback for an order that
+    # was only partially fulfilled. This just notifies the admin (via the
+    # unconditional _notify_admins call below) to reconcile it manually via
+    # OrderService.partial_deliver() instead — mirrors how Pathao's own
+    # order.partial-delivery event is left unmapped for the same reason.
     _STEADFAST_STATUS_ACTIONS = {
         'delivered': 'DELIVER',
-        'partial_delivered': 'DELIVER',
     }
 
     # Pathao's webhook "event" values -> the same action vocabulary as above,
@@ -329,12 +337,14 @@ class CourierService:
         # status in it, just stale/leftover data, so it must never drive an
         # order transition. Notifying admins, on the other hand, happens for
         # every webhook hit no matter the type — _notify_admins shows the
-        # real tracking message when there's no status change to report
-        # (e.g. tracking_update), or the usual "now **status**" wording when
-        # there is one.
+        # real tracking message whenever Steadfast actually sent one (e.g.
+        # partial_delivered's "Amount has been changed from X to Y" — the
+        # exact detail an admin needs to reconcile it manually), falling
+        # back to the generic "now **status**" wording only when there's no
+        # message to show (a plain delivered/dispatched hit).
         if notification_type == 'delivery_status':
             self._apply_courier_status_to_order(consignment, self._STEADFAST_STATUS_ACTIONS.get(raw_status))
-        self._notify_admins(consignment, tracking_message='' if notification_type == 'delivery_status' else message)
+        self._notify_admins(consignment, tracking_message=message)
 
     @transaction.atomic
     def handle_pathao_webhook(self, payload: dict) -> None:
