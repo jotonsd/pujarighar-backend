@@ -48,7 +48,14 @@ def _post_message(payload: dict) -> None:
             headers={'Authorization': f'Bearer {s.whatsapp_access_token}'},
             timeout=15,
         )
-        if not resp.ok:
+        if resp.ok:
+            # Logged on success too (not just failure) — an HTTP 200 here
+            # only means WhatsApp accepted the request, not that it actually
+            # rendered/delivered (e.g. media WhatsApp couldn't fetch fails
+            # asynchronously via a webhook status event instead), so this is
+            # needed to tell "never sent" apart from "sent but didn't arrive".
+            logger.info(f'WhatsApp send ok: type={payload.get("type")} to={payload.get("to")} id={resp.json().get("messages", [{}])[0].get("id")}')
+        else:
             logger.error(f'WhatsApp send failed: {resp.status_code} {resp.text}')
     except requests.RequestException as e:
         logger.error(f'WhatsApp send error: {e}', exc_info=True)
