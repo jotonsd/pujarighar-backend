@@ -104,6 +104,7 @@ urlpatterns = [
     path('orders/<uuid:pk>/assign-delivery/',    views.assign_delivery,    name='order-assign-delivery'),
     path('orders/<uuid:pk>/dispatch/',           views.dispatch_order,     name='order-dispatch'),
     path('orders/<uuid:pk>/deliver/',            views.deliver_order,      name='order-deliver'),
+    path('orders/<uuid:pk>/partial-deliver/',    views.partial_deliver_order, name='order-partial-deliver'),
     path('orders/<uuid:pk>/return/',             views.return_order,       name='order-return'),
     path('orders/<uuid:pk>/cancel/',             views.cancel_order,       name='order-cancel'),
     path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),

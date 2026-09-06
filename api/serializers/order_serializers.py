@@ -70,6 +70,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
             'PENDING': 'পেন্ডিং', 'CONFIRMED': 'নিশ্চিত',
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'ডেলিভারিম্যান নির্ধারিত',
             'PICKED': 'পিকআপ হয়েছে', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে',
+            'PARTIALLY_DELIVERED': 'আংশিক ডেলিভারি হয়েছে',
             'RETURNED': 'ফেরত', 'CANCELLED': 'বাতিল',
         }
         if obj.to_status == 'ASSIGNED':
@@ -83,6 +84,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
             'PENDING': 'Pending', 'CONFIRMED': 'Confirmed',
             'PACKED': 'Packed', 'ASSIGNED': 'Assigned',
             'PICKED': 'Picked Up', 'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered',
+            'PARTIALLY_DELIVERED': 'Partially Delivered',
             'RETURNED': 'Returned', 'CANCELLED': 'Cancelled',
         }
         if obj.to_status == 'ASSIGNED':
@@ -169,12 +171,14 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 STATUS_LABELS_BN = {
     'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
     'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'PICKED':'পিকআপ হয়েছে', 'ON_THE_WAY':'পথে আছে',
-    'DELIVERED':'ডেলিভারি হয়েছে', 'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
+    'DELIVERED':'ডেলিভারি হয়েছে', 'PARTIALLY_DELIVERED':'আংশিক ডেলিভারি হয়েছে',
+    'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
 }
 STATUS_LABELS_EN = {
     'PENDING':'Pending', 'CONFIRMED':'Confirmed', 'PACKED':'Packed',
     'ASSIGNED':'Assigned', 'PICKED':'Picked Up', 'ON_THE_WAY':'On the Way',
-    'DELIVERED':'Delivered', 'RETURNED':'Returned', 'CANCELLED':'Cancelled',
+    'DELIVERED':'Delivered', 'PARTIALLY_DELIVERED':'Partially Delivered',
+    'RETURNED':'Returned', 'CANCELLED':'Cancelled',
 }
 
 
@@ -312,6 +316,22 @@ class AssignDeliverySerializer(serializers.Serializer):
 class OrderCancelSerializer(serializers.Serializer):
     note_bn = serializers.CharField(required=False, allow_blank=True, default='')
     note_en = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class PartialDeliverItemSerializer(serializers.Serializer):
+    item_id  = serializers.UUIDField()
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+
+class PartialDeliverSerializer(serializers.Serializer):
+    items   = PartialDeliverItemSerializer(many=True)
+    note_bn = serializers.CharField(required=False, allow_blank=True, default='')
+    note_en = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('At least one returned item is required')
+        return value
 
 
 class AddOrderItemSerializer(serializers.Serializer):
