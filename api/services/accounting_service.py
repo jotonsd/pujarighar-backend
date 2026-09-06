@@ -1,3 +1,4 @@
+import calendar
 import logging
 from collections import defaultdict
 from datetime import date
@@ -321,6 +322,33 @@ class AccountingService:
             if last_month_rev > 0 else None
         )
 
+        # ── This month vs last month order count, by day-of-month ─────────────
+        # Aligned by day number (1st vs 1st, 2nd vs 2nd, ...) rather than by
+        # weekday, so the single-month overview chart shows how far this
+        # month has progressed against the same point in the prior one.
+        def _daily_order_counts(date_from, date_to):
+            counts: dict = defaultdict(int)
+            for created_at in SalesOrder.objects.filter(
+                created_at__gte=local_day_start(date_from),
+                created_at__lt=local_day_end_exclusive(date_to),
+            ).values_list('created_at', flat=True):
+                counts[local_period_bucket(created_at, 'day').day] += 1
+            return counts
+
+        this_month_daily = _daily_order_counts(month_start, today)
+        last_month_daily = _daily_order_counts(last_month_start, last_month_end)
+        # Show the full previous month for context even though this month's
+        # line necessarily stops at today.
+        days_in_chart = max(calendar.monthrange(today.year, today.month)[1], last_month_end.day)
+        order_comparison_chart = [
+            {
+                'day':         d,
+                'this_month':  this_month_daily.get(d, 0),
+                'last_month':  last_month_daily.get(d, 0),
+            }
+            for d in range(1, days_in_chart + 1)
+        ]
+
         # ── Financial obligations ─────────────────────────────────────────────
         credit_moves = StockMovement.objects.filter(payment_method='CREDIT', movement_type='PURCHASE')
         total_credit = sum(m.unit_cost * m.quantity for m in credit_moves)
@@ -442,6 +470,7 @@ class AccountingService:
             'total_customers':       User.objects.filter(role__code='CUSTOMER', is_active=True).count(),
             'total_products':        Product.objects.filter(is_active=True).count(),
             'monthly_revenue_chart': monthly_chart,
+            'order_comparison_chart': order_comparison_chart,
             'status_breakdown':      status_breakdown,
             # new
             'this_month_revenue':    str(this_month_rev),
