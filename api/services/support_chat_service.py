@@ -123,6 +123,36 @@ def _word_set(text: str) -> set:
     return set(re.split(r'[\s|।,.:;!?()\-]+', text.lower()))
 
 
+# Common English conversational filler a customer's natural-language message
+# carries but a product name/description never does ("do you have...",
+# "I need...", "can I get..."). Passing these through avro.parse() below
+# phonetically transliterates them into meaningless Bengali fragments
+# ("you" -> "ইয়উ", "have" -> "হাভে") that then get used as literal search
+# keywords — harmless on their own, but the fuzzy difflib fallback further
+# down scores every product against every query word, and a random 3-4
+# character fragment can coincidentally score deceptively high against an
+# unrelated short word, pulling completely unrelated products into the
+# result. Stripped before transliteration, not after, so neither the
+# English word nor its transliteration ever enters the search.
+_ENGLISH_STOPWORDS = {
+    'a', 'an', 'the', 'is', 'are', 'am', 'was', 'were', 'do', 'does', 'did',
+    'have', 'has', 'had', 'i', 'you', 'we', 'they', 'he', 'she', 'it', 'me',
+    'my', 'your', 'our', 'their', 'this', 'that', 'these', 'those', 'can',
+    'could', 'would', 'will', 'shall', 'should', 'want', 'wants', 'wanted',
+    'need', 'needs', 'please', 'any', 'some', 'of', 'for', 'to', 'in', 'on',
+    'at', 'and', 'or', 'but', 'if', 'what', 'which', 'who', 'how', 'there',
+    'here', 'get', 'got', 'hi', 'hello', 'hey', 'let', 'know', 'tell',
+    'show', 'looking', 'look', 'search', 'find', 'about', 'give', 'much',
+    'many', 'more', 'also', 'just', 'now', 'still', 'yet', 'so', 'no',
+    'yes', 'ok', 'okay', 'thanks', 'thank', 'sir', 'madam', 'apu', 'bhai',
+}
+
+
+def _strip_stopwords(text: str) -> str:
+    kept = [w for w in text.split() if re.sub(r'\W', '', w).lower() not in _ENGLISH_STOPWORDS]
+    return ' '.join(kept)
+
+
 def _find_products(query: str, limit: int = 8) -> list:
     # Product names here are often long/compound (e.g. "পিতলের গণেশ ঠাকুর – ৫
     # ইঞ্চি | ১০০০ গ্রাম" — material + subject + size + weight all in one
@@ -148,9 +178,20 @@ def _find_products(query: str, limit: int = 8) -> list:
     # inconsistent, so transliterate deterministically here instead —
     # already-Bengali or plain-English input passes through avro.parse()
     # close to unchanged, so adding it alongside the original is safe.
+    #
+    # Strip English filler ("do you have...") BEFORE transliterating — see
+    # _strip_stopwords above for why this has to happen pre-transliteration.
+    # If that strips away the ENTIRE message ("do you have it?"), there's no
+    # actual product content left to search for — return nothing rather than
+    # falling back to the noisy original text (which is exactly the garbage
+    # this function exists to avoid).
+    stripped_query = _strip_stopwords(query)
+    if not stripped_query.strip():
+        return []
+    query = stripped_query
     transliterated = avro.parse(query)
     search_text = f'{query} {transliterated}' if transliterated != query else query
-    all_words = [w for w in search_text.strip().split() if len(w) > 1 or w.isdigit()] or [search_text.strip()]
+    all_words = [w for w in _word_set(search_text) if len(w) > 1 or w.isdigit()] or [search_text.strip()]
     name_words = [w for w in all_words if not w.isdigit()] or all_words
 
     word_filter = Q()
