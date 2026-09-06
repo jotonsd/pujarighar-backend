@@ -350,9 +350,16 @@ class AccountingService:
         active_products = list(Product.objects.filter(is_active=True))
         low_stock_count  = sum(1 for p in active_products if 0 < p.stock_on_hand <= 5)
         out_of_stock     = sum(1 for p in active_products if p.stock_on_hand <= 0)
+        # Packages excluded — their stock_on_hand is derived from component
+        # stock (see Product.stock_on_hand), so counting them here would
+        # double the components' own value into the total.
+        total_stock_value = sum(
+            (p.stock_on_hand * p.cost_price for p in active_products if not p.is_package),
+            Decimal('0'),
+        )
 
         # ── Recent orders ─────────────────────────────────────────────────────
-        recent_qs = SalesOrder.objects.order_by('-created_at')[:20]
+        recent_qs = SalesOrder.objects.order_by('-created_at')[:10]
         recent_orders = [
             {
                 'id':           str(o.id),
@@ -385,6 +392,16 @@ class AccountingService:
         ]
 
         week_start = today - timedelta(days=6)  # rolling 7-day window including today
+        # Both filtered by created_at (any status) — a straight count/sum of
+        # orders placed this month, distinct from this_month_revenue above
+        # (which is journal-based: only recognized once paid/delivered, and
+        # can include orders created in an earlier month if posted this one).
+        this_month_orders_qs = SalesOrder.objects.filter(
+            created_at__gte=local_day_start(month_start),
+            created_at__lt=local_day_end_exclusive(today),
+        )
+        this_month_orders = this_month_orders_qs.count()
+        this_month_sales_amount = this_month_orders_qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
         return {
             # existing
             'week_orders':           SalesOrder.objects.filter(created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today)).count(),
@@ -406,6 +423,9 @@ class AccountingService:
             'cash_on_hand':          str(cash_on_hand),
             'cash_account_id':       str(cash_account.id) if cash_account else None,
             'out_of_stock_count':    out_of_stock,
+            'total_stock_value':     str(total_stock_value),
+            'this_month_orders':     this_month_orders,
+            'this_month_sales_amount': str(this_month_sales_amount),
             'recent_orders':         recent_orders,
             'top_products':          top_products,
         }
