@@ -72,6 +72,61 @@ def send_whatsapp_image(to: str, image_url: str, caption: str = '') -> None:
     })
 
 
+def send_whatsapp_list(to: str, body_text: str, button_text: str, items: list[dict]) -> None:
+    """A real tappable menu (WhatsApp's 'interactive list' message) — the
+    closest equivalent to the website's clickable product cards. Sent
+    alongside the image messages (list rows can't show pictures), so the
+    customer gets both a look at the products and a one-tap way to pick one
+    instead of having to type the exact name back."""
+    rows = []
+    for item in items[:10]:  # WhatsApp's own cap on list rows
+        name = item.get('name_bn') or item.get('name_en') or ''
+        price = item.get('price')
+        rows.append({
+            'id': name[:200],
+            'title': name[:24] or '-',
+            'description': f'৳{price}' if price else '',
+        })
+    if not rows:
+        return
+    _post_message({
+        'messaging_product': 'whatsapp',
+        'to': to,
+        'type': 'interactive',
+        'interactive': {
+            'type': 'list',
+            'body': {'text': body_text[:1024]},
+            'action': {'button': button_text[:20], 'sections': [{'rows': rows}]},
+        },
+    })
+
+
+def _download_whatsapp_media(media_id: str) -> tuple[bytes | None, str | None]:
+    """Media messages only carry an id — the actual file lives behind a
+    short-lived, auth-gated URL that has to be looked up first, then fetched
+    with the same bearer token (Meta doesn't serve media publicly)."""
+    s = SiteSetting.get()
+    headers = {'Authorization': f'Bearer {s.whatsapp_access_token}'}
+    try:
+        meta_resp = requests.get(f'https://graph.facebook.com/{_API_VERSION}/{media_id}', headers=headers, timeout=15)
+        if not meta_resp.ok:
+            logger.error(f'WhatsApp media lookup failed: {meta_resp.status_code} {meta_resp.text}')
+            return None, None
+        info = meta_resp.json()
+        media_url = info.get('url')
+        mime_type = info.get('mime_type', 'image/jpeg')
+        if not media_url:
+            return None, None
+        file_resp = requests.get(media_url, headers=headers, timeout=30)
+        if not file_resp.ok:
+            logger.error(f'WhatsApp media download failed: {file_resp.status_code}')
+            return None, None
+        return file_resp.content, mime_type
+    except requests.RequestException as e:
+        logger.error(f'WhatsApp media fetch error: {e}', exc_info=True)
+        return None, None
+
+
 @transaction.atomic
 def handle_incoming_message(payload: dict) -> None:
     """Parses one WhatsApp Cloud API webhook payload, routes text messages
@@ -106,13 +161,24 @@ def handle_incoming_message(payload: dict) -> None:
 
     if msg_type == 'text':
         text = (message.get('text') or {}).get('body', '').strip()
+    elif msg_type == 'interactive':
+        # A tap on one of our own send_whatsapp_list() rows — id carries the
+        # exact product name (see send_whatsapp_list), so this flows into
+        # answer() exactly like the customer typed that name themselves,
+        # same as clicking a candidate card does on the website.
+        list_reply = (message.get('interactive') or {}).get('list_reply') or {}
+        text = list_reply.get('id') or list_reply.get('title', '')
+    elif msg_type == 'image':
+        media_id = (message.get('image') or {}).get('id')
+        image_bytes, mime_type = _download_whatsapp_media(media_id) if media_id else (None, None)
+        text = support_chat_service.describe_image_for_search(image_bytes, mime_type) if image_bytes else ''
     else:
         text = ''
 
     if not text:
         reply_text = (
-            'দুঃখিত, আমরা এখন শুধু লেখা বার্তা বুঝতে পারি। আপনার প্রশ্নটি লিখে পাঠান।'
-            ' | Sorry, we can currently only understand text messages — please type your question.'
+            'দুঃখিত, ছবিটি বুঝতে সমস্যা হচ্ছে। আপনার প্রশ্নটি লিখে পাঠান।'
+            ' | Sorry, having trouble understanding that — please describe what you\'re looking for in text.'
         )
         send_whatsapp_message(wa_id, reply_text)
         conversation.last_message_id = message_id
@@ -157,6 +223,19 @@ def handle_incoming_message(payload: dict) -> None:
             send_whatsapp_image(wa_id, image_url, caption)
         else:
             send_whatsapp_message(wa_id, f'• {caption}')
+
+    # A real tappable menu, sent after the photos — list rows can't carry
+    # images, so this is deliberately in addition to (not instead of) the
+    # image messages above: pictures for reference, list for actually
+    # picking one without having to type the exact name back.
+    combined = (products + candidates)[:10]
+    if len(combined) > 1:
+        send_whatsapp_list(
+            wa_id,
+            body_text='নিচের তালিকা থেকে একটি বেছে নিন।',
+            button_text='বেছে নিন',
+            items=combined,
+        )
 
     history = list(conversation.history or [])
     history.append({'role': 'user', 'text': text})

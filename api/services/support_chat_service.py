@@ -927,6 +927,37 @@ def is_configured() -> bool:
     return bool(SiteSetting.get().gemini_api_key)
 
 
+def describe_image_for_search(image_bytes: bytes, mime_type: str) -> str:
+    """Turns a customer-sent photo into a short text search query (e.g. "লাল
+    শাড়ি") via Gemini's vision input, so it can flow into the exact same
+    _find_products/answer() pipeline as a normal typed message — no separate
+    image-aware product-matching path needed. Used by the WhatsApp
+    integration, which has no other way to let a customer "search by photo"
+    the way the website's text box does."""
+    s = SiteSetting.get()
+    if not s.gemini_api_key:
+        return ''
+    client = genai.Client(api_key=s.gemini_api_key)
+    model = s.gemini_model or 'gemini-3.6-flash'
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role='user', parts=[
+                types.Part(text=(
+                    'A customer of a Bangladeshi religious/puja goods store sent this photo. '
+                    'In a few words, describe the product or item shown, as a short search '
+                    'phrase a customer would type to look for it (e.g. "লাল শাড়ি", "brass ganesh idol"). '
+                    'Reply with ONLY the search phrase, nothing else.'
+                )),
+                types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes)),
+            ])],
+        )
+        return (response.text or '').strip()
+    except Exception as e:
+        logger.error(f'describe_image_for_search error: {e}', exc_info=True)
+        return ''
+
+
 def answer(message: str, history: list[dict] | None = None, incoming_pending_order: dict | None = None) -> dict:
     """Runs the manual tool-calling loop against Gemini, scoped to product/pricing/
     discount/delivery/referral/cashback/blog data pulled live from the DB. Every
