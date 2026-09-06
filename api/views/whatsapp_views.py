@@ -35,9 +35,15 @@ def whatsapp_webhook(request):
     # POST — a real event. Verified via X-Hub-Signature-256 (HMAC of the raw
     # body with the app secret), not a bearer token — same role Pathao's
     # X-PATHAO-Signature plays on the courier webhook.
+    #
+    # request.body MUST be read before request.data — under ASGI the request
+    # stream can only be consumed once, and accessing .data first (as the log
+    # line below effectively would) leaves .body unreadable afterward,
+    # raising RawPostDataException.
+    raw_body = request.body
     logger.info(f'WhatsApp webhook received: {request.data}')
     signature = request.META.get('HTTP_X_HUB_SIGNATURE_256', '')
-    if not whatsapp_service.verify_signature(request.body, signature):
+    if not whatsapp_service.verify_signature(raw_body, signature):
         logger.warning('WhatsApp webhook rejected: signature mismatch')
         return ApiResponse(message='Invalid signature', errors='Unauthorized', status_code=401)
 
