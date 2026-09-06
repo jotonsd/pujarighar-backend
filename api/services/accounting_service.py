@@ -358,6 +358,37 @@ class AccountingService:
             Decimal('0'),
         )
 
+        # Cash vs credit ("বাকি") stock — there's no batch/lot tracking, so
+        # this can't say exactly which physical units were bought which way.
+        # Approximation: split each product's current stock_on_hand
+        # proportionally to its all-time PURCHASE quantity by payment_method
+        # (e.g. 70% of everything ever bought was on credit -> 70% of what's
+        # left on the shelf is treated as credit stock too).
+        purchase_qty_by_product: dict = defaultdict(lambda: {'CASH': Decimal('0'), 'CREDIT': Decimal('0')})
+        for row in (
+            StockMovement.objects.filter(movement_type='PURCHASE')
+            .values('product_id', 'payment_method')
+            .annotate(qty=Sum('quantity'))
+        ):
+            purchase_qty_by_product[row['product_id']][row['payment_method']] = row['qty'] or Decimal('0')
+
+        cash_stock_value = Decimal('0')
+        credit_stock_value = Decimal('0')
+        for p in active_products:
+            if p.is_package or p.stock_on_hand <= 0:
+                continue
+            purchases = purchase_qty_by_product.get(p.id, {'CASH': Decimal('0'), 'CREDIT': Decimal('0')})
+            total_purchased = purchases['CASH'] + purchases['CREDIT']
+            stock_value = p.stock_on_hand * p.cost_price
+            if total_purchased <= 0:
+                # No purchase history at all (stock only ever entered via a
+                # manual ADJUSTMENT) — default to cash rather than guess.
+                cash_stock_value += stock_value
+                continue
+            cash_ratio = purchases['CASH'] / total_purchased
+            cash_stock_value += stock_value * cash_ratio
+            credit_stock_value += stock_value * (Decimal('1') - cash_ratio)
+
         # ── Recent orders ─────────────────────────────────────────────────────
         recent_qs = SalesOrder.objects.order_by('-created_at')[:10]
         recent_orders = [
@@ -424,6 +455,8 @@ class AccountingService:
             'cash_account_id':       str(cash_account.id) if cash_account else None,
             'out_of_stock_count':    out_of_stock,
             'total_stock_value':     str(total_stock_value),
+            'cash_stock_value':      str(cash_stock_value),
+            'credit_stock_value':    str(credit_stock_value),
             'this_month_orders':     this_month_orders,
             'this_month_sales_amount': str(this_month_sales_amount),
             'recent_orders':         recent_orders,
