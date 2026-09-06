@@ -6,8 +6,9 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    ShippingAddress, Notification, SiteSetting, User,
+    ShippingAddress, Notification, SiteSetting,
 )
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.utils.order_number import generate_order_number
 
@@ -168,7 +169,7 @@ class CheckoutService:
             )
 
     def _notify_admins(self, order: SalesOrder) -> None:
-        admins  = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins  = get_notified_users()
         amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'

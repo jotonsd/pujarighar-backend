@@ -10,6 +10,7 @@ from api.models import (
 )
 from api.services import mail_service
 from api.services.courier.registry import get_courier_service
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.services.order_service import OrderService
 
@@ -396,7 +397,7 @@ class CourierService:
         consignment involved (Pathao's dashboard just pinging to confirm the
         URL is reachable and correctly configured), so this is purely an
         informational ping for admins, not tied to any order."""
-        admins = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins = get_notified_users()
         provider_short = provider.code.title()
         notifications = [
             Notification(
@@ -422,7 +423,7 @@ class CourierService:
         Pathao-event case). extra_note: additional detail (e.g. rider name/
         phone Pathao included on this event) appended alongside whichever
         wording above was used, rather than replacing it."""
-        admins = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins = get_notified_users()
         order = consignment.order
         provider_short = consignment.provider.code.title()
         if tracking_message:

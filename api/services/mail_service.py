@@ -10,6 +10,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from api.models import SiteSetting, User
+from api.services.notification_recipients import get_notified_users
 from api.services.short_link_service import get_short_url
 from api.services.sms_service import send_sms
 from api.services.telegram_service import send_telegram_message
@@ -41,7 +42,7 @@ def _get_connection():
 
 def _admin_emails():
     return list(
-        User.objects.filter(role__code='ADMIN', is_active=True)
+        get_notified_users()
         .exclude(email='')
         .values_list('email', flat=True)
     )
