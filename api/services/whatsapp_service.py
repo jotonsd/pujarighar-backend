@@ -134,14 +134,21 @@ def handle_incoming_message(payload: dict) -> None:
 
     reply = result.get('reply') or ''
     products = result.get('products') or []
+    # 'candidates' carries the same shape (name/price/image_url) but comes
+    # from a different path — an order tool (add_order_item/propose_order)
+    # hitting an ambiguous match (e.g. several dresses sharing a name), where
+    # the website shows the same options as clickable cards for the customer
+    # to disambiguate. Missing this here meant the AI would say "pick one
+    # from the options below" on WhatsApp with nothing actually below it.
+    candidates = result.get('candidates') or []
     send_whatsapp_message(wa_id, reply or '...')
 
-    # Send each product as a real WhatsApp image message (name + price as
-    # the caption) rather than a plain-text list — WhatsApp can't render the
-    # website widget's clickable image/price cards, but it can send actual
-    # photos, which reads far better than a text bullet list. Capped at 5 to
-    # avoid flooding the chat on a broad search.
-    for p in products[:5]:
+    # Send each product/candidate as a real WhatsApp image message (name +
+    # price as the caption) rather than a plain-text list — WhatsApp can't
+    # render the website widget's clickable image/price cards, but it can
+    # send actual photos, which reads far better than a text bullet list.
+    # Capped at 5 combined to avoid flooding the chat on a broad search.
+    for p in (products + candidates)[:5]:
         name = p.get('name_bn') or p.get('name_en') or ''
         price = p.get('price')
         caption = f'{name} — ৳{price}' if price else name
