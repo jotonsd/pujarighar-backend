@@ -985,6 +985,18 @@ class SiteSetting(models.Model):
     # materially bigger risk than the read-only Q&A tools, so this needs an
     # explicit admin opt-in rather than working the moment a key is added.
     ai_ordering_enabled = models.BooleanField(default=False)
+    # ব্রাহ্মণ AI on WhatsApp (Meta Cloud API) — same support_chat_service
+    # logic as the website widget, reached via a WhatsApp Business number
+    # instead. whatsapp_verify_token is invented by the admin (not issued by
+    # Meta) and echoed back during the webhook verification handshake;
+    # whatsapp_app_secret verifies the X-Hub-Signature-256 on every real
+    # event, same role encrypted courier webhook secrets play elsewhere.
+    whatsapp_phone_number_id = models.CharField(max_length=64, blank=True, default='')
+    whatsapp_business_account_id = models.CharField(max_length=64, blank=True, default='')
+    whatsapp_access_token = models.CharField(max_length=1024, blank=True, default='')
+    whatsapp_app_secret = models.CharField(max_length=255, blank=True, default='')
+    whatsapp_verify_token = models.CharField(max_length=255, blank=True, default='')
+    whatsapp_enabled = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = 'Site Setting'
@@ -1011,6 +1023,26 @@ class SmsLog(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class WhatsAppConversation(models.Model):
+    """One row per customer WhatsApp number — the server-side stand-in for
+    what the website widget's browser normally holds (history, pending_order),
+    since there's no frontend session on WhatsApp to carry that between
+    messages. history mirrors support_chat_service.answer()'s expected shape
+    exactly: [{'role': 'user'|'model', 'text': str}, ...]."""
+    id                    = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    wa_id                 = models.CharField(max_length=32, unique=True)
+    history               = models.JSONField(default=list, blank=True)
+    pending_order         = models.JSONField(null=True, blank=True)
+    # Guards against Meta's webhook retries (delivery isn't exactly-once)
+    # reprocessing and double-replying to the same inbound message.
+    last_message_id       = models.CharField(max_length=128, blank=True, default='')
+    created_at            = models.DateTimeField(auto_now_add=True)
+    updated_at            = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
 
 
 # ─── Referral ─────────────────────────────────────────────────────────────────

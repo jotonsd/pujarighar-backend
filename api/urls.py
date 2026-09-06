@@ -260,6 +260,7 @@ urlpatterns = [
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
     path('courier/webhooks/pathao/',                views.pathao_webhook,           name='courier-webhook-pathao'),
+    path('whatsapp/webhook/',                       views.whatsapp_webhook,         name='whatsapp-webhook'),
 
     # ─── SMS ────────────────────────────────────────────────────────────────────
     path('sms/settings/',  views.get_sms_settings,    name='sms-settings-get'),
