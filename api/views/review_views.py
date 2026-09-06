@@ -2,10 +2,11 @@ import logging
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.models import Notification, Product, ProductPackageItem, Review, SalesOrder, SalesOrderItem, User
+from api.models import Notification, Product, ProductPackageItem, Review, SalesOrder, SalesOrderItem
 from api.serializers.review_serializers import ReviewSerializer, ReviewCreateSerializer
 from api.utils.response import ApiResponse
 from api.permissions import has_permission
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def create_review(request):
 
     product_name = product.name_bn or product.name_en
     reviewer_name = getattr(getattr(request.user, 'profile', None), 'full_name_bn', None) or request.user.email
-    admins = User.objects.filter(role__code='ADMIN', is_active=True)
+    admins = get_notified_users()
     notifications = [
         Notification(
             user=admin,
