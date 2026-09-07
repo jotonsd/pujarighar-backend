@@ -238,6 +238,16 @@ class Product(BaseModel):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # Matches Meta.ordering — the catalog's default sort (and the
+            # personalized-ordering tiebreak), otherwise a full sequential
+            # scan + sort on every list page load as the table grows.
+            models.Index(fields=['-created_at']),
+            # `category`/`brand` are ForeignKeys, which Django already
+            # indexes automatically — only `is_active` (a plain boolean,
+            # filtered on almost every list_products call) needs one here.
+            models.Index(fields=['is_active']),
+        ]
 
     def __str__(self):
         return f'{self.name_bn} ({self.sku})'
@@ -256,6 +266,12 @@ class Product(BaseModel):
 
     @property
     def effective_price(self) -> Decimal:
+        # ProductService.list_products annotates `_effective_price` via a
+        # correlated subquery so a list page doesn't run this discount
+        # lookup once per row — use it when present instead of re-querying.
+        annotated = getattr(self, '_effective_price', None)
+        if annotated is not None:
+            return annotated
         today = timezone.now().date()
         active = (
             self.discounts
@@ -303,6 +319,12 @@ class Product(BaseModel):
                     available.append(item.component.stock_on_hand // item.quantity)
             return min(available) if available else Decimal('0')
 
+        # ProductService.list_products annotates `_stock_on_hand` via a
+        # correlated subquery so a list page doesn't run this aggregate once
+        # per row — use it when present instead of re-querying.
+        annotated = getattr(self, '_stock_on_hand', None)
+        if annotated is not None:
+            return annotated
         from django.db.models import Sum
         result = self.stock_movements.aggregate(total=Sum('quantity'))
         return result['total'] or Decimal('0')
