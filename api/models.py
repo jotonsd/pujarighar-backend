@@ -1019,6 +1019,10 @@ class SmsLog(models.Model):
     status        = models.CharField(max_length=10, choices=STATUS_CHOICES)
     response_code = models.CharField(max_length=10, blank=True, default='')
     response_text = models.CharField(max_length=255, blank=True, default='')
+    # Billed SMS units for `message` (1 for a single segment, 2+ once it
+    # splits) — computed once at send time so historical cost stays fixed
+    # even if the segment-size heuristic changes later.
+    segments      = models.PositiveSmallIntegerField(default=1)
     created_at    = models.DateTimeField(auto_now_add=True)
 
     class Meta:

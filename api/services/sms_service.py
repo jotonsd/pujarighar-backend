@@ -39,6 +39,21 @@ _RESPONSE_MEANINGS = {
 _BENGALI_DIGITS = str.maketrans('০১২৩৪৫৬৭৮৯', '0123456789')
 
 
+def sms_segment_count(message: str) -> int:
+    """Billed SMS units for `message` — GSM-7 (plain ASCII) gets 160 chars
+    for 1 segment then 153/part once multi-part; anything with a non-ASCII
+    character (Bengali, emoji, …) is forced into Unicode mode at 70/67,
+    same limits BulkSMSBD (and every GSM gateway) bills against."""
+    length = len(message)
+    if length == 0:
+        return 0
+    is_unicode = any(ord(c) > 127 for c in message)
+    single_limit, part_limit = (70, 67) if is_unicode else (160, 153)
+    if length <= single_limit:
+        return 1
+    return -(-length // part_limit)
+
+
 def _normalize_bd_phone(phone: str) -> str | None:
     """BulkSMSBD expects 8801XXXXXXXXX (13 digits, country code, no plus) —
     every phone number in this app is stored in the local 01XXXXXXXXX form,
@@ -66,10 +81,11 @@ def _send_one(phone: str, message: str, order=None) -> None:
         s = SiteSetting.get()
         if not s.sms_api_key or not s.sms_sender_id:
             return
+        segments = sms_segment_count(message)
         number = _normalize_bd_phone(phone)
         if not number:
             SmsLog.objects.create(
-                order=order, phone=phone or '', message=message,
+                order=order, phone=phone or '', message=message, segments=segments,
                 status='FAILED', response_text='Invalid phone number',
             )
             logger.warning(f'SMS skipped (invalid phone): {phone!r}')
@@ -97,7 +113,7 @@ def _send_one(phone: str, message: str, order=None) -> None:
 
         success = code == 202
         SmsLog.objects.create(
-            order=order, phone=number, message=message,
+            order=order, phone=number, message=message, segments=segments,
             status='SUCCESS' if success else 'FAILED',
             response_code=str(code) if code is not None else '',
             response_text=_RESPONSE_MEANINGS.get(code, text[:255]),

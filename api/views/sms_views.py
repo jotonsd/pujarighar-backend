@@ -1,4 +1,4 @@
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Q, Sum
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -64,6 +64,7 @@ def list_sms_logs(request):
         'order_number':  log.order.order_number if log.order else None,
         'phone':         log.phone,
         'message':       log.message,
+        'segments':      log.segments,
         'status':        log.status,
         'response_code': log.response_code,
         'response_text': log.response_text,
@@ -86,8 +87,13 @@ def get_sms_stats(request):
     total = qs.count()
     success = qs.filter(status='SUCCESS').count()
     failed = qs.filter(status='FAILED').count()
+    # Only SUCCESS sends actually reach the gateway and get billed — this is
+    # the number that should match the provider's own sent-SMS count, since
+    # a multi-segment message counts as 2+ units there even though it's one
+    # row (one `total`) here.
+    billed_segments = qs.filter(status='SUCCESS').aggregate(n=Sum('segments'))['n'] or 0
     return ApiResponse(message='SMS stats retrieved', data={
-        'total': total, 'success': success, 'failed': failed,
+        'total': total, 'success': success, 'failed': failed, 'billed_segments': billed_segments,
     })
 
 
