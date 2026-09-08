@@ -41,7 +41,30 @@ class PathaoCourierService(BaseCourierService):
             resp = requests.request(method, url, headers=headers, timeout=TIMEOUT, **kwargs)
             resp.raise_for_status()
             return resp.json()
+        except requests.HTTPError:
+            # Pathao actually responded, just not with success (expired/bad
+            # credentials, invalid store_id, a rejected payload, their own
+            # 5xx, etc.) — surface what it said instead of the generic
+            # "unreachable" message below, which made every failure look
+            # identical to a real network outage and impossible to debug
+            # from the admin-facing error alone.
+            detail = resp.text[:300]
+            try:
+                body = resp.json()
+                message = body.get('message') or body.get('error') or str(body)
+                # A 422 "Please fix the given errors" on its own says nothing
+                # — Pathao's validation responses (Laravel-style) put the
+                # actual field-level reasons in a separate "errors" object,
+                # e.g. {"errors": {"recipient_city": ["invalid city id"]}}.
+                errors = body.get('errors')
+                detail = f'{message} — {errors}' if errors else message
+            except ValueError:
+                pass
+            logger.error(f'Pathao request failed: {method} {url} — {resp.status_code} {detail}', exc_info=True)
+            raise Exception(f'Pathao rejected the request ({resp.status_code}): {detail}')
         except requests.RequestException as e:
+            # Pathao never actually responded — a genuine connection failure
+            # or timeout, unlike the HTTPError case above.
             logger.error(f'Pathao request failed: {method} {url} — {e}', exc_info=True)
             raise Exception('Pathao is unreachable right now. Please try again.')
 

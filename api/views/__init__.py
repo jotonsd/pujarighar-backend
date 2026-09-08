@@ -21,7 +21,7 @@ from .stock_views import (
 )
 from .cart_views import (
     get_cart, add_to_cart, update_cart_item,
-    clear_cart, checkout,
+    clear_cart, checkout, get_cart_report,
 )
 from .guest_views import guest_checkout
 from .shipping_views import (
@@ -35,9 +35,9 @@ from .order_views import (
     list_orders, get_order, get_order_tracking, get_order_status_log,
     track_by_order_number,
     confirm_order, pack_order, assign_delivery, dispatch_order,
-    deliver_order, return_order, cancel_order, pos_create_order,
-    mark_cod_paid, update_shipping, apply_discount, update_order_item, delete_order_item,
-    waive_delivery_charge, lookup_recent_order_by_phone,
+    deliver_order, partial_deliver_order, return_order, cancel_order, pos_create_order,
+    mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
+    waive_delivery_charge, lookup_recent_order_by_phone, get_sales_report,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
@@ -50,7 +50,7 @@ from .accounting_views import (
     get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, list_all_notifications, mark_all_read, mark_one_read
-from .discount_views import list_discounts, create_discount, toggle_discount, update_discount, delete_discount
+from .discount_views import list_discounts, create_discount, bulk_create_discount, toggle_discount, update_discount, delete_discount, bulk_delete_discount
 from .review_views import (
     create_review, list_product_reviews, my_order_reviews,
     eligible_order_for_product,
@@ -77,11 +77,12 @@ from .analytics_views import (
     pagespeed_seo, pagespeed_seo_refresh,
 )
 from .courier_views import (
-    providers, update_provider, provider_balance, provider_police_stations,
+    providers, update_provider, regenerate_webhook_secret, provider_balance, provider_police_stations,
     send_to_courier, courier_status, list_consignments, get_consignment,
     create_return_request, get_return_request, list_return_requests,
-    list_payments, get_payment, steadfast_webhook,
+    list_payments, get_payment, steadfast_webhook, pathao_webhook,
 )
+from .whatsapp_views import whatsapp_webhook
 from .blog_views import (
     list_blog_posts, list_all_blog_posts, get_blog_post_by_slug, get_blog_post,
     create_blog_post, update_blog_post, delete_blog_post,
@@ -96,3 +97,8 @@ from .bayna_views import (
     update_booking as update_bayna_booking,
     list_my_bookings as list_my_bayna_bookings,
 )
+from .sms_views import (
+    get_sms_settings, update_sms_settings, list_sms_logs, get_sms_stats,
+    list_sms_recipients, send_bulk_sms_view,
+)
+from .support_views import support_chat

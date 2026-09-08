@@ -34,6 +34,10 @@ class GuestCheckoutSerializer(serializers.Serializer):
     payment_method   = serializers.ChoiceField(choices=['COD'], default='COD')
     apply_delivery   = serializers.BooleanField(default=True)
     delivery_zone    = serializers.ChoiceField(choices=['inside', 'outside'], required=False, allow_null=True, default=None)
+    # Set by the AI support chatbot's create_order call — never something a
+    # real guest checkout form would send — so admin staff can tell an
+    # AI-placed order apart from a normal self-checkout.
+    placed_via_ai    = serializers.BooleanField(default=False)
 
 
 class POSCheckoutSerializer(GuestCheckoutSerializer):

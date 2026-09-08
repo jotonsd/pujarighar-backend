@@ -1,5 +1,6 @@
 import logging
-from api.models import BaynaBooking, Notification, User
+from api.models import BaynaBooking, Notification
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ class BaynaService:
     SERVICE_LABELS_EN = {'PUJARI': 'Pujari', 'DHAKI': 'Dhaki', 'MURTI': 'Murti'}
 
     def _notify_admins(self, booking: BaynaBooking) -> None:
-        admins = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins = get_notified_users()
         label_bn = dict(BaynaBooking.SERVICE_TYPES).get(booking.service_type, booking.service_type)
         label_en = self.SERVICE_LABELS_EN.get(booking.service_type, booking.service_type)
         notifications = [

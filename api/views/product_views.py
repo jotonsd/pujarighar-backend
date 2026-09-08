@@ -45,6 +45,7 @@ def list_products(request):
             has_discount=request.query_params.get('has_discount', '').lower() == 'true',
             is_active=request.query_params.get('is_active'),
             badges=request.query_params.get('badges'),
+            payment_method=request.query_params.get('payment_method'),
             personalize_user=None if is_staff else user,
             personalize_guest_id='' if is_staff else guest_id,
         )
@@ -223,7 +224,7 @@ def popular_by_category(request):
         sold_sq = Subquery(
             SalesOrderItem.objects.filter(
                 product_id=OuterRef('pk'),
-                order__status__in=['CONFIRMED', 'PACKED', 'ASSIGNED', 'ON_THE_WAY', 'DELIVERED'],
+                order__status__in=['CONFIRMED', 'PACKED', 'ASSIGNED', 'PICKED', 'ON_THE_WAY', 'DELIVERED', 'PARTIALLY_DELIVERED'],
             ).values('product_id').annotate(total=Sum('quantity')).values('total')[:1],
             output_field=DecimalField(max_digits=12, decimal_places=2),
         )

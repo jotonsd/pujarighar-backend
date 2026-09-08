@@ -2,15 +2,15 @@ import logging
 import math
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    Account, JournalEntry, JournalLine,
-    ShippingAddress, Notification, User,
+    ShippingAddress, Notification, SiteSetting,
 )
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
+from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
@@ -62,17 +62,31 @@ class CheckoutService:
             s_thana      = profile.thana
             s_post_code  = profile.post_code
 
-        # Generate order number
-        today        = timezone.now().date()
-        prefix       = f'PG-{today:%Y%m%d}-'
-        last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
-        order_number = f'{prefix}{last + 1:04d}'
+        order_number = generate_order_number()
 
         original_subtotal = sum(i.product.original_price * i.quantity for i in items)
         subtotal          = sum(i.product.effective_price * i.quantity for i in items)
-        discount_amount   = original_subtotal - subtotal
-        delivery          = _delivery_charge(s_district or '', delivery_zone)
-        grand_total       = subtotal + delivery
+        product_discount  = original_subtotal - subtotal
+
+        # Welcome discount — a registered customer's very first order only
+        # (guest/POS checkouts go through GuestCheckoutService, not here, so
+        # this never applies to them). "First" means no prior SalesOrder at
+        # all, regardless of its status, so cancel-and-reorder can't be used
+        # to re-earn it.
+        first_order_discount_amount = Decimal('0')
+        is_first_order = not SalesOrder.objects.filter(customer=user).exists()
+        if is_first_order:
+            pct = SiteSetting.get().first_order_discount_percent
+            if pct > 0:
+                first_order_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+
+        subtotal        = subtotal - first_order_discount_amount
+        discount_amount = product_discount + first_order_discount_amount
+        delivery         = _delivery_charge(s_district or '', delivery_zone)
+        grand_total      = subtotal + delivery
 
         # Auto-apply user's cashback balance
         profile          = user.profile
@@ -93,8 +107,10 @@ class CheckoutService:
             shipping_district   = s_district,
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
+            source              = 'WEBSITE',
             subtotal            = subtotal,
             discount_amount     = discount_amount,
+            first_order_discount_amount = first_order_discount_amount,
             delivery_charge     = delivery,
             grand_total         = grand_total,
             cashback_used       = cashback_used,
@@ -126,8 +142,11 @@ class CheckoutService:
             order.cashback_amount = cashback
             order.save(update_fields=['cashback_amount'])
 
-        if payment_method != 'COD':
-            self._create_sale_journal(order, user)
+        # No journal posted here — for an ONLINE order the customer hasn't
+        # actually paid yet at this point (that's confirmed later via
+        # SSLCommerzService.confirm_payment, which posts the full revenue +
+        # cash journal in one go). Posting revenue for a sale that might
+        # still fail/be abandoned overstates the books until payment lands.
         cart.items.all().delete()
         self._notify_admins(order)
 
@@ -149,51 +168,8 @@ class CheckoutService:
                 quantity=-quantity, reference_id=order_id, created_by=user,
             )
 
-    def _create_sale_journal(self, order: SalesOrder, user) -> None:
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
-
-        cogs = sum(
-            item.product.cost_price * item.quantity
-            for item in order.items.select_related('product')
-        )
-
-        entry = JournalEntry.objects.create(
-            entry_number=entry_number, reference_type='SALE', reference_id=order.id,
-            description_bn=f'বিক্রয় — {order.order_number}',
-            description_en=f'Sale — {order.order_number}',
-            created_by=user, is_posted=True,
-        )
-
-        def _acct(code):
-            try:
-                return Account.objects.get(code=code)
-            except Account.DoesNotExist:
-                return None
-
-        lines = [
-            ('1100', order.grand_total,                    Decimal('0')),  # Dr AR
-            ('4000', Decimal('0'),                         order.subtotal),  # Cr Revenue
-            ('4200', Decimal('0'), Decimal(str(order.delivery_charge))),  # Cr Delivery
-            ('2100', Decimal('0'),                         order.tax_amount),  # Cr Tax
-            ('5000', cogs,                                 Decimal('0')),  # Dr COGS
-            ('1300', Decimal('0'),                         cogs),  # Cr Inventory
-        ]
-        cb_used = Decimal(str(order.cashback_used or 0))
-        if cb_used > 0:
-            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
-
-        for code, debit, credit in lines:
-            acct = _acct(code)
-            if acct and (debit or credit):
-                JournalLine.objects.create(
-                    journal_entry=entry, account=acct, debit=debit, credit=credit,
-                )
-
     def _notify_admins(self, order: SalesOrder) -> None:
-        admins  = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins  = get_notified_users()
         amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'

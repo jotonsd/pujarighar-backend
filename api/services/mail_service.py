@@ -4,11 +4,15 @@ import threading
 from decimal import Decimal
 from email.utils import formataddr
 
+from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.db import close_old_connections
 from django.utils import timezone
 
 from api.models import SiteSetting, User
+from api.services.notification_recipients import get_notified_users
+from api.services.short_link_service import get_short_url
+from api.services.sms_service import send_sms
 from api.services.telegram_service import send_telegram_message
 
 logger = logging.getLogger(__name__)
@@ -38,7 +42,7 @@ def _get_connection():
 
 def _admin_emails():
     return list(
-        User.objects.filter(role__code='ADMIN', is_active=True)
+        get_notified_users()
         .exclude(email='')
         .values_list('email', flat=True)
     )
@@ -320,6 +324,44 @@ def send_order_created(order):
         )
 
 
+def send_order_confirmed(order):
+    """Customer SMS only, fired when staff move an order PENDING → CONFIRMED
+    (not at initial placement, which already gets send_order_created's
+    email) — reaches every customer since it doesn't depend on having an
+    email on file."""
+    if not order.shipping_phone:
+        return
+    is_bn = _customer_lang(order) == 'bn'
+    locale = 'bn' if is_bn else 'en'
+    tracking_url = get_short_url(f'{settings.FRONTEND_URL}/{locale}/orders/{order.id}/tracking')
+    name = (order.shipping_name_bn if is_bn else order.shipping_name_en) \
+        or order.shipping_name_bn or order.shipping_name_en or ''
+
+    if is_bn:
+        confirmed_line = f"অর্ডার #{order.order_number} নিশ্চিত হয়েছে।"
+        track_line = f"ট্র্যাক: {tracking_url}"
+        greeting = f"প্রিয় {name}," if name else ""
+        signature = "পূজারিঘর"
+    else:
+        confirmed_line = f"Order #{order.order_number} confirmed."
+        track_line = f"Track: {tracking_url}"
+        greeting = f"Dear {name}," if name else ""
+        signature = "PujariGhar"
+
+    sms_text = "\n".join(l for l in [greeting, confirmed_line, track_line, signature] if l)
+
+    # Bengali/Unicode SMS is capped at 67 chars/segment once multi-part (70
+    # single) — far tighter than GSM-7's 153/160 — so an unusually long
+    # customer name can push the full greeting+signature wording into a 3rd
+    # billed segment. Fall back to just the two essential lines whenever
+    # that happens, rather than always paying for the extra segment.
+    segment_size = 67 if is_bn else 153
+    if len(sms_text) > segment_size * 2:
+        sms_text = "\n".join([confirmed_line, track_line])
+
+    send_sms(order.shipping_phone, sms_text, order=order)
+
+
 def send_order_cancelled(order):
     customer_email = _customer_email(order)
     admins = _admin_emails()
@@ -404,6 +446,28 @@ def send_order_delivered(order):
             f"✅ <b>Order Delivered #{order.order_number}</b>\n"
             f"Customer: {_customer_display(order)}"
         )
+
+
+def send_order_returned(order):
+    """Admin notification only (email + Telegram) — no customer email, no
+    SMS, unlike send_order_cancelled/send_order_delivered."""
+    admins = _admin_emails()
+    if admins:
+        body = _base_html(
+            f"Order Returned #{order.order_number}",
+            f"""
+            <p>An order has been marked as returned.</p>
+            <p><strong>Order #:</strong> {order.order_number}<br>
+            <strong>Customer:</strong> {_customer_display(order)}</p>
+            {_order_summary_html(order, False)}
+            """
+        )
+        _send_async(f"[PujariGhar] Order #{order.order_number} Returned", body, admins)
+
+    send_telegram_message(
+        f"↩️ <b>Order Returned #{order.order_number}</b>\n"
+        f"Customer: {_customer_display(order)}"
+    )
 
 
 # ── Promotional / marketing emails ──────────────────────────────────────────────

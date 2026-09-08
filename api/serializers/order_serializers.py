@@ -1,6 +1,7 @@
+from decimal import Decimal
 from django.conf import settings
 from rest_framework import serializers
-from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User
+from api.models import SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User, Product
 
 
 class SalesOrderItemSerializer(serializers.ModelSerializer):
@@ -25,6 +26,11 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
     def get_package_items(self, obj):
         if not obj.product.is_package:
             return []
+        # Plain .all() (not .select_related(...).all()) so this actually
+        # reads from the prefetch_related('items__product__package_items__component')
+        # cache instead of silently re-querying — calling select_related() or
+        # any other filter on a prefetched related manager bypasses the
+        # prefetch cache and always hits the DB fresh.
         return [
             {
                 'component_name_bn': pi.component.name_bn,
@@ -32,7 +38,7 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
                 'component_sku':     pi.component.sku,
                 'quantity':          str(pi.quantity),
             }
-            for pi in obj.product.package_items.select_related('component').all()
+            for pi in obj.product.package_items.all()
         ]
 
 
@@ -63,7 +69,9 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'পেন্ডিং', 'CONFIRMED': 'নিশ্চিত',
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'ডেলিভারিম্যান নির্ধারিত',
-            'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে', 'CANCELLED': 'বাতিল',
+            'PICKED': 'পিকআপ হয়েছে', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারি হয়েছে',
+            'PARTIALLY_DELIVERED': 'আংশিক ডেলিভারি হয়েছে',
+            'RETURNED': 'ফেরত', 'CANCELLED': 'বাতিল',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=True)
@@ -75,7 +83,9 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'Pending', 'CONFIRMED': 'Confirmed',
             'PACKED': 'Packed', 'ASSIGNED': 'Assigned',
-            'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered', 'CANCELLED': 'Cancelled',
+            'PICKED': 'Picked Up', 'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered',
+            'PARTIALLY_DELIVERED': 'Partially Delivered',
+            'RETURNED': 'Returned', 'CANCELLED': 'Cancelled',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=False)
@@ -137,6 +147,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         model  = SalesOrder
         fields = [
             'id', 'order_number', 'customer', 'customer_email', 'status', 'status_label',
+            'source',
             'payment_method', 'payment_status',
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_address_en',
@@ -159,14 +170,42 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 
 STATUS_LABELS_BN = {
     'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
-    'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'ON_THE_WAY':'পথে আছে',
-    'DELIVERED':'ডেলিভারি হয়েছে', 'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
+    'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'PICKED':'পিকআপ হয়েছে', 'ON_THE_WAY':'পথে আছে',
+    'DELIVERED':'ডেলিভারি হয়েছে', 'PARTIALLY_DELIVERED':'আংশিক ডেলিভারি হয়েছে',
+    'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
 }
 STATUS_LABELS_EN = {
     'PENDING':'Pending', 'CONFIRMED':'Confirmed', 'PACKED':'Packed',
-    'ASSIGNED':'Assigned', 'ON_THE_WAY':'On the Way',
-    'DELIVERED':'Delivered', 'RETURNED':'Returned', 'CANCELLED':'Cancelled',
+    'ASSIGNED':'Assigned', 'PICKED':'Picked Up', 'ON_THE_WAY':'On the Way',
+    'DELIVERED':'Delivered', 'PARTIALLY_DELIVERED':'Partially Delivered',
+    'RETURNED':'Returned', 'CANCELLED':'Cancelled',
 }
+
+
+def _mask_phone(phone: str) -> str:
+    """Keeps the edges, masks exactly the middle 6 characters — for a
+    standard 11-digit BD number ("01712345678") that's "017******78"."""
+    if not phone:
+        return phone
+    n = len(phone)
+    if n <= 6:
+        return '*' * n
+    keep_total = n - 6
+    keep_start = (keep_total + 1) // 2
+    keep_end = keep_total - keep_start
+    return phone[:keep_start] + '*' * 6 + phone[n - keep_end:]
+
+
+def _mask_name(name: str) -> str:
+    """Keeps the first word as-is, masks only the last word — a middle
+    word (if any) is left alone too, only the surname is hidden."""
+    if not name:
+        return name
+    words = name.split()
+    if len(words) <= 1:
+        return name
+    words[-1] = '*' * len(words[-1])
+    return ' '.join(words)
 
 
 class OrderTrackingSerializer(serializers.ModelSerializer):
@@ -177,6 +216,14 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
     payment_method_label_en = serializers.SerializerMethodField()
     delivery_info           = serializers.SerializerMethodField()
     courier_tracking_url    = serializers.SerializerMethodField()
+    is_courier              = serializers.SerializerMethodField()
+    # Publicly reachable with no login (by order id, or by order number +
+    # phone) — mask the customer's PII before it ever leaves the server,
+    # rather than just hiding it in the UI while still shipping it over
+    # the wire.
+    shipping_name_bn        = serializers.SerializerMethodField()
+    shipping_name_en        = serializers.SerializerMethodField()
+    shipping_phone          = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
@@ -187,9 +234,25 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_district', 'shipping_thana',
             'grand_total', 'created_at',
-            'delivery_info', 'courier_tracking_url',
+            'delivery_info', 'courier_tracking_url', 'is_courier',
             'timeline',
         ]
+
+    def get_is_courier(self, obj):
+        # NOT the same as courier_tracking_url being non-null — Steadfast
+        # has no public tracking page (build_courier_tracking_url returns
+        # None for it), so that field alone can't tell "no courier" apart
+        # from "courier with no public tracker".
+        return bool(getattr(obj, 'courier_consignment', None))
+
+    def get_shipping_name_bn(self, obj):
+        return _mask_name(obj.shipping_name_bn)
+
+    def get_shipping_name_en(self, obj):
+        return _mask_name(obj.shipping_name_en)
+
+    def get_shipping_phone(self, obj):
+        return _mask_phone(obj.shipping_phone)
 
     def get_status_label_bn(self, obj):
         if obj.status == 'ASSIGNED':
@@ -253,3 +316,32 @@ class AssignDeliverySerializer(serializers.Serializer):
 class OrderCancelSerializer(serializers.Serializer):
     note_bn = serializers.CharField(required=False, allow_blank=True, default='')
     note_en = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class PartialDeliverItemSerializer(serializers.Serializer):
+    item_id  = serializers.UUIDField()
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+
+class PartialDeliverSerializer(serializers.Serializer):
+    items   = PartialDeliverItemSerializer(many=True)
+    note_bn = serializers.CharField(required=False, allow_blank=True, default='')
+    note_en = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError('At least one returned item is required')
+        return value
+
+
+class AddOrderItemSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+    def validate_product_id(self, value):
+        if not Product.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError({
+                'message_bn': 'পণ্য পাওয়া যায়নি',
+                'message_en': 'Product not found',
+            })
+        return value

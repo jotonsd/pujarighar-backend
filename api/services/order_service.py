@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
@@ -24,7 +24,27 @@ class OrderService:
 
     def list_orders(self, user: User, params: dict):
         role = user.role.code
-        qs   = SalesOrder.objects.select_related('customer', 'delivery').prefetch_related('items', 'status_logs')
+        # Matched to exactly what SalesOrderSerializer walks for a list page:
+        # items -> product -> images (product_image) and -> package_items ->
+        # component (for package products), delivery -> delivery_person ->
+        # profile, courier_consignment -> provider and -> events (tracking
+        # history). Without these, each was a separate query PER ORDER ROW
+        # (N+1 — some of them N+1 *inside* an N+1, for package items) — the
+        # actual cause of a slow list page, not the page size itself.
+        # status_logs was being prefetched here too but the list serializer
+        # never reads it — that was a wasted query on every single page load.
+        qs = (
+            SalesOrder.objects
+            .select_related(
+                'customer', 'delivery', 'delivery__delivery_person', 'delivery__delivery_person__profile',
+                'courier_consignment', 'courier_consignment__provider',
+            )
+            .prefetch_related(
+                'items__product__images',
+                'items__product__package_items__component',
+                'courier_consignment__events',
+            )
+        )
 
         if role == 'CUSTOMER':
             qs = qs.filter(customer=user)
@@ -50,6 +70,55 @@ class OrderService:
         if params.get('to'):
             qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
         return qs
+
+    def get_sales_report(self, params: dict) -> dict:
+        """Order-level sales listing for the admin Reports menu — one row per
+        order (the natural unit for "what did we sell and to whom"), distinct
+        from Sales Summary (period-aggregated chart) and the Income Report
+        (ledger entries, not orders). Same date/payment filter conventions as
+        the other Reports-menu endpoints (purchases, supplier returns)."""
+        qs = SalesOrder.objects.select_related('customer').prefetch_related('items')
+
+        if params.get('from'):
+            qs = qs.filter(created_at__gte=local_day_start(params['from']))
+        if params.get('to'):
+            qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
+        if params.get('payment_method'):
+            qs = qs.filter(payment_method=params['payment_method'])
+        if params.get('payment_status'):
+            qs = qs.filter(payment_status=params['payment_status'])
+        if params.get('status'):
+            qs = qs.filter(status=params['status'])
+
+        rows = []
+        total_amount = Decimal('0')
+        for order in qs.order_by('-created_at'):
+            total_amount += order.grand_total
+            rows.append({
+                'id': str(order.id),
+                'date': order.created_at.isoformat(),
+                'order_number': order.order_number,
+                'customer_name': order.shipping_name_bn or order.shipping_name_en,
+                'phone': order.shipping_phone,
+                'payment_method': order.payment_method,
+                'payment_status': order.payment_status,
+                'status': order.status,
+                # len(...all()) reuses the prefetch_related cache — .count()
+                # on a related manager always issues its own fresh query
+                # regardless of prefetching, which would mean one extra query
+                # per order in the report.
+                'items_count': len(order.items.all()),
+                'subtotal': str(order.subtotal),
+                'discount_amount': str(order.discount_amount),
+                'delivery_charge': str(order.delivery_charge),
+                'grand_total': str(order.grand_total),
+            })
+
+        return {
+            'rows': rows,
+            'total_orders': len(rows),
+            'total_amount': str(total_amount),
+        }
 
     def find_recent_shipping_by_phone(self, phone: str) -> SalesOrder | None:
         """POS auto-fill fallback for repeat guest customers — lookup_user_by_phone
@@ -110,10 +179,21 @@ class OrderService:
         logger.info(f'Delivery charge recalculated for order {order.order_number}: ৳{new_charge} (weight={weight}kg, zone={zone})')
         return order
 
-    def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
-        order = self._transition(order, 'ON_THE_WAY', user)
+    def pick_up(self, order: SalesOrder, user: User) -> SalesOrder:
+        order = self._transition(order, 'PICKED', user)
         order.delivery.picked_up_at = timezone.now()
         order.delivery.save(update_fields=['picked_up_at'])
+        return order
+
+    def dispatch(self, order: SalesOrder, user: User) -> SalesOrder:
+        order = self._transition(order, 'ON_THE_WAY', user)
+        # Only set picked_up_at here if pick_up() didn't already (ASSIGNED
+        # can go straight to ON_THE_WAY, skipping PICKED entirely — see
+        # ALLOWED_TRANSITIONS) — don't clobber the real, earlier pickup
+        # timestamp with "now" if it was already recorded.
+        if not order.delivery.picked_up_at:
+            order.delivery.picked_up_at = timezone.now()
+            order.delivery.save(update_fields=['picked_up_at'])
         return order
 
     @transaction.atomic
@@ -175,8 +255,10 @@ class OrderService:
             })
 
         # Same POS staff-discount calculation used at checkout (guest_service.py) —
-        # layered on top of whatever's already in subtotal/discount_amount, clamped
-        # so the order can't go negative.
+        # layered on top of whatever's already in subtotal, clamped so the
+        # order can't go negative. Stored in staff_discount_amount (not just
+        # folded into subtotal/discount_amount directly) so it survives a
+        # later item add/quantity-change/removal — see _recalc_order_totals.
         extra_discount = Decimal('0')
         if discount_type == 'PERCENTAGE':
             extra_discount = (order.subtotal * discount_value / 100).quantize(Decimal('0.01'))
@@ -184,10 +266,17 @@ class OrderService:
             extra_discount = discount_value
         extra_discount = min(extra_discount, order.subtotal)
 
-        order.subtotal -= extra_discount
-        order.discount_amount += extra_discount
-        order.grand_total = order.subtotal + order.delivery_charge
-        order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
+        order.staff_discount_amount = (order.staff_discount_amount or Decimal('0')) + extra_discount
+        order.save(update_fields=['staff_discount_amount'])
+        self._recalc_order_totals(order)
+        # A non-COD order posts its SALE journal immediately at checkout —
+        # before payment is even confirmed, while still PENDING/UNPAID, which
+        # is exactly the window a discount can be applied in. Without this,
+        # the journal's Revenue/AR would stay stale at the pre-discount
+        # amount while order.subtotal/grand_total move to the discounted
+        # figure. No-ops if no SALE/PAYMENT journal exists yet (the common
+        # COD case) — same as the other item-editing methods.
+        self._resync_order_item_journal(order)
 
         logger.info(f'Discount applied to order {order.order_number} by {user.email}: {discount_type} {discount_value} (৳{extra_discount})')
         return order
@@ -267,6 +356,50 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User) -> SalesOrder:
+        """Add a product to a not-yet-shipped order — same gate as
+        update_item_quantity/delete_item. If the product's already on the
+        order, bumps that line's quantity instead of creating a duplicate
+        row (mirrors how re-adding an item already in the cart behaves at
+        checkout)."""
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারে পণ্য যোগ করা যায়',
+                'message_en': 'Products can only be added to pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারে পণ্য যোগ করা যাবে না',
+                'message_en': 'Products cannot be added to an already-paid order',
+            })
+        if quantity <= 0:
+            raise ValidationError({
+                'message_bn': 'পরিমাণ শূন্যের বেশি হতে হবে',
+                'message_en': 'Quantity must be greater than zero',
+            })
+
+        existing = order.items.filter(product=product).first()
+        if existing:
+            return self.update_item_quantity(order, existing, existing.quantity + quantity, user)
+
+        self._adjust_order_item_stock(product, quantity, order.id, user)
+
+        SalesOrderItem.objects.create(
+            order=order, product=product,
+            product_name_bn=product.name_bn, product_name_en=product.name_en,
+            original_unit_price=product.original_price,
+            unit_price=product.effective_price,
+            quantity=quantity,
+            line_total=product.effective_price * quantity,
+        )
+
+        self._recalc_order_totals(order)
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Order {order.order_number} item added: {product.sku} x{quantity} by {user.email}')
+        return order
+
+    @transaction.atomic
     def delete_item(self, order: SalesOrder, item: SalesOrderItem, user: User) -> SalesOrder:
         """Remove a mistakenly-added line item from a not-yet-shipped order —
         same gate and stock/totals/journal reconciliation as
@@ -310,6 +443,91 @@ class OrderService:
             )
         self._create_return_journal(order, user)
         self._reverse_referral_bonus(order, user)
+        return order
+
+    @transaction.atomic
+    def partial_deliver(self, order: SalesOrder, user: User, returned_items: list,
+                        note_bn: str = '', note_en: str = '') -> SalesOrder:
+        """returned_items: [{'item_id': <SalesOrderItem id>, 'quantity': Decimal}, ...] —
+        the items (and how much of each) that did NOT actually reach the
+        customer. Always a manual, admin-picked call — couriers only ever
+        report a lump collected_amount, never which item failed, so there's
+        nothing to auto-drive this from a webhook.
+
+        Reachable from ON_THE_WAY (courier reports the shortfall directly)
+        or from an already-DELIVERED order (the more common real case: full
+        delivery got recorded first, and the gap only surfaces once COD is
+        reconciled) — the latter has already posted the full payment/
+        cashback/referral journals via deliver(), so those get reversed for
+        just the returned slice here rather than assuming a clean slate.
+
+        No cashback or referral bonus for the delivered portion either way
+        (deliberately skipped, not prorated) — mirrors return_order()'s
+        all-or-nothing treatment rather than inventing a partial-credit rule.
+        """
+        came_from_delivered = order.status == 'DELIVERED'
+
+        # Validate + resolve every returned line BEFORE transitioning, so the
+        # auto-generated item summary can be appended to the status log's
+        # note in the same _transition() call that creates it (rather than
+        # editing the log row after the fact).
+        items_by_id = {str(i.id): i for i in order.items.select_related('product')}
+        resolved = []
+        for entry in returned_items:
+            item = items_by_id.get(str(entry['item_id']))
+            if not item:
+                raise ValidationError({
+                    'message_bn': 'অর্ডারে এই আইটেম পাওয়া যায়নি',
+                    'message_en': 'Item not found on this order',
+                })
+            qty = Decimal(str(entry['quantity']))
+            if qty <= 0 or qty > item.quantity:
+                raise ValidationError({
+                    'message_bn': f'{item.product_name_bn} এর জন্য সঠিক পরিমাণ দিন',
+                    'message_en': f'Enter a valid quantity for {item.product_name_en}',
+                })
+            resolved.append((item, qty))
+
+        summary_bn = 'ফেরত: ' + ', '.join(f'{i.product_name_bn} x{q}' for i, q in resolved)
+        summary_en = 'Returned: ' + ', '.join(f'{i.product_name_en or i.product_name_bn} x{q}' for i, q in resolved)
+        full_note_bn = f'{note_bn} — {summary_bn}' if note_bn else summary_bn
+        full_note_en = f'{note_en} — {summary_en}' if note_en else summary_en
+
+        order = self._transition(order, 'PARTIALLY_DELIVERED', user, full_note_bn, full_note_en)
+        if not order.delivery.delivered_at:
+            order.delivery.delivered_at = timezone.now()
+            order.delivery.save(update_fields=['delivered_at'])
+
+        returned_value = Decimal('0')
+        returned_cogs = Decimal('0')
+        for item, qty in resolved:
+            StockMovement.objects.create(
+                product=item.product, movement_type='RETURN',
+                quantity=qty, reference_id=order.id, created_by=user,
+            )
+            returned_value += item.unit_price * qty
+            returned_cogs += item.product.cost_price * qty
+
+        if came_from_delivered:
+            # Full payment already posted — reverse just the returned slice,
+            # then claw back any cashback/referral that order's DELIVERED
+            # transition already credited.
+            self._create_partial_return_journal(order, user, returned_value, returned_cogs)
+            self._reverse_cashback(order, user)
+            self._reverse_referral_bonus(order, user)
+        else:
+            # Fresh from ON_THE_WAY — nothing posted yet, so post one
+            # payment journal scoped to what was actually delivered.
+            if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
+                order.payment_status = 'PAID'
+                order.save(update_fields=['payment_status'])
+            if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+                self._create_partial_payment_journal(order, user, returned_value, returned_cogs)
+
+        logger.info(
+            f'Order {order.order_number} partially delivered by {user.email} '
+            f'(returned value ৳{returned_value}, from {"DELIVERED" if came_from_delivered else "ON_THE_WAY"})'
+        )
         return order
 
     @transaction.atomic
@@ -393,10 +611,28 @@ class OrderService:
         # order.items.all() would silently reuse get_order()'s prefetch_related
         # cache here — stale from before this same request's delete/quantity
         # change — so query the base manager directly to force a fresh read.
-        subtotal = SalesOrderItem.objects.filter(order=order).aggregate(total=Sum('line_total'))['total'] or Decimal('0')
-        order.subtotal    = subtotal
-        order.grand_total = subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
-        order.save(update_fields=['subtotal', 'grand_total'])
+        #
+        # discount_amount mixes two different things that both need to
+        # survive an item being added/changed/removed: each item's own
+        # product-level discount (original_unit_price vs unit_price — already
+        # baked into line_total, so it's recomputed fresh from current items
+        # every time) and a manually-applied staff/POS discount, which isn't
+        # stored on any item at all. Without separately tracking the latter
+        # in staff_discount_amount, a naive "subtotal = sum(line_total)"
+        # here would silently wipe out any staff discount the moment an item
+        # changed — discount_amount would stay stale while the customer-
+        # facing subtotal jumped back up as if the discount never happened.
+        items = list(SalesOrderItem.objects.filter(order=order))
+        raw_total = sum((i.line_total for i in items), Decimal('0'))
+        original_total = sum(((i.original_unit_price or i.unit_price) * i.quantity for i in items), Decimal('0'))
+        product_discount = original_total - raw_total
+        staff_discount = order.staff_discount_amount or Decimal('0')
+        first_order_discount = order.first_order_discount_amount or Decimal('0')
+
+        order.subtotal        = raw_total - staff_discount - first_order_discount
+        order.discount_amount = product_discount + staff_discount + first_order_discount
+        order.grand_total     = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
 
     def _resync_order_item_journal(self, order: SalesOrder) -> None:
         """A non-COD order posts its SALE journal immediately at checkout
@@ -542,6 +778,34 @@ class OrderService:
         bonus.delete()  # allow bonus to fire again if referred user places a new delivered order
         logger.info(f'Referral bonus ৳{amount} reversed from {referrer.email} for returned order {order.order_number}')
 
+    def _reverse_cashback(self, order: SalesOrder, actor: User) -> None:
+        """Claws back the cashback deliver() credited, for the partial_deliver()
+        case where an order already went through DELIVERED before the
+        shortfall surfaced. No-ops if deliver() never actually credited any
+        (guest order, no customer, or cashback_amount was 0)."""
+        if not JournalEntry.objects.filter(reference_type='CASHBACK', reference_id=order.id).exists():
+            return
+        amount = Decimal(str(order.cashback_amount or 0))
+        if amount <= 0 or order.is_guest or not order.customer_id:
+            return
+        order.customer.profile.cashback_balance = F('cashback_balance') - amount
+        order.customer.profile.save(update_fields=['cashback_balance'])
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='CASHBACK_REVERSAL',
+            reference_id=order.id,
+            description_bn=f'ক্যাশব্যাক বিপরীত — {order.order_number}',
+            description_en=f'Cashback Reversed — {order.order_number}',
+            created_by=actor, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('2250', amount,         Decimal('0')),  # Dr Cashback Payable (liability cleared)
+            ('6350', Decimal('0'),   amount),        # Cr Cashback Expense (reversed)
+        ]:
+            acct = self._acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+        logger.info(f'Cashback ৳{amount} reversed for partially-returned order {order.order_number}')
+
     def _create_return_journal(self, order: SalesOrder, user: User) -> None:
         cogs = sum(
             item.product.cost_price * item.quantity
@@ -561,6 +825,65 @@ class OrderService:
             ('1000', Decimal('0'),  revenue),       # Cr Cash (refund)
             ('5000', Decimal('0'),  cogs),          # Cr COGS (reversal)
         ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_partial_return_journal(self, order: SalesOrder, user: User,
+                                       returned_value: Decimal, returned_cogs: Decimal) -> None:
+        """Same shape as _create_return_journal, scoped to just the returned
+        items' slice — used when partial_deliver() is correcting an order
+        that already went through deliver() (full payment journal already
+        posted for the whole order), so only the shortfall gets reversed."""
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='RETURN',
+            reference_id=order.id,
+            description_bn=f'আংশিক ফেরত — {order.order_number}',
+            description_en=f'Partial Return — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('4000', returned_value, Decimal('0')),  # Dr Sales Revenue (reversal, returned slice only)
+            ('1300', returned_cogs,  Decimal('0')),  # Dr Inventory (stock back)
+            ('1000', Decimal('0'),   returned_value),# Cr Cash (refund, returned slice only)
+            ('5000', Decimal('0'),   returned_cogs), # Cr COGS (reversal)
+        ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_partial_payment_journal(self, order: SalesOrder, user: User,
+                                        returned_value: Decimal, returned_cogs: Decimal) -> None:
+        """Same shape as _create_payment_journal, scoped to only what was
+        actually delivered — used when partial_deliver() applies fresh from
+        ON_THE_WAY (no payment journal posted yet), so revenue/COGS/cash are
+        recognized for the delivered portion only, never the returned one."""
+        full_cogs = sum(item.product.cost_price * item.quantity for item in order.items.select_related('product'))
+        delivered_revenue = order.subtotal - returned_value  # subtotal already net of discount
+        delivered_cogs = full_cogs - returned_cogs
+        cb_used = Decimal(str(order.cashback_used or 0))
+        # Mirrors grand_total's own formula (revenue + delivery - cashback_used),
+        # just scoped to the delivered slice, so the entry balances exactly
+        # the same way _create_payment_journal's full-order version does.
+        cash_received = delivered_revenue + Decimal(str(order.delivery_charge)) - cb_used
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='PAYMENT',
+            reference_id=order.id,
+            description_bn=f'আংশিক পেমেন্ট — {order.order_number}',
+            description_en=f'Partial Payment — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('1000', cash_received,   Decimal('0')),                        # Dr Cash (delivered slice + delivery fee)
+            ('5000', delivered_cogs,  Decimal('0')),                        # Dr COGS (delivered slice only)
+            ('4000', Decimal('0'),    delivered_revenue),                   # Cr Revenue (delivered slice only)
+            ('4200', Decimal('0'),    Decimal(str(order.delivery_charge))), # Cr Delivery Income
+            ('1300', Decimal('0'),    delivered_cogs),                      # Cr Inventory (delivered slice only)
+        ]
+        if cb_used > 0:
+            lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable (discharged)
         for code, debit, credit in lines:
             acct = self._acct(code)
             if acct and (debit or credit):

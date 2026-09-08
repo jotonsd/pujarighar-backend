@@ -69,10 +69,10 @@ class Role(BaseModel):
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, phone=None, password=None, **extra):
-        if not email:
-            raise ValueError('Email is required')
-        user = self.model(email=self.normalize_email(email), phone=phone, **extra)
+    def create_user(self, email=None, phone=None, password=None, **extra):
+        if not email and not phone:
+            raise ValueError('Email or phone is required')
+        user = self.model(email=self.normalize_email(email) if email else None, phone=phone, **extra)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -88,7 +88,10 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     id                 = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     username           = None
-    email              = models.EmailField(unique=True)
+    # Nullable — registration only requires one of email/phone, not both
+    # (see RegisterSerializer). unique=True still holds across non-null
+    # values; multiple NULLs are allowed by both Postgres and MySQL.
+    email              = models.EmailField(unique=True, null=True, blank=True)
     phone              = models.CharField(max_length=15, unique=True, null=True, blank=True)
     role               = models.ForeignKey(Role, on_delete=models.PROTECT, related_name='users')
     preferred_language = models.CharField(
@@ -446,8 +449,10 @@ ORDER_STATUS = [
     ('CONFIRMED',  'নিশ্চিত'),
     ('PACKED',     'প্যাক হয়েছে'),
     ('ASSIGNED',   'ডেলিভারিম্যান নির্ধারিত'),
+    ('PICKED',     'পিকআপ হয়েছে'),
     ('ON_THE_WAY', 'পথে আছে'),
     ('DELIVERED',  'ডেলিভারি হয়েছে'),
+    ('PARTIALLY_DELIVERED', 'আংশিক ডেলিভারি হয়েছে'),
     ('RETURNED',   'ফেরত'),
     ('CANCELLED',  'বাতিল'),
 ]
@@ -462,13 +467,31 @@ PAYMENT_STATUS_CHOICES = [
     ('PAID',   'পরিশোধিত'),
 ]
 
+ORDER_SOURCE_CHOICES = [
+    ('WEBSITE',    'ওয়েবসাইট'),
+    ('AI_CHATBOT', 'ব্রাহ্মণ AI'),
+    ('POS',        'POS'),
+]
+
 ALLOWED_TRANSITIONS = {
     'PENDING':    ['CONFIRMED', 'CANCELLED'],
     'CONFIRMED':  ['PACKED',    'CANCELLED'],
     'PACKED':     ['ASSIGNED',  'CANCELLED'],
-    'ASSIGNED':   ['ON_THE_WAY'],
-    'ON_THE_WAY': ['DELIVERED'],
-    'DELIVERED':  ['RETURNED'],
+    # PICKED is an optional waypoint, not a mandatory one — a courier that
+    # reports a distinct pickup event (Pathao) passes through it, but
+    # internal delivery (one admin action, no separate "picked up" click)
+    # and couriers with no such granularity (Steadfast) still go straight
+    # from ASSIGNED to ON_THE_WAY exactly as before.
+    'ASSIGNED':   ['PICKED', 'ON_THE_WAY'],
+    'PICKED':     ['ON_THE_WAY'],
+    # PARTIALLY_DELIVERED covers two real cases: the courier reports it
+    # directly while still ON_THE_WAY, or (more common in practice) an order
+    # already marked DELIVERED turns out on reconciliation to have had some
+    # items rejected/returned — partial_deliver() (order_service.py) handles
+    # both, reversing the already-posted payment/cashback/referral journals
+    # in the second case rather than assuming a clean slate.
+    'ON_THE_WAY': ['DELIVERED', 'PARTIALLY_DELIVERED'],
+    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED'],
 }
 
 
@@ -490,6 +513,20 @@ class SalesOrder(BaseModel):
     payment_status      = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='UNPAID')
     subtotal            = models.DecimalField(max_digits=12, decimal_places=2)
     discount_amount     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Portion of discount_amount that's a manually-applied staff/POS discount
+    # (apply_discount / POS checkout's discount_type+value), as opposed to
+    # each item's own product-level discount (already baked into its
+    # unit_price). discount_amount itself is recomputed from current items
+    # every time they change; this field is what lets that recomputation
+    # still know how much staff discount to keep subtracting, since that
+    # portion isn't stored on any item.
+    staff_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Auto-applied welcome discount on a registered customer's very first
+    # order (SiteSetting.first_order_discount_percent) — tracked the same
+    # way as staff_discount_amount, so a later item edit's recalculation
+    # (_recalc_order_totals) keeps subtracting it correctly instead of
+    # silently losing it.
+    first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
@@ -497,9 +534,24 @@ class SalesOrder(BaseModel):
     cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     notes_bn            = models.TextField(blank=True)
     notes_en            = models.TextField(blank=True)
+    # Which channel placed this order — lets admin staff tell an AI-placed
+    # order, a staff POS sale, and a normal website checkout apart at a
+    # glance. WEBSITE covers both a real anonymous guest and a logged-in
+    # customer's own self-checkout.
+    source              = models.CharField(max_length=20, choices=ORDER_SOURCE_CHOICES, default='WEBSITE')
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # Matches Meta.ordering — the admin order list's default sort,
+            # otherwise a full sequential scan + sort on every page load as
+            # the table grows.
+            models.Index(fields=['-created_at']),
+            # The other columns the admin order list commonly filters by.
+            models.Index(fields=['status']),
+            models.Index(fields=['payment_status']),
+            models.Index(fields=['shipping_phone']),
+        ]
 
     def __str__(self):
         return self.order_number
@@ -916,9 +968,35 @@ class SiteSetting(models.Model):
     email_default_from = models.EmailField(blank=True, default='')
     # Referral
     referral_bonus_amount = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('8.00'))
+    # Auto-applied on a registered customer's very first order (self-checkout
+    # only) — 0 disables it.
+    first_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('20.00'))
     # Telegram admin notifications
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
+    # SMS customer notifications (BulkSMSBD)
+    sms_api_key   = models.CharField(max_length=255, blank=True, default='')
+    sms_sender_id = models.CharField(max_length=32, blank=True, default='')
+    # AI product support chat (Gemini) — model name is admin-editable (not
+    # hardcoded) since Google renames/retires free-tier model ids over time.
+    gemini_api_key = models.CharField(max_length=255, blank=True, default='')
+    gemini_model   = models.CharField(max_length=64, blank=True, default='gemini-3.6-flash')
+    # Off by default — placing real orders (stock deduction, DB writes) is a
+    # materially bigger risk than the read-only Q&A tools, so this needs an
+    # explicit admin opt-in rather than working the moment a key is added.
+    ai_ordering_enabled = models.BooleanField(default=False)
+    # ব্রাহ্মণ AI on WhatsApp (Meta Cloud API) — same support_chat_service
+    # logic as the website widget, reached via a WhatsApp Business number
+    # instead. whatsapp_verify_token is invented by the admin (not issued by
+    # Meta) and echoed back during the webhook verification handshake;
+    # whatsapp_app_secret verifies the X-Hub-Signature-256 on every real
+    # event, same role encrypted courier webhook secrets play elsewhere.
+    whatsapp_phone_number_id = models.CharField(max_length=64, blank=True, default='')
+    whatsapp_business_account_id = models.CharField(max_length=64, blank=True, default='')
+    whatsapp_access_token = models.CharField(max_length=1024, blank=True, default='')
+    whatsapp_app_secret = models.CharField(max_length=255, blank=True, default='')
+    whatsapp_verify_token = models.CharField(max_length=255, blank=True, default='')
+    whatsapp_enabled = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = 'Site Setting'
@@ -927,6 +1005,44 @@ class SiteSetting(models.Model):
     def get(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class SmsLog(models.Model):
+    STATUS_CHOICES = [
+        ('SUCCESS', 'সফল'),
+        ('FAILED',  'ব্যর্থ'),
+    ]
+    id            = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    order         = models.ForeignKey(SalesOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='sms_logs')
+    phone         = models.CharField(max_length=20)
+    message       = models.TextField()
+    status        = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    response_code = models.CharField(max_length=10, blank=True, default='')
+    response_text = models.CharField(max_length=255, blank=True, default='')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class WhatsAppConversation(models.Model):
+    """One row per customer WhatsApp number — the server-side stand-in for
+    what the website widget's browser normally holds (history, pending_order),
+    since there's no frontend session on WhatsApp to carry that between
+    messages. history mirrors support_chat_service.answer()'s expected shape
+    exactly: [{'role': 'user'|'model', 'text': str}, ...]."""
+    id                    = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    wa_id                 = models.CharField(max_length=32, unique=True)
+    history               = models.JSONField(default=list, blank=True)
+    pending_order         = models.JSONField(null=True, blank=True)
+    # Guards against Meta's webhook retries (delivery isn't exactly-once)
+    # reprocessing and double-replying to the same inbound message.
+    last_message_id       = models.CharField(max_length=128, blank=True, default='')
+    created_at            = models.DateTimeField(auto_now_add=True)
+    updated_at            = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
 
 
 # ─── Referral ─────────────────────────────────────────────────────────────────
@@ -1092,6 +1208,15 @@ class CourierProvider(models.Model):
     api_key_encrypted        = models.TextField(blank=True, default='')
     secret_key_encrypted     = models.TextField(blank=True, default='')
     webhook_secret_encrypted = models.TextField(blank=True, default='')
+    # Pathao's webhook setup has its own one-time verification challenge,
+    # separate from webhook_secret_encrypted above (which WE generate and
+    # give to the courier, checked via X-PATHAO-Signature on every real
+    # event) — this one Pathao generates and shows on ITS dashboard when the
+    # webhook URL is registered; our endpoint has to echo it straight back
+    # as a response header to prove we control the URL. Not encrypted: its
+    # confidentiality protects nothing (it's an echo-back token, not a
+    # credential that grants access), unlike the other secret fields here.
+    webhook_verification_secret = models.CharField(max_length=100, blank=True, default='')
     is_active                = models.BooleanField(default=False)
     # OAuth providers (e.g. Pathao) — api_key/secret_key above double as
     # client_id/client_secret for these; username/password are the merchant
@@ -1154,6 +1279,26 @@ class CourierReturnRequest(BaseModel):
     reason               = models.TextField(blank=True, default='')
     status               = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_by           = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+
+# ─── Short Links ──────────────────────────────────────────────────────────────
+# Self-hosted URL shortener — used to fit long links (e.g. a UUID-keyed order
+# tracking URL) into SMS without eating extra segments, without depending on
+# a third-party shortening service.
+
+def _gen_short_code():
+    chars = string.ascii_letters + string.digits
+    while True:
+        code = ''.join(secrets.choice(chars) for _ in range(7))
+        if not ShortLink.objects.filter(code=code).exists():
+            return code
+
+
+class ShortLink(models.Model):
+    code       = models.CharField(max_length=12, unique=True, default=_gen_short_code, editable=False)
+    target_url = models.URLField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+    hits       = models.PositiveIntegerField(default=0)
 
 
 # ─── Blog ───────────────────────────────────────────────────────────────────────

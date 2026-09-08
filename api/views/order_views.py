@@ -3,12 +3,13 @@ from decimal import Decimal
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.models import SalesOrder, OrderStatusLog
+from api.models import SalesOrder, OrderStatusLog, Product
 from api.serializers.guest_serializers import POSCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
+    AddOrderItemSerializer, PartialDeliverSerializer,
 )
 from api.services.order_service import OrderService
 from api.services import mail_service
@@ -40,9 +41,11 @@ def pos_create_order(request):
             d, customer=customer,
             discount_type=d.get('discount_type', 'NONE'),
             discount_value=d.get('discount_value', 0),
+            is_pos=True,
         )
         order = _svc.confirm(order, request.user)
         mail_service.send_order_created(order)
+        mail_service.send_order_confirmed(order)
         return ApiResponse(
             message="POS order created",
             data=SalesOrderSerializer(order, context={'request': request}).data,
@@ -171,7 +174,9 @@ def get_order_status_log(request, pk):
 def confirm_order(request, pk):
     try:
         order = _svc.get_order(pk)
-        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(_svc.confirm(order, request.user), context={'request': request}).data)
+        confirmed = _svc.confirm(order, request.user)
+        mail_service.send_order_confirmed(confirmed)
+        return ApiResponse(message="Order confirmed", data=SalesOrderSerializer(confirmed, context={'request': request}).data)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -242,6 +247,34 @@ def deliver_order(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdminOrDelivery])
+def partial_deliver_order(request, pk):
+    try:
+        order = _svc.get_order(pk)
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+            return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message="Order not found", errors="Not found", status_code=404)
+
+    serializer = PartialDeliverSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
+    try:
+        d = serializer.validated_data
+        updated = _svc.partial_deliver(
+            order, request.user, d['items'],
+            d.get('note_bn', ''), d.get('note_en', ''),
+        )
+        return ApiResponse(
+            message="Order marked as partially delivered",
+            data=SalesOrderSerializer(updated, context={'request': request}).data,
+        )
+    except Exception as e:
+        logger.error(f"Partial deliver error: {e}", exc_info=True)
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
 def return_order(request, pk):
     try:
         order = _svc.get_order(pk)
@@ -249,9 +282,11 @@ def return_order(request, pk):
             return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
         note_bn = request.data.get('note_bn', '')
         note_en = request.data.get('note_en', '')
+        returned = _svc.return_order(order, request.user, note_bn, note_en)
+        mail_service.send_order_returned(returned)
         return ApiResponse(
             message="Order returned",
-            data=SalesOrderSerializer(_svc.return_order(order, request.user, note_bn, note_en), context={'request': request}).data,
+            data=SalesOrderSerializer(returned, context={'request': request}).data,
         )
     except SalesOrder.DoesNotExist:
         return ApiResponse(message="Order not found", errors="Not found", status_code=404)
@@ -363,6 +398,28 @@ def update_shipping(request, pk):
     return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order, context={'request': request}).data)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
+def add_order_item(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    serializer = AddOrderItemSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message='Validation failed', errors=serializer.errors, status_code=422)
+    d = serializer.validated_data
+
+    try:
+        product = Product.objects.get(pk=d['product_id'])
+        updated = _svc.add_item(order, product, d['quantity'], request.user)
+        return ApiResponse(message='Item added', data=SalesOrderSerializer(updated, context={'request': request}).data)
+    except Exception as e:
+        logger.error(f'Add order item error: {e}', exc_info=True)
+        return api_error(e)
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def update_order_item(request, pk, item_id):
@@ -406,3 +463,16 @@ def delete_order_item(request, pk, item_id):
     except Exception as e:
         logger.error(f'Delete order item error: {e}', exc_info=True)
         return api_error(e)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('reports_sales', 'view')])
+def get_sales_report(request):
+    data = _svc.get_sales_report({
+        'from':            request.query_params.get('from', ''),
+        'to':              request.query_params.get('to', ''),
+        'status':          request.query_params.get('status', ''),
+        'payment_status':  request.query_params.get('payment_status', ''),
+        'payment_method':  request.query_params.get('payment_method', ''),
+    })
+    return ApiResponse(message='Sales report retrieved', data=data)

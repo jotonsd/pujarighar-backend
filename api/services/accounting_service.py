@@ -1,3 +1,4 @@
+import calendar
 import logging
 from collections import defaultdict
 from datetime import date
@@ -279,7 +280,7 @@ class AccountingService:
         ]
 
         # Order status breakdown
-        statuses = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'ON_THE_WAY', 'DELIVERED', 'RETURNED', 'CANCELLED']
+        statuses = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'PICKED', 'ON_THE_WAY', 'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'CANCELLED']
         status_breakdown = [
             {'status': s, 'count': SalesOrder.objects.filter(status=s).count()}
             for s in statuses
@@ -321,6 +322,33 @@ class AccountingService:
             if last_month_rev > 0 else None
         )
 
+        # ── This month vs last month order count, by day-of-month ─────────────
+        # Aligned by day number (1st vs 1st, 2nd vs 2nd, ...) rather than by
+        # weekday, so the single-month overview chart shows how far this
+        # month has progressed against the same point in the prior one.
+        def _daily_order_counts(date_from, date_to):
+            counts: dict = defaultdict(int)
+            for created_at in SalesOrder.objects.filter(
+                created_at__gte=local_day_start(date_from),
+                created_at__lt=local_day_end_exclusive(date_to),
+            ).values_list('created_at', flat=True):
+                counts[local_period_bucket(created_at, 'day').day] += 1
+            return counts
+
+        this_month_daily = _daily_order_counts(month_start, today)
+        last_month_daily = _daily_order_counts(last_month_start, last_month_end)
+        # Show the full previous month for context even though this month's
+        # line necessarily stops at today.
+        days_in_chart = max(calendar.monthrange(today.year, today.month)[1], last_month_end.day)
+        order_comparison_chart = [
+            {
+                'day':         d,
+                'this_month':  this_month_daily.get(d, 0),
+                'last_month':  last_month_daily.get(d, 0),
+            }
+            for d in range(1, days_in_chart + 1)
+        ]
+
         # ── Financial obligations ─────────────────────────────────────────────
         credit_moves = StockMovement.objects.filter(payment_method='CREDIT', movement_type='PURCHASE')
         total_credit = sum(m.unit_cost * m.quantity for m in credit_moves)
@@ -350,9 +378,47 @@ class AccountingService:
         active_products = list(Product.objects.filter(is_active=True))
         low_stock_count  = sum(1 for p in active_products if 0 < p.stock_on_hand <= 5)
         out_of_stock     = sum(1 for p in active_products if p.stock_on_hand <= 0)
+        # Packages excluded — their stock_on_hand is derived from component
+        # stock (see Product.stock_on_hand), so counting them here would
+        # double the components' own value into the total.
+        total_stock_value = sum(
+            (p.stock_on_hand * p.cost_price for p in active_products if not p.is_package),
+            Decimal('0'),
+        )
+
+        # Cash vs credit ("বাকি") stock — there's no batch/lot tracking, so
+        # this can't say exactly which physical units were bought which way.
+        # Approximation: split each product's current stock_on_hand
+        # proportionally to its all-time PURCHASE quantity by payment_method
+        # (e.g. 70% of everything ever bought was on credit -> 70% of what's
+        # left on the shelf is treated as credit stock too).
+        purchase_qty_by_product: dict = defaultdict(lambda: {'CASH': Decimal('0'), 'CREDIT': Decimal('0')})
+        for row in (
+            StockMovement.objects.filter(movement_type='PURCHASE')
+            .values('product_id', 'payment_method')
+            .annotate(qty=Sum('quantity'))
+        ):
+            purchase_qty_by_product[row['product_id']][row['payment_method']] = row['qty'] or Decimal('0')
+
+        cash_stock_value = Decimal('0')
+        credit_stock_value = Decimal('0')
+        for p in active_products:
+            if p.is_package or p.stock_on_hand <= 0:
+                continue
+            purchases = purchase_qty_by_product.get(p.id, {'CASH': Decimal('0'), 'CREDIT': Decimal('0')})
+            total_purchased = purchases['CASH'] + purchases['CREDIT']
+            stock_value = p.stock_on_hand * p.cost_price
+            if total_purchased <= 0:
+                # No purchase history at all (stock only ever entered via a
+                # manual ADJUSTMENT) — default to cash rather than guess.
+                cash_stock_value += stock_value
+                continue
+            cash_ratio = purchases['CASH'] / total_purchased
+            cash_stock_value += stock_value * cash_ratio
+            credit_stock_value += stock_value * (Decimal('1') - cash_ratio)
 
         # ── Recent orders ─────────────────────────────────────────────────────
-        recent_qs = SalesOrder.objects.order_by('-created_at')[:20]
+        recent_qs = SalesOrder.objects.order_by('-created_at')[:10]
         recent_orders = [
             {
                 'id':           str(o.id),
@@ -385,6 +451,16 @@ class AccountingService:
         ]
 
         week_start = today - timedelta(days=6)  # rolling 7-day window including today
+        # Both filtered by created_at (any status) — a straight count/sum of
+        # orders placed this month, distinct from this_month_revenue above
+        # (which is journal-based: only recognized once paid/delivered, and
+        # can include orders created in an earlier month if posted this one).
+        this_month_orders_qs = SalesOrder.objects.filter(
+            created_at__gte=local_day_start(month_start),
+            created_at__lt=local_day_end_exclusive(today),
+        )
+        this_month_orders = this_month_orders_qs.count()
+        this_month_sales_amount = this_month_orders_qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
         return {
             # existing
             'week_orders':           SalesOrder.objects.filter(created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today)).count(),
@@ -394,6 +470,7 @@ class AccountingService:
             'total_customers':       User.objects.filter(role__code='CUSTOMER', is_active=True).count(),
             'total_products':        Product.objects.filter(is_active=True).count(),
             'monthly_revenue_chart': monthly_chart,
+            'order_comparison_chart': order_comparison_chart,
             'status_breakdown':      status_breakdown,
             # new
             'this_month_revenue':    str(this_month_rev),
@@ -406,6 +483,11 @@ class AccountingService:
             'cash_on_hand':          str(cash_on_hand),
             'cash_account_id':       str(cash_account.id) if cash_account else None,
             'out_of_stock_count':    out_of_stock,
+            'total_stock_value':     str(total_stock_value),
+            'cash_stock_value':      str(cash_stock_value),
+            'credit_stock_value':    str(credit_stock_value),
+            'this_month_orders':     this_month_orders,
+            'this_month_sales_amount': str(this_month_sales_amount),
             'recent_orders':         recent_orders,
             'top_products':          top_products,
         }

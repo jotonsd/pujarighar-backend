@@ -61,6 +61,8 @@ urlpatterns = [
     path('reports/supplier-returns/',          views.get_supplier_return_report, name='supplier-return-report'),
     path('reports/income/',                    views.get_income_report,          name='income-report'),
     path('reports/expenses/',                  views.get_expense_report,         name='expense-report'),
+    path('reports/sales/',                     views.get_sales_report,           name='sales-report'),
+    path('reports/carts/',                     views.get_cart_report,            name='cart-report'),
     path('products/<uuid:pk>/package-items/',  views.list_package_items, name='package-items'),
     path('products/<uuid:pk>/package-items/add/', views.add_package_item, name='package-item-add'),
     path('products/<uuid:pk>/package-items/<uuid:item_id>/delete/', views.delete_package_item, name='package-item-delete'),
@@ -102,6 +104,7 @@ urlpatterns = [
     path('orders/<uuid:pk>/assign-delivery/',    views.assign_delivery,    name='order-assign-delivery'),
     path('orders/<uuid:pk>/dispatch/',           views.dispatch_order,     name='order-dispatch'),
     path('orders/<uuid:pk>/deliver/',            views.deliver_order,      name='order-deliver'),
+    path('orders/<uuid:pk>/partial-deliver/',    views.partial_deliver_order, name='order-partial-deliver'),
     path('orders/<uuid:pk>/return/',             views.return_order,       name='order-return'),
     path('orders/<uuid:pk>/cancel/',             views.cancel_order,       name='order-cancel'),
     path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),
@@ -110,6 +113,7 @@ urlpatterns = [
     path('orders/<uuid:pk>/courier/send/',       views.send_to_courier,    name='order-courier-send'),
     path('orders/<uuid:pk>/courier/status/',     views.courier_status,     name='order-courier-status'),
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),
+    path('orders/<uuid:pk>/items/add/',                   views.add_order_item,    name='order-item-add'),
     path('orders/<uuid:pk>/items/<uuid:item_id>/update/', views.update_order_item, name='order-item-update'),
     path('orders/<uuid:pk>/items/<uuid:item_id>/delete/', views.delete_order_item, name='order-item-delete'),
     path('orders/<uuid:pk>/invoice/',            views.download_invoice,   name='order-invoice'),
@@ -199,9 +203,11 @@ urlpatterns = [
     # ─── Discounts ────────────────────────────────────────────────────────────
     path('discounts/',                      views.list_discounts,   name='discount-list'),
     path('discounts/create/',               views.create_discount,  name='discount-create'),
+    path('discounts/bulk-create/',          views.bulk_create_discount, name='discount-bulk-create'),
     path('discounts/<uuid:pk>/toggle/',     views.toggle_discount,  name='discount-toggle'),
     path('discounts/<uuid:pk>/update/',     views.update_discount,  name='discount-update'),
     path('discounts/<uuid:pk>/delete/',     views.delete_discount,  name='discount-delete'),
+    path('discounts/bulk-delete/',          views.bulk_delete_discount, name='discount-bulk-delete'),
 
     # ─── Notifications ────────────────────────────────────────────────────────
     path('notifications/',                      views.list_notifications,     name='notification-list'),
@@ -242,6 +248,7 @@ urlpatterns = [
     # ─── Courier ────────────────────────────────────────────────────────────────
     path('courier/providers/',                    views.providers,                 name='courier-providers'),
     path('courier/providers/<int:pk>/update/',    views.update_provider,           name='courier-provider-update'),
+    path('courier/providers/<int:pk>/regenerate-webhook-secret/', views.regenerate_webhook_secret, name='courier-provider-regenerate-webhook-secret'),
     path('courier/providers/<int:pk>/balance/',   views.provider_balance,          name='courier-provider-balance'),
     path('courier/providers/<int:pk>/police-stations/', views.provider_police_stations, name='courier-provider-police-stations'),
     path('courier/consignments/',                  views.list_consignments,        name='courier-consignment-list'),
@@ -252,6 +259,19 @@ urlpatterns = [
     path('courier/payments/',                       views.list_payments,            name='courier-payment-list'),
     path('courier/payments/<str:payment_id>/',      views.get_payment,              name='courier-payment-detail'),
     path('courier/webhooks/steadfast/',             views.steadfast_webhook,        name='courier-webhook-steadfast'),
+    path('courier/webhooks/pathao/',                views.pathao_webhook,           name='courier-webhook-pathao'),
+    path('whatsapp/webhook/',                       views.whatsapp_webhook,         name='whatsapp-webhook'),
+
+    # ─── SMS ────────────────────────────────────────────────────────────────────
+    path('sms/settings/',  views.get_sms_settings,    name='sms-settings-get'),
+    path('sms/settings/update/', views.update_sms_settings, name='sms-settings-update'),
+    path('sms/logs/',      views.list_sms_logs,       name='sms-logs'),
+    path('sms/stats/',     views.get_sms_stats,       name='sms-stats'),
+    path('sms/recipients/', views.list_sms_recipients, name='sms-recipients'),
+    path('sms/bulk-send/', views.send_bulk_sms_view,  name='sms-bulk-send'),
+
+    # ─── AI Support Chat ────────────────────────────────────────────────────────
+    path('support/chat/', views.support_chat, name='support-chat'),
 
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),

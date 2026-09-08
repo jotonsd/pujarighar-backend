@@ -10,7 +10,9 @@ from api.models import (
     Account, JournalEntry, JournalLine,
     User, Notification,
 )
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
+from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
@@ -29,20 +31,27 @@ class GuestCheckoutService:
 
     @transaction.atomic
     def checkout(self, validated_data: dict, customer: User | None = None,
-                 discount_type: str = 'NONE', discount_value: Decimal = Decimal('0')) -> SalesOrder:
+                 discount_type: str = 'NONE', discount_value: Decimal = Decimal('0'),
+                 is_pos: bool = False) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
+        # is_pos identifies a staff POS sale unambiguously (passed by the
+        # caller, never by request data); placed_via_ai is the AI chatbot's
+        # own signal on the same public endpoint a real guest also uses, so
+        # it's the only way to tell those two apart here.
+        if is_pos:
+            source = 'POS'
+        elif validated_data.get('placed_via_ai'):
+            source = 'AI_CHATBOT'
+        else:
+            source = 'WEBSITE'
 
         # Validate stock for all items
         for item in items:
             self._validate_stock(item['product'], item['quantity'])
 
-        # Generate order number
-        today        = timezone.now().date()
-        prefix       = f'PG-{today:%Y%m%d}-'
-        last         = SalesOrder.objects.filter(order_number__startswith=prefix).count()
-        order_number = f'{prefix}{last + 1:04d}'
+        order_number = generate_order_number()
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
         subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
@@ -82,10 +91,12 @@ class GuestCheckoutService:
             shipping_thana      = shipping['thana'],
             shipping_post_code  = shipping['post_code'],
             notes_bn            = shipping.get('notes_bn', ''),
-            subtotal            = subtotal,
-            discount_amount     = discount_amount,
-            delivery_charge     = delivery,
-            grand_total         = grand_total,
+            source                = source,
+            subtotal              = subtotal,
+            discount_amount       = discount_amount,
+            staff_discount_amount = extra_discount,
+            delivery_charge       = delivery,
+            grand_total           = grand_total,
         )
 
         for item in items:
@@ -107,7 +118,13 @@ class GuestCheckoutService:
             changed_by=system_user,
         )
 
-        if payment_method != 'COD':
+        # POS: staff already collected the payment in person before hitting
+        # submit — there's no separate gateway/confirmation step coming
+        # later, so this IS the moment payment is confirmed; post now.
+        # Public guest checkout: an ONLINE order redirects to SSLCommerz and
+        # isn't actually paid yet — deferred to SSLCommerzService.confirm_payment,
+        # same reasoning as the logged-in checkout flow.
+        if payment_method != 'COD' and is_pos:
             self._create_sale_journal(order)
         self._notify_admins(order)
         logger.info(f"Guest order created: {order.order_number} phone={order.shipping_phone}")
@@ -191,7 +208,7 @@ class GuestCheckoutService:
                 )
 
     def _notify_admins(self, order: SalesOrder) -> None:
-        admins  = User.objects.filter(role__code='ADMIN', is_active=True)
+        admins  = get_notified_users()
         amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
         name_en = order.shipping_name_en or order.shipping_name_bn or '—'

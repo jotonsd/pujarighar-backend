@@ -10,11 +10,14 @@ PAGE_SIZE_CHOICES  = ['A4', 'A5', 'LETTER', 'THERMAL']
 TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
                       'contact_phone', 'contact_email', 'address_bn', 'address_en',
                       'email_host', 'email_host_user', 'email_host_password', 'email_default_from',
-                      'telegram_bot_token', 'telegram_chat_id']
+                      'telegram_bot_token', 'telegram_chat_id',
+                      'gemini_api_key', 'gemini_model',
+                      'whatsapp_phone_number_id', 'whatsapp_business_account_id',
+                      'whatsapp_access_token', 'whatsapp_app_secret', 'whatsapp_verify_token']
 INT_FIELDS         = ['email_port']
-BOOL_FIELDS        = ['email_use_tls']
+BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled', 'whatsapp_enabled']
 FILE_FIELDS        = ['logo', 'favicon']
-DECIMAL_FIELDS     = ['referral_bonus_amount']
+DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent']
 
 
 def _serialize(s: SiteSetting, request=None) -> dict:
@@ -46,8 +49,22 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'email_use_tls':            s.email_use_tls,
             'email_default_from':       s.email_default_from,
             'referral_bonus_amount':    str(s.referral_bonus_amount),
+            'first_order_discount_percent': str(s.first_order_discount_percent),
             'has_telegram_bot_token':   bool(s.telegram_bot_token),
             'telegram_chat_id':         s.telegram_chat_id,
+            'has_gemini_api_key':       bool(s.gemini_api_key),
+            'gemini_model':             s.gemini_model,
+            'ai_ordering_enabled':      s.ai_ordering_enabled,
+            'whatsapp_phone_number_id':       s.whatsapp_phone_number_id,
+            'whatsapp_business_account_id':   s.whatsapp_business_account_id,
+            'has_whatsapp_access_token':      bool(s.whatsapp_access_token),
+            'has_whatsapp_app_secret':        bool(s.whatsapp_app_secret),
+            # Not secret — just a value we invented for Meta to echo back
+            # during the webhook verification handshake, not a credential
+            # that grants access (same reasoning CourierProvider's
+            # webhook_verification_secret uses for the same non-encryption).
+            'whatsapp_verify_token':          s.whatsapp_verify_token,
+            'whatsapp_enabled':               s.whatsapp_enabled,
         })
 
     return data
@@ -68,7 +85,8 @@ def update_site_settings(request):
         if field in request.data:
             if field == 'invoice_page_size' and request.data[field] not in PAGE_SIZE_CHOICES:
                 continue
-            if field in ('email_host_password', 'telegram_bot_token') and not request.data[field]:
+            if field in ('email_host_password', 'telegram_bot_token', 'gemini_api_key',
+                          'whatsapp_access_token', 'whatsapp_app_secret') and not request.data[field]:
                 continue  # blank means "keep the currently stored secret"
             setattr(s, field, request.data[field])
             updated.append(field)
@@ -91,6 +109,8 @@ def update_site_settings(request):
         if field in request.data:
             try:
                 value = Decimal(str(request.data[field]))
+                if field == 'first_order_discount_percent' and value > 100:
+                    continue
                 if value >= 0:
                     setattr(s, field, value)
                     updated.append(field)

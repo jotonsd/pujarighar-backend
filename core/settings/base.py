@@ -69,6 +69,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # Only its ORM lookups (TrigramSimilarity, for typo-tolerant product
+    # search) are actually used, guarded to Postgres at query time — safe to
+    # install regardless of which DB_ENGINE is active; it does nothing on MySQL.
+    'django.contrib.postgres',
 
     # Third-party
     'rest_framework',

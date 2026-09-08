@@ -8,7 +8,9 @@ from api.models import (
     CourierConsignment, CourierProvider, CourierReturnRequest, CourierTrackingEvent,
     Notification, SalesOrder, User,
 )
+from api.services import mail_service
 from api.services.courier.registry import get_courier_service
+from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.services.order_service import OrderService
 
@@ -154,14 +156,151 @@ class CourierService:
 
     # ── Webhook ─────────────────────────────────────────────────────────────────
 
+    # Steadfast's documented delivery_status values -> what that means for our
+    # own SalesOrder state machine. 'DISPATCH' = ASSIGNED -> ON_THE_WAY,
+    # 'DELIVER' = -> DELIVERED (crediting cashback, posting the sale journal,
+    # marking COD paid), 'RETURN' = DELIVERED -> RETURNED (reversing journal).
+    # Steadfast has no separate "in transit" webhook status (coarser than
+    # Pathao) — pending/hold/in_review/cancelled and the *_approval_pending
+    # variants deliberately map to nothing here: cancellation isn't a
+    # reachable transition once ASSIGNED (see ALLOWED_TRANSITIONS), and
+    # "approval pending" isn't final yet, so those stay visible only in the
+    # tracking timeline until an admin acts.
+    #
+    # partial_delivered deliberately maps to nothing too (not DELIVER) —
+    # Steadfast only reports a lump collected amount (e.g. "Amount has been
+    # changed from 690 to 130"), never which item failed, so auto-applying
+    # DELIVER here would wrongly credit full COD/cashback for an order that
+    # was only partially fulfilled. This just notifies the admin (via the
+    # unconditional _notify_admins call below) to reconcile it manually via
+    # OrderService.partial_deliver() instead — mirrors how Pathao's own
+    # order.partial-delivery event is left unmapped for the same reason.
+    _STEADFAST_STATUS_ACTIONS = {
+        'delivered': 'DELIVER',
+    }
+
+    # Pathao's webhook "event" values -> the same action vocabulary as above,
+    # now with 'PICK' for the dedicated ASSIGNED -> PICKED waypoint —
+    # order.picked is the rider physically picking the package up from us.
+    # order.at-the-sorting-hub also maps to PICK: Pathao doesn't reliably
+    # send a discrete order.picked event for every parcel (confirmed from
+    # real traffic), but reaching the sorting hub is itself proof the rider
+    # already picked it up, so it's just as valid a signal — this way
+    # PICKED shows up as soon as that happens rather than waiting for the
+    # next event (in-transit/assigned-for-delivery, -> ON_THE_WAY) to
+    # backfill it retroactively.
+    # order.returned-to-merchant is the terminal event of Pathao's more
+    # granular return flow (return-id-created -> return-in-transit ->
+    # returned-to-merchant) and maps to the same RETURN action as the plain
+    # order.returned event — whichever one a given store actually fires.
+    _PATHAO_EVENT_ACTIONS = {
+        'order.picked': 'PICK',
+        'order.at-the-sorting-hub': 'PICK',
+        'order.in-transit': 'DISPATCH',
+        'order.assigned-for-delivery': 'DISPATCH',
+        'order.delivered': 'DELIVER',
+        'order.returned': 'RETURN',
+        'order.returned-to-merchant': 'RETURN',
+    }
+
+    # Pathao's raw event slugs read poorly in an admin notification
+    # ("order.in-transit") — human-friendly labels for every event Pathao's
+    # webhook can send, matching their own dashboard's event names.
+    _PATHAO_EVENT_LABELS = {
+        'order.created': ('অর্ডার তৈরি হয়েছে', 'Order Created'),
+        'order.updated': ('অর্ডার আপডেট হয়েছে', 'Order Updated'),
+        'order.pickup-requested': ('পিকআপ অনুরোধ করা হয়েছে', 'Pickup Requested'),
+        'order.assigned-for-pickup': ('পিকআপের জন্য নির্ধারিত', 'Assigned For Pickup'),
+        'order.picked': ('পিকআপ হয়েছে', 'Picked Up'),
+        'order.pickup-failed': ('পিকআপ ব্যর্থ হয়েছে', 'Pickup Failed'),
+        'order.pickup-cancelled': ('পিকআপ বাতিল হয়েছে', 'Pickup Cancelled'),
+        'order.at-the-sorting-hub': ('সর্টিং হাবে পৌঁছেছে', 'At the Sorting Hub'),
+        'order.in-transit': ('ট্রানজিটে আছে', 'In Transit'),
+        'order.received-at-last-mile-hub': ('লাস্ট মাইল হাবে পৌঁছেছে', 'Received at Last Mile Hub'),
+        'order.assigned-for-delivery': ('ডেলিভারির জন্য নির্ধারিত', 'Assigned for Delivery'),
+        'order.delivered': ('ডেলিভারি সম্পন্ন হয়েছে', 'Delivered'),
+        'order.partial-delivery': ('আংশিক ডেলিভারি হয়েছে', 'Partial Delivery'),
+        'order.returned': ('ফেরত এসেছে', 'Returned'),
+        'order.delivery-failed': ('ডেলিভারি ব্যর্থ হয়েছে', 'Delivery Failed'),
+        'order.on-hold': ('হোল্ডে আছে', 'On Hold'),
+        'order.paid': ('পেমেন্ট হয়েছে', 'Paid'),
+        'order.paid-return': ('পেইড রিটার্ন', 'Paid Return'),
+        'order.exchanged': ('এক্সচেঞ্জ হয়েছে', 'Exchanged'),
+        'order.return-id-created': ('রিটার্ন আইডি তৈরি হয়েছে', 'Return ID Created'),
+        'order.return-in-transit': ('রিটার্ন ট্রানজিটে আছে', 'Return In Transit'),
+        'order.returned-to-merchant': ('মার্চেন্টের কাছে ফেরত এসেছে', 'Returned to Merchant'),
+    }
+
+    # Structural/noise fields present on every Pathao webhook payload (either
+    # already parsed explicitly, or carrying no useful per-event info, like
+    # updated_at/timestamp/store_id) — anything else Pathao includes
+    # (invoice_id, return_consignment_id, return_type, etc.) is unknown ahead
+    # of time and varies by event, so rather than guessing field names we
+    # surface whatever's left over verbatim (see _pathao_extra_note below)
+    # instead of silently dropping it.
+    _PATHAO_KNOWN_KEYS = {
+        'consignment_id', 'merchant_order_id', 'event', 'collected_amount',
+        'delivery_fee', 'reason', 'updated_at', 'timestamp', 'store_id',
+    }
+
+    def _pathao_extra_note(self, payload: dict) -> str:
+        extra = {
+            k: v for k, v in payload.items()
+            if k not in self._PATHAO_KNOWN_KEYS and v not in (None, '', [], {})
+        }
+        return ', '.join(f'{k.replace("_", " ").title()}: {v}' for k, v in extra.items())
+
+    def _get_system_user(self) -> User:
+        return User.objects.filter(role__code='ADMIN').first()
+
+    def _apply_courier_status_to_order(self, consignment: CourierConsignment, action: str | None) -> None:
+        """Shared by both the Steadfast and Pathao webhook handlers, so a
+        courier reporting "delivered"/"returned"/"in transit" auto-advances
+        SalesOrder.status identically regardless of which one it was —
+        reuses the exact same OrderService methods (and their cashback/
+        accounting/referral side effects) the manual admin buttons call.
+        Silently no-ops if the order isn't currently in a state that
+        transition is valid from (e.g. a stray "delivered" event arriving
+        for an order that's already CANCELLED) rather than raising, since a
+        webhook that doesn't cleanly apply shouldn't break processing the
+        rest of the payload."""
+        if not action:
+            return
+        order = consignment.order
+        user = self._get_system_user()
+        order_svc = OrderService()
+        try:
+            if action == 'PICK' and order.status == 'ASSIGNED':
+                order_svc.pick_up(order, user)
+            elif action == 'DISPATCH' and order.status in ('ASSIGNED', 'PICKED'):
+                # A later-stage event (in-transit, at-the-sorting-hub, ...)
+                # arriving while still ASSIGNED means the courier skipped
+                # sending a discrete pickup event — the package obviously
+                # was picked up regardless, so backfill PICKED first rather
+                # than jumping straight to ON_THE_WAY and losing that step.
+                if order.status == 'ASSIGNED':
+                    order = order_svc.pick_up(order, user)
+                order_svc.dispatch(order, user)
+            elif action == 'DELIVER' and order.status in ('ASSIGNED', 'PICKED', 'ON_THE_WAY'):
+                if order.status == 'ASSIGNED':
+                    order = order_svc.pick_up(order, user)
+                if order.status in ('ASSIGNED', 'PICKED'):
+                    order = order_svc.dispatch(order, user)
+                delivered = order_svc.deliver(order, user)
+                mail_service.send_order_delivered(delivered)
+            elif action == 'RETURN' and order.status == 'DELIVERED':
+                returned = order_svc.return_order(order, user)
+                mail_service.send_order_returned(returned)
+        except Exception as e:
+            logger.warning(f'Courier webhook: could not auto-apply {action} to order {order.order_number}: {e}')
+
     @transaction.atomic
     def handle_webhook(self, payload: dict) -> None:
-        """Steadfast pushes delivery_status / tracking_update notifications here.
-        Updates the matching consignment's tracking info only — it deliberately
-        never touches SalesOrder.status, since that transition (crediting
-        cashback, posting accounting journals) stays an explicit admin action
-        via the existing OrderService.deliver()/cancel_order().
-        """
+        """Steadfast pushes delivery_status / tracking_update notifications
+        here. Updates the matching consignment's tracking info, and — for a
+        final delivery_status (delivered/partial_delivered) — auto-advances
+        the order itself via _apply_courier_status_to_order, same as Pathao's
+        handle_pathao_webhook below."""
         consignment_id = str(payload.get('consignment_id', ''))
         invoice = payload.get('invoice', '')
 
@@ -174,9 +313,10 @@ class CourierService:
 
         notification_type = payload.get('notification_type', '')
         message = payload.get('tracking_message', '')
+        raw_status = payload.get('status', consignment.status)
 
         if notification_type == 'delivery_status':
-            consignment.status = payload.get('status', consignment.status)
+            consignment.status = raw_status
             if 'cod_amount' in payload:
                 consignment.cod_amount = Decimal(str(payload.get('cod_amount') or 0))
             if 'delivery_charge' in payload:
@@ -193,21 +333,116 @@ class CourierService:
         )
         logger.info(f'Courier webhook applied to consignment {consignment.id} ({notification_type})')
 
-        # Only fan out a notification for real status changes, not every
-        # low-signal tracking_update ping (e.g. "arrived at sorting center").
+        # Auto-transition only applies for a real status payload
+        # (delivery_status) — any other notification_type has no actual
+        # status in it, just stale/leftover data, so it must never drive an
+        # order transition. Notifying admins, on the other hand, happens for
+        # every webhook hit no matter the type — _notify_admins shows the
+        # real tracking message whenever Steadfast actually sent one (e.g.
+        # partial_delivered's "Amount has been changed from X to Y" — the
+        # exact detail an admin needs to reconcile it manually), falling
+        # back to the generic "now **status**" wording only when there's no
+        # message to show (a plain delivered/dispatched hit).
         if notification_type == 'delivery_status':
-            self._notify_admins(consignment)
+            self._apply_courier_status_to_order(consignment, self._STEADFAST_STATUS_ACTIONS.get(raw_status))
+        self._notify_admins(consignment, tracking_message=message)
 
-    def _notify_admins(self, consignment: CourierConsignment) -> None:
-        admins = User.objects.filter(role__code='ADMIN', is_active=True)
+    @transaction.atomic
+    def handle_pathao_webhook(self, payload: dict) -> None:
+        """Pathao pushes one event per status change (order.created,
+        order.in-transit, order.assigned-for-delivery, order.delivered,
+        order.returned, ...). Same shape as handle_webhook above: update the
+        consignment/tracking timeline, then auto-advance SalesOrder.status
+        via the shared mapping where applicable."""
+        consignment_id = str(payload.get('consignment_id', ''))
+        merchant_order_id = payload.get('merchant_order_id', '')
+        event = payload.get('event', '')
+
+        consignment = CourierConsignment.objects.filter(consignment_id=consignment_id).select_related('order').first()
+        if not consignment and merchant_order_id:
+            consignment = CourierConsignment.objects.filter(order__order_number=merchant_order_id).select_related('order').first()
+        if not consignment:
+            logger.warning(f'Pathao webhook: no consignment found for consignment_id={consignment_id} merchant_order_id={merchant_order_id}')
+            return
+
+        consignment.status = event or consignment.status
+        if 'collected_amount' in payload:
+            consignment.cod_amount = Decimal(str(payload.get('collected_amount') or 0))
+        if 'delivery_fee' in payload:
+            consignment.delivery_charge = Decimal(str(payload.get('delivery_fee') or 0))
+        consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
+        consignment.save()
+
+        extra_note = self._pathao_extra_note(payload)
+        message = payload.get('reason', '') or extra_note
+        CourierTrackingEvent.objects.create(
+            consignment=consignment,
+            status=event,
+            message=message,
+            source='WEBHOOK',
+        )
+        logger.info(f'Pathao webhook applied to consignment {consignment.id} ({event})')
+
+        self._apply_courier_status_to_order(consignment, self._PATHAO_EVENT_ACTIONS.get(event))
+        # Every webhook hit notifies admins, no exceptions — including
+        # order.created, even though that moment is also visible immediately
+        # in the UI response to "Send to Courier" (this is Pathao's own
+        # independent confirmation of the same thing, worth surfacing too).
+        # extra_note surfaces any extra field Pathao sent on this event
+        # (rider info, hub, etc.) alongside the usual "now **status**" label.
+        self._notify_admins(consignment, extra_note=extra_note)
+
+    def notify_webhook_verified(self, provider: CourierProvider) -> None:
+        """Fired for the one-time webhook_integration handshake — no order/
+        consignment involved (Pathao's dashboard just pinging to confirm the
+        URL is reachable and correctly configured), so this is purely an
+        informational ping for admins, not tied to any order."""
+        admins = get_notified_users()
+        provider_short = provider.code.title()
+        notifications = [
+            Notification(
+                user=admin,
+                title_bn=f'ওয়েবহুক ভেরিফাই হয়েছে — {provider_short}',
+                title_en=f'Webhook Verified — {provider_short}',
+                body_bn=f'{provider_short}: আপনার ওয়েবহুক ইউআরএল সফলভাবে ভেরিফাই করেছে।',
+                body_en=f'{provider_short}: successfully verified your webhook URL.',
+                reference_type='COURIER_WEBHOOK_VERIFIED',
+            )
+            for admin in admins
+        ]
+        Notification.objects.bulk_create(notifications)
+        broadcast_notifications(notifications)
+
+    def _notify_admins(self, consignment: CourierConsignment, tracking_message: str = '', extra_note: str = '') -> None:
+        """tracking_message: for a low-signal update with no actual status
+        change (Steadfast's notification_type=tracking_update — a note like
+        "customer asked to deliver to the office" rather than a status
+        transition), showing that note is far more useful than repeating an
+        unchanged status label. Falls back to the usual "now **status**"
+        wording when there's no such note (the normal delivery_status /
+        Pathao-event case). extra_note: additional detail (e.g. rider name/
+        phone Pathao included on this event) appended alongside whichever
+        wording above was used, rather than replacing it."""
+        admins = get_notified_users()
         order = consignment.order
+        provider_short = consignment.provider.code.title()
+        if tracking_message:
+            body_bn = f'{provider_short}: অর্ডার #{order.order_number} — {tracking_message}'
+            body_en = f'{provider_short}: Order #{order.order_number} — {tracking_message}'
+        else:
+            label_bn, label_en = self._PATHAO_EVENT_LABELS.get(consignment.status, (consignment.status, consignment.status))
+            body_bn = f'{provider_short}: অর্ডার #{order.order_number} এখন **{label_bn}**।'
+            body_en = f'{provider_short}: Order #{order.order_number} is now **{label_en}**.'
+        if extra_note:
+            body_bn += f' ({extra_note})'
+            body_en += f' ({extra_note})'
         notifications = [
             Notification(
                 user=admin,
                 title_bn=f'কুরিয়ার স্ট্যাটাস — {order.order_number}',
                 title_en=f'Courier Status — {order.order_number}',
-                body_bn=f'{consignment.provider.name} জানিয়েছে: অর্ডার #{order.order_number} এখন **{consignment.status}**।',
-                body_en=f'{consignment.provider.name} reports order #{order.order_number} is now **{consignment.status}**.',
+                body_bn=body_bn,
+                body_en=body_en,
                 reference_type='COURIER_STATUS',
                 reference_id=order.id,
             )

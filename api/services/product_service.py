@@ -89,7 +89,7 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, personalize_user=None, personalize_guest_id=''):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, payment_method=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
         if is_active is not None:
@@ -139,6 +139,18 @@ class ProductService:
                 for b in wanted:
                     cond |= Q(badges__contains=[b])
                 qs = qs.filter(cond)
+        if payment_method in ('CASH', 'CREDIT'):
+            # "Cash stock" / "credit stock" — how the product's stock on hand
+            # was bought, based on its most recent PURCHASE movement (same
+            # rule already used elsewhere for "which purchase sets the
+            # current cost price" — see StockService.update_stock_movement).
+            latest_purchase_payment = (
+                StockMovement.objects.filter(product=OuterRef('pk'), movement_type='PURCHASE')
+                .order_by('-created_at')
+                .values('payment_method')[:1]
+            )
+            qs = qs.annotate(_latest_purchase_payment=Subquery(latest_purchase_payment))
+            qs = qs.filter(_latest_purchase_payment=payment_method)
         if ordering == 'newest':
             # "New Released" is the New badge, not just recency — only
             # products the admin has actually tagged 'new' show up here,
