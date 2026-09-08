@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
 from api.utils.dates import local_day_start, local_day_end_exclusive
+from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
 
@@ -516,10 +517,7 @@ class StockService:
     def _create_purchase_journal(self, product: Product, quantity: Decimal,
                                   unit_cost: Decimal, movement: StockMovement, user,
                                   payment_method: str = 'CASH') -> None:
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        entry_number = next_entry_number()
         total_cost   = unit_cost * quantity
         credit_acct  = '1000' if payment_method == 'CASH' else '2000'
 
@@ -553,10 +551,7 @@ class StockService:
         """Mirror image of the purchase journal: stock leaves inventory, and we
         either get cash back or owe the supplier less (Accounts Payable shrinks).
         """
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        entry_number = next_entry_number()
         total_value  = unit_cost * quantity
         debit_acct   = '1000' if payment_method == 'CASH' else '2000'
 

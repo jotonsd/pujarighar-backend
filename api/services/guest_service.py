@@ -2,7 +2,6 @@ import logging
 import math
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
@@ -13,6 +12,7 @@ from api.models import (
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.utils.order_number import generate_order_number
+from api.utils.journal_number import next_entry_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
@@ -180,10 +180,7 @@ class GuestCheckoutService:
         if not user:
             return
 
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
+        entry_number = next_entry_number()
 
         cogs = sum(
             item.product.cost_price * item.quantity

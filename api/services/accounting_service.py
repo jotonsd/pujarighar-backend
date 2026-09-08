@@ -76,10 +76,17 @@ class AccountingService:
     def get_ledger(self, account_id: str, from_date: str, to_date: str, locale: str) -> dict:
         account  = Account.objects.get(pk=account_id)
         lines_qs = JournalLine.objects.filter(account=account).select_related('journal_entry').order_by('journal_entry__created_at')
+        # ASSET/EXPENSE accounts increase with a debit; LIABILITY/EQUITY/
+        # REVENUE increase with a credit — without this, every revenue and
+        # liability account's running balance would show as negative (e.g.
+        # a healthy Sales Revenue account, all credits, would read as a
+        # large negative number) even though the postings themselves are
+        # correct — this is purely a display-direction fix.
+        sign = Decimal('1') if account.account_type in ('ASSET', 'EXPENSE') else Decimal('-1')
 
         if from_date:
             opening_lines   = lines_qs.filter(journal_entry__created_at__lt=local_day_start(from_date))
-            opening_balance = (
+            opening_balance = sign * (
                 (opening_lines.aggregate(d=Sum('debit'))['d']  or Decimal('0')) -
                 (opening_lines.aggregate(c=Sum('credit'))['c'] or Decimal('0'))
             )
@@ -93,7 +100,7 @@ class AccountingService:
         running   = opening_balance
         line_data = []
         for line in lines_qs:
-            running += line.debit - line.credit
+            running += sign * (line.debit - line.credit)
             desc = line.journal_entry.description_bn if locale == 'bn' else line.journal_entry.description_en
             line_data.append({
                 'date':         line.journal_entry.created_at,

@@ -1,7 +1,6 @@
 import logging
 from decimal import Decimal, InvalidOperation
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -11,6 +10,7 @@ from api.services.accounting_service import AccountingService
 from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
 from api.permissions import has_permission, has_any_permission
+from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
 _svc = AccountingService()
@@ -210,10 +210,7 @@ def create_manual_journal(request):
             errors="Imbalance", status_code=422,
         )
 
-    today  = timezone.now().date()
-    prefix = f'JE-{today:%Y%m%d}-'
-    last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-    entry_number = f'{prefix}{last + 1:04d}'
+    entry_number = next_entry_number()
 
     ref_type = data.get('reference_type', 'EXPENSE')
     entry = JournalEntry.objects.create(

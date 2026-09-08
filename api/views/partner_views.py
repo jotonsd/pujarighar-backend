@@ -2,7 +2,6 @@ import logging
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Sum
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -10,6 +9,7 @@ from api.models import Account, JournalEntry, JournalLine, Partner, PartnerProfi
 from api.serializers.partner_serializers import PartnerSerializer, PartnerProfitPaymentSerializer
 from api.utils.response import ApiResponse
 from api.permissions import has_permission
+from api.utils.journal_number import next_entry_number as _next_entry_number
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +19,6 @@ def _acct(code):
         return Account.objects.get(code=code)
     except Account.DoesNotExist:
         return None
-
-
-def _next_entry_number():
-    today  = timezone.now().date()
-    prefix = f'JE-{today:%Y%m%d}-'
-    last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-    return f'{prefix}{last + 1:04d}'
 
 
 def _create_profit_accrual_journal(payment: PartnerProfitPayment, user) -> None:

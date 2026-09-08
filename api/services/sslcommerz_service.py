@@ -3,9 +3,9 @@ import requests
 from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
-from django.utils import timezone
 from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine
 from api.services import mail_service
+from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,16 @@ class SSLCommerzService:
                 order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
             )
             self._create_payment_journal(order, admin)
+        else:
+            # Real gateway money already moved and the order is already
+            # marked PAID above — don't fail the customer's payment
+            # confirmation over a missing admin account, but this must not
+            # disappear silently: no journal gets posted for this order
+            # until an admin exists again and someone reconciles it by hand.
+            logger.error(
+                f'Payment confirmed for order {order.order_number} but no ADMIN-role user exists — '
+                f'no OrderStatusLog/PAYMENT journal was posted for this order. Needs manual reconciliation.'
+            )
 
         mail_service.send_order_confirmed(order)
         logger.info(f'Payment confirmed for order {order.order_number}')
@@ -161,10 +171,7 @@ class SSLCommerzService:
         if JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
             return
 
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
+        entry_number = next_entry_number()
 
         cogs = sum(
             item.product.cost_price * item.quantity

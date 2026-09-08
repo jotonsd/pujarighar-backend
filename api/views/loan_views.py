@@ -2,7 +2,6 @@ import logging
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -10,6 +9,7 @@ from api.models import Account, JournalEntry, JournalLine, LoanInvestor, LoanPay
 from api.serializers.loan_serializers import LoanInvestorSerializer, LoanPaymentSerializer
 from api.utils.response import ApiResponse
 from api.permissions import has_permission
+from api.utils.journal_number import next_entry_number as _next_je_number
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +19,6 @@ def _acct(code):
         return Account.objects.get(code=code)
     except Account.DoesNotExist:
         return None
-
-
-def _next_je_number():
-    today  = timezone.now().date()
-    prefix = f'JE-{today:%Y%m%d}-'
-    last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-    return f'{prefix}{last + 1:04d}'
 
 
 def _create_loan_received_journal(loan: LoanInvestor, user) -> None:
