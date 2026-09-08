@@ -579,6 +579,9 @@ class OrderService:
         # neither, so nothing to reverse.
         if JournalEntry.objects.filter(reference_id=order.id, reference_type='PAYMENT').exists():
             self._create_return_journal(order, user)
+            if order.payment_status == 'PAID':
+                order.payment_status = 'UNPAID'
+                order.save(update_fields=['payment_status'])
         elif JournalEntry.objects.filter(reference_id=order.id, reference_type='SALE').exists():
             self._create_sale_reversal_journal(order, user)
         # Refund cashback that was used on this order back to the customer

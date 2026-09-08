@@ -220,7 +220,12 @@ class AccountingService:
         return self._get_ledger_report('EXPENSE', account_id, from_date, to_date)
 
     def get_sales_summary(self, from_date: str, to_date: str, group_by: str) -> dict:
-        qs = SalesOrder.objects.filter(payment_status='PAID')
+        # "Sales" = orders that are still a real, kept sale — excludes
+        # PENDING (nothing confirmed/paid yet), CANCELLED, and RETURNED
+        # (revenue was reversed for both). EXCHANGED stays included: the
+        # customer kept equivalent value, just swapped for a different
+        # product, so it's still a real sale, not a refund.
+        qs = SalesOrder.objects.exclude(status__in=('PENDING', 'CANCELLED', 'RETURNED'))
         if from_date:
             qs = qs.filter(created_at__gte=local_day_start(from_date))
         if to_date:
@@ -304,20 +309,26 @@ class AccountingService:
             last_month_end   = month_start - timedelta(days=1)
 
         def _rev(date_from, date_to):
-            # Use account 4000 (Revenue) journal credits — captures both delivered
-            # and COD-paid orders regardless of delivery status
-            return JournalLine.objects.filter(
+            # Use account 4000 (Revenue) journal lines, net of any reversal
+            # (a RETURN/CANCEL debits 4000 to reverse revenue) — credit-only
+            # would overstate revenue whenever a return/cancellation lands in
+            # the same window as the sale it's reversing.
+            agg = JournalLine.objects.filter(
                 account__code='4000',
                 journal_entry__created_at__gte=local_day_start(date_from),
                 journal_entry__created_at__lt=local_day_end_exclusive(date_to),
-            ).aggregate(t=Sum('credit'))['t'] or Decimal('0')
+            ).aggregate(d=Sum('debit'), c=Sum('credit'))
+            return (agg['c'] or Decimal('0')) - (agg['d'] or Decimal('0'))
 
         def _exp(date_from, date_to):
-            return JournalLine.objects.filter(
+            # Net of any reversal (e.g. a cashback-earned expense line
+            # reversed via _reverse_cashback), same reasoning as _rev above.
+            agg = JournalLine.objects.filter(
                 account__account_type='EXPENSE',
                 journal_entry__created_at__gte=local_day_start(date_from),
                 journal_entry__created_at__lt=local_day_end_exclusive(date_to),
-            ).aggregate(t=Sum('debit'))['t'] or Decimal('0')
+            ).aggregate(d=Sum('debit'), c=Sum('credit'))
+            return (agg['d'] or Decimal('0')) - (agg['c'] or Decimal('0'))
 
         this_month_rev  = _rev(month_start, today)
         last_month_rev  = _rev(last_month_start, last_month_end)
@@ -334,8 +345,12 @@ class AccountingService:
         # weekday, so the single-month overview chart shows how far this
         # month has progressed against the same point in the prior one.
         def _daily_order_counts(date_from, date_to):
+            # Only DELIVERED/EXCHANGED — a real, kept sale — not every order
+            # ever placed regardless of what happened to it since (pending,
+            # cancelled, returned).
             counts: dict = defaultdict(int)
             for created_at in SalesOrder.objects.filter(
+                status__in=('DELIVERED', 'EXCHANGED'),
                 created_at__gte=local_day_start(date_from),
                 created_at__lt=local_day_end_exclusive(date_to),
             ).values_list('created_at', flat=True):
@@ -458,20 +473,26 @@ class AccountingService:
         ]
 
         week_start = today - timedelta(days=6)  # rolling 7-day window including today
-        # Both filtered by created_at (any status) — a straight count/sum of
-        # orders placed this month, distinct from this_month_revenue above
-        # (which is journal-based: only recognized once paid/delivered, and
-        # can include orders created in an earlier month if posted this one).
+        # "Sales" everywhere on this dashboard = a real, kept sale —
+        # excludes PENDING (nothing confirmed/paid yet), CANCELLED, and
+        # RETURNED (revenue was reversed for both). EXCHANGED stays
+        # included: the customer kept equivalent value, just swapped for a
+        # different product. Same exclusion list as get_sales_summary
+        # (Sales Report), so the two stay reconcilable with each other.
+        sales_status_exclude = ('PENDING', 'CANCELLED', 'RETURNED')
+        week_orders_qs = SalesOrder.objects.filter(
+            created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today),
+        ).exclude(status__in=sales_status_exclude)
         this_month_orders_qs = SalesOrder.objects.filter(
             created_at__gte=local_day_start(month_start),
             created_at__lt=local_day_end_exclusive(today),
-        )
+        ).exclude(status__in=sales_status_exclude)
         this_month_orders = this_month_orders_qs.count()
         this_month_sales_amount = this_month_orders_qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
         return {
             # existing
-            'week_orders':           SalesOrder.objects.filter(created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today)).count(),
-            'week_revenue':          str(JournalLine.objects.filter(account__code='4000', journal_entry__created_at__gte=local_day_start(week_start), journal_entry__created_at__lt=local_day_end_exclusive(today)).aggregate(t=Sum('credit'))['t'] or Decimal('0')),
+            'week_orders':           week_orders_qs.count(),
+            'week_revenue':          str(_rev(week_start, today)),
             'pending_orders':        SalesOrder.objects.filter(status='PENDING').count(),
             'low_stock_count':       low_stock_count,
             'total_customers':       User.objects.filter(role__code='CUSTOMER', is_active=True).count(),
