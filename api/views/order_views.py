@@ -208,7 +208,8 @@ def assign_delivery(request, pk):
     try:
         delivery_person_id = serializer.validated_data.get('delivery_person_id')
         weight = serializer.validated_data.get('weight')
-        updated = _svc.assign_delivery(order, str(delivery_person_id) if delivery_person_id else None, request.user, weight)
+        note = serializer.validated_data.get('note', '')
+        updated = _svc.assign_delivery(order, str(delivery_person_id) if delivery_person_id else None, request.user, weight, note)
         return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         return api_error(e)

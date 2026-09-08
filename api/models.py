@@ -1,6 +1,6 @@
 import secrets
 import string
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
@@ -214,6 +214,12 @@ class Product(BaseModel):
     cost_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     unit_bn        = models.CharField(max_length=50, default='পিস')
     unit_en        = models.CharField(max_length=50, default='piece')
+    # Per-unit weight — used to estimate an order's total shipping weight at
+    # checkout (see CheckoutService/GuestCheckoutService), which then feeds
+    # DeliveryCharge.charge_for()'s weight-bracket lookup. Null/blank means
+    # "not weighed yet" and contributes 0kg to that estimate, same as today
+    # if no product on the site has a weight set at all.
+    weight_kg        = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     is_package       = models.BooleanField(default=False)
     discount_type    = models.CharField(
         max_length=12,
@@ -551,6 +557,11 @@ class SalesOrder(BaseModel):
     first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
+    # Snapshot of the cart's total weight (sum of product.weight_kg * qty)
+    # at checkout time, used to compute delivery_charge above via
+    # DeliveryCharge.charge_for() — kept for the record so a delivery-charge
+    # dispute can be traced back to what weight it was priced from.
+    estimated_weight_kg = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
     cashback_amount     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
@@ -858,6 +869,13 @@ class DeliveryCharge(models.Model):
     # flat zone rate above is used, exactly as today.
     inside_dhaka_weight_tiers  = models.JSONField(default=list, blank=True)
     outside_dhaka_weight_tiers = models.JSONField(default=list, blank=True)
+    # Per-kg surcharge (rounded up to the next whole kg) applied on top of
+    # the heaviest bracket's charge for weight beyond that bracket's
+    # max_weight_kg — mirrors how couriers actually bill overweight parcels
+    # ("15 BDT/kg after 2kg") instead of capping forever at the heaviest
+    # bracket's flat rate. 0 (the default) keeps today's flat-cap behavior.
+    inside_dhaka_extra_per_kg  = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    outside_dhaka_extra_per_kg = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     updated_at    = models.DateTimeField(auto_now=True)
     updated_by    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -881,7 +899,11 @@ class DeliveryCharge(models.Model):
         for tier in sorted_tiers:
             if w <= Decimal(str(tier['max_weight_kg'])):
                 return Decimal(str(tier['charge_amount']))
-        return Decimal(str(sorted_tiers[-1]['charge_amount']))  # heaviest bracket covers "and above"
+        heaviest = sorted_tiers[-1]
+        extra_per_kg = self.inside_dhaka_extra_per_kg if zone == 'inside' else self.outside_dhaka_extra_per_kg
+        overflow_kg = w - Decimal(str(heaviest['max_weight_kg']))
+        extra_units = overflow_kg.to_integral_value(rounding=ROUND_CEILING) if overflow_kg > 0 else Decimal('0')
+        return Decimal(str(heaviest['charge_amount'])) + extra_units * extra_per_kg
 
     def __str__(self):
         return f'ডেলিভারি চার্জ — ঢাকা: ৳{self.inside_dhaka}, বাইরে: ৳{self.outside_dhaka}'

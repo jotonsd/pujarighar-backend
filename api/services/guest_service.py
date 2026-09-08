@@ -16,13 +16,21 @@ from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
-def _delivery_charge(district: str, zone: str | None = None) -> Decimal:
-    cfg = DeliveryCharge.get()
-    if zone == 'inside':
-        return cfg.inside_dhaka
-    if zone == 'outside':
-        return cfg.outside_dhaka
-    return cfg.inside_dhaka if district.strip().lower() in _DHAKA_DISTRICTS else cfg.outside_dhaka
+def _delivery_charge(district: str, zone: str | None = None, weight: Decimal | None = None) -> Decimal:
+    resolved_zone = zone if zone in ('inside', 'outside') else (
+        'inside' if district.strip().lower() in _DHAKA_DISTRICTS else 'outside'
+    )
+    return DeliveryCharge.get().charge_for(resolved_zone, weight)
+
+
+def _cart_weight(items) -> Decimal:
+    """Sum of product.weight_kg * quantity across cart items — see the
+    identical helper in checkout_service.py (this one takes dict items,
+    that one CartItem model instances, otherwise the same logic)."""
+    return sum(
+        ((i['product'].weight_kg or Decimal('0')) * i['quantity'] for i in items),
+        Decimal('0'),
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +79,8 @@ class GuestCheckoutService:
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')
-        delivery          = _delivery_charge(shipping.get('district', ''), zone) if apply_deliv else Decimal('0')
+        total_weight      = _cart_weight(items)
+        delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
         grand_total       = subtotal + delivery
 
         order = SalesOrder.objects.create(
@@ -96,6 +105,7 @@ class GuestCheckoutService:
             discount_amount       = discount_amount,
             staff_discount_amount = extra_discount,
             delivery_charge       = delivery,
+            estimated_weight_kg   = total_weight,
             grand_total           = grand_total,
         )
 

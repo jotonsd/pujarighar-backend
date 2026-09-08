@@ -58,10 +58,22 @@ class CartSerializer(serializers.ModelSerializer):
     subtotal        = serializers.SerializerMethodField()
     discount_amount = serializers.SerializerMethodField()
     item_count      = serializers.SerializerMethodField()
+    weight_kg       = serializers.SerializerMethodField()
 
     class Meta:
         model  = Cart
-        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count']
+        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count', 'weight_kg']
+
+    def get_weight_kg(self, obj):
+        # Approximate — sum of each product's declared weight * quantity,
+        # same calculation checkout uses to price delivery (see
+        # CheckoutService._cart_weight), so this is what the delivery charge
+        # will actually be based on, not a separate estimate.
+        total = sum(
+            ((item.product.weight_kg or Decimal('0')) * item.quantity for item in obj.items.all()),
+            Decimal('0'),
+        )
+        return str(total)
 
     def get_subtotal(self, obj):
         return str(sum(item.product.effective_price * item.quantity for item in obj.items.all()))

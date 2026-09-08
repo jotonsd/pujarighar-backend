@@ -27,6 +27,12 @@ class CourierService:
 
     @transaction.atomic
     def send_order(self, order: SalesOrder, provider_id, user: User, weight=None, note=None) -> CourierConsignment:
+        # No manual weight entry needed any more — Product.weight_kg lets
+        # checkout estimate this already (order.estimated_weight_kg), so
+        # that's what the courier API and our own delivery-charge
+        # recalculation both use unless a manual weight is explicitly given.
+        if weight is None:
+            weight = order.estimated_weight_kg
         # Sending to courier is offered as an alternative to internal delivery
         # assignment (same "who delivers this" decision point), so it's only
         # valid from the same states assign_delivery() accepts from.

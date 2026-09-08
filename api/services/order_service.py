@@ -142,11 +142,14 @@ class OrderService:
         return self._transition(order, 'PACKED', user)
 
     @transaction.atomic
-    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User, weight: Decimal = None) -> SalesOrder:
+    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User, weight: Decimal = None, note: str = '') -> SalesOrder:
         delivery_person = None
         if delivery_person_id:
             delivery_person = User.objects.get(id=delivery_person_id, role__code='DELIVERY')
-        DeliveryAssignment.objects.update_or_create(order=order, defaults={'delivery_person': delivery_person})
+        defaults = {'delivery_person': delivery_person}
+        if note:
+            defaults['tracking_note'] = note
+        DeliveryAssignment.objects.update_or_create(order=order, defaults=defaults)
         # Already ASSIGNED (e.g. assigned earlier without a delivery person) — just
         # attaching/updating the delivery person now, no status transition needed.
         updated = order if order.status == 'ASSIGNED' else self._transition(order, 'ASSIGNED', user)
@@ -156,10 +159,12 @@ class OrderService:
         return updated
 
     def recalculate_delivery_charge(self, order: SalesOrder, weight: Decimal = None) -> SalesOrder:
-        """Re-price delivery for the actual package weight, entered by admin
-        at assignment time (mirrors the courier flow's existing manual-weight
-        entry — no product in the catalog carries a weight field). A no-op
-        unless a weight was actually given, and skipped once the order is
+        """Re-price delivery for a given package weight — checkout already
+        prices delivery_charge from order.estimated_weight_kg (see
+        CheckoutService), so this only matters when a manual weight override
+        is explicitly passed in (e.g. the courier flow, when it differs from
+        the estimate). A no-op unless a weight was actually given, and
+        skipped once the order is
         already PAID (changing an already-collected amount would desync the
         books — same reasoning waive_delivery_charge applies elsewhere), so
         this never blocks assignment itself, it just silently leaves the

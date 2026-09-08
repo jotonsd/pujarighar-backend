@@ -152,7 +152,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
             'shipping_address_bn', 'shipping_address_en',
             'shipping_district', 'shipping_thana', 'shipping_post_code',
-            'subtotal', 'discount_amount', 'tax_amount', 'delivery_charge', 'grand_total', 'cashback_amount', 'cashback_used',
+            'subtotal', 'discount_amount', 'tax_amount', 'delivery_charge', 'estimated_weight_kg', 'grand_total', 'cashback_amount', 'cashback_used',
             'notes_bn', 'notes_en',
             'items', 'delivery', 'courier_consignment',
             'created_at', 'updated_at',
@@ -301,6 +301,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
 class AssignDeliverySerializer(serializers.Serializer):
     delivery_person_id = serializers.UUIDField(required=False, allow_null=True)
     weight = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True, default=None)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_delivery_person_id(self, value):
         if value is None:
