@@ -241,6 +241,7 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
     shipping_name_bn        = serializers.SerializerMethodField()
     shipping_name_en        = serializers.SerializerMethodField()
     shipping_phone          = serializers.SerializerMethodField()
+    exchanged_to            = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
@@ -252,8 +253,18 @@ class OrderTrackingSerializer(serializers.ModelSerializer):
             'shipping_address_bn', 'shipping_district', 'shipping_thana',
             'grand_total', 'created_at',
             'delivery_info', 'courier_tracking_url', 'is_courier',
-            'timeline',
+            'timeline', 'exchanged_to',
         ]
+
+    def get_exchanged_to(self, obj):
+        # Public-safe — same sensitivity as order_number/id already exposed
+        # here, just for the replacement order instead of this one, so a
+        # customer whose order shows "Exchanged" has somewhere to click
+        # through to for the replacement's own tracking.
+        ex = obj.exchanges.select_related('new_order').first()
+        if not ex:
+            return None
+        return {'id': str(ex.new_order_id), 'order_number': ex.new_order.order_number}
 
     def get_is_courier(self, obj):
         # NOT the same as courier_tracking_url being non-null — Steadfast
