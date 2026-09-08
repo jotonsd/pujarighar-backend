@@ -110,6 +110,7 @@ urlpatterns = [
     path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),
     path('orders/<uuid:pk>/apply-discount/',     views.apply_discount,     name='order-apply-discount'),
     path('orders/<uuid:pk>/waive-delivery/',     views.waive_delivery_charge, name='order-waive-delivery'),
+    path('orders/<uuid:pk>/exchange/',           views.create_exchange,    name='order-create-exchange'),
     path('orders/<uuid:pk>/courier/send/',       views.send_to_courier,    name='order-courier-send'),
     path('orders/<uuid:pk>/courier/status/',     views.courier_status,     name='order-courier-status'),
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),

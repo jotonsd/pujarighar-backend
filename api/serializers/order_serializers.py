@@ -142,11 +142,13 @@ class SalesOrderSerializer(serializers.ModelSerializer):
     customer_email      = serializers.EmailField(source='customer.email', read_only=True)
     status_label        = serializers.SerializerMethodField()
     courier_consignment = serializers.SerializerMethodField()
+    exchanges           = serializers.SerializerMethodField()
+    exchanged_from       = serializers.SerializerMethodField()
 
     class Meta:
         model  = SalesOrder
         fields = [
-            'id', 'order_number', 'customer', 'customer_email', 'status', 'status_label',
+            'id', 'order_number', 'customer', 'customer_email', 'is_guest', 'status', 'status_label',
             'source',
             'payment_method', 'payment_status',
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
@@ -154,7 +156,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             'shipping_district', 'shipping_thana', 'shipping_post_code',
             'subtotal', 'discount_amount', 'tax_amount', 'delivery_charge', 'estimated_weight_kg', 'grand_total', 'cashback_amount', 'cashback_used',
             'notes_bn', 'notes_en',
-            'items', 'delivery', 'courier_consignment',
+            'items', 'delivery', 'courier_consignment', 'exchanges', 'exchanged_from',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
@@ -167,18 +169,33 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         consignment = getattr(obj, 'courier_consignment', None)
         return CourierConsignmentSerializer(consignment).data if consignment else None
 
+    def get_exchanges(self, obj):
+        return [
+            {
+                'id': str(ex.id), 'new_order_id': str(ex.new_order_id),
+                'new_order_number': ex.new_order.order_number,
+                'returned_value': str(ex.returned_value), 'created_at': ex.created_at.isoformat(),
+            }
+            for ex in obj.exchanges.select_related('new_order').all()
+        ]
+
+    def get_exchanged_from(self, obj):
+        if not obj.exchanged_from_id:
+            return None
+        return {'id': str(obj.exchanged_from_id), 'order_number': obj.exchanged_from.order_number}
+
 
 STATUS_LABELS_BN = {
     'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
     'ASSIGNED':'ডেলিভারিম্যান নির্ধারিত', 'PICKED':'পিকআপ হয়েছে', 'ON_THE_WAY':'পথে আছে',
     'DELIVERED':'ডেলিভারি হয়েছে', 'PARTIALLY_DELIVERED':'আংশিক ডেলিভারি হয়েছে',
-    'RETURNED':'ফেরত', 'CANCELLED':'বাতিল',
+    'RETURNED':'ফেরত', 'EXCHANGED':'বিনিময় হয়েছে', 'CANCELLED':'বাতিল',
 }
 STATUS_LABELS_EN = {
     'PENDING':'Pending', 'CONFIRMED':'Confirmed', 'PACKED':'Packed',
     'ASSIGNED':'Assigned', 'PICKED':'Picked Up', 'ON_THE_WAY':'On the Way',
     'DELIVERED':'Delivered', 'PARTIALLY_DELIVERED':'Partially Delivered',
-    'RETURNED':'Returned', 'CANCELLED':'Cancelled',
+    'RETURNED':'Returned', 'EXCHANGED':'Exchanged', 'CANCELLED':'Cancelled',
 }
 
 
@@ -345,4 +362,42 @@ class AddOrderItemSerializer(serializers.Serializer):
                 'message_bn': 'পণ্য পাওয়া যায়নি',
                 'message_en': 'Product not found',
             })
+        return value
+
+
+class ExchangeReturnItemSerializer(serializers.Serializer):
+    item_id  = serializers.UUIDField()
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+
+class ExchangeReplacementItemSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+
+    def validate_product_id(self, value):
+        if not Product.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError({
+                'message_bn': 'পণ্য পাওয়া যায়নি',
+                'message_en': 'Product not found',
+            })
+        return value
+
+
+class CreateExchangeSerializer(serializers.Serializer):
+    returned_items         = ExchangeReturnItemSerializer(many=True)
+    replacement_items      = ExchangeReplacementItemSerializer(many=True)
+    delivery_charge_waived = serializers.BooleanField(default=False)
+    discount_type          = serializers.ChoiceField(choices=['PERCENTAGE', 'FLAT'], required=False, allow_null=True, default=None)
+    discount_value         = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, default=None)
+    note_bn                = serializers.CharField(required=False, allow_blank=True, default='')
+    note_en                = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_returned_items(self, value):
+        if not value:
+            raise serializers.ValidationError('At least one returned item is required')
+        return value
+
+    def validate_replacement_items(self, value):
+        if not value:
+            raise serializers.ValidationError('At least one replacement product is required')
         return value

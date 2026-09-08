@@ -482,6 +482,7 @@ ORDER_STATUS = [
     ('DELIVERED',  'ডেলিভারি হয়েছে'),
     ('PARTIALLY_DELIVERED', 'আংশিক ডেলিভারি হয়েছে'),
     ('RETURNED',   'ফেরত'),
+    ('EXCHANGED',  'বিনিময় হয়েছে'),
     ('CANCELLED',  'বাতিল'),
 ]
 
@@ -519,7 +520,7 @@ ALLOWED_TRANSITIONS = {
     # both, reversing the already-posted payment/cashback/referral journals
     # in the second case rather than assuming a clean slate.
     'ON_THE_WAY': ['DELIVERED', 'PARTIALLY_DELIVERED'],
-    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED'],
+    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED', 'EXCHANGED'],
 }
 
 
@@ -572,6 +573,13 @@ class SalesOrder(BaseModel):
     # glance. WEBSITE covers both a real anonymous guest and a logged-in
     # customer's own self-checkout.
     source              = models.CharField(max_length=20, choices=ORDER_SOURCE_CHOICES, default='WEBSITE')
+    # Set only on a replacement order created by OrderService.create_exchange()
+    # — lets both order detail pages render an "Exchanged ↔" cross-link
+    # without a join through Exchange.
+    exchanged_from      = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='exchange_replacements',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -603,6 +611,38 @@ class SalesOrderItem(models.Model):
     unit_price          = models.DecimalField(max_digits=12, decimal_places=2)
     quantity            = models.DecimalField(max_digits=10, decimal_places=3)
     line_total          = models.DecimalField(max_digits=12, decimal_places=2)
+
+
+class Exchange(BaseModel):
+    """Audit/link record for a customer exchange — NOT a parallel state
+    machine. original_order transitions to EXCHANGED (see ALLOWED_TRANSITIONS)
+    but new_order is a completely normal SalesOrder that goes through the
+    usual PENDING→...→DELIVERED pipeline unmodified."""
+    original_order = models.ForeignKey(SalesOrder, on_delete=models.PROTECT, related_name='exchanges')
+    new_order      = models.OneToOneField(SalesOrder, on_delete=models.PROTECT, related_name='exchange_source')
+    note_bn        = models.TextField(blank=True)
+    note_en        = models.TextField(blank=True)
+    delivery_charge_waived = models.BooleanField(default=False)
+    # Snapshot of total returned-item value credited back (as store credit or
+    # cash, depending on original_order.is_guest) — handy for admin display
+    # without re-summing ExchangeItems every time.
+    returned_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_by     = models.ForeignKey(User, on_delete=models.PROTECT, related_name='exchanges_created')
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ExchangeItem(models.Model):
+    id            = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    exchange      = models.ForeignKey(Exchange, on_delete=models.CASCADE, related_name='items')
+    original_item = models.ForeignKey(SalesOrderItem, on_delete=models.PROTECT, related_name='exchange_items')
+    quantity      = models.DecimalField(max_digits=10, decimal_places=3)
+    # Snapshot at exchange time — same reasoning SalesOrderItem already
+    # snapshots product_name_bn/en/unit_price instead of re-deriving from
+    # Product later, so a subsequent price/cost change never rewrites history.
+    unit_price    = models.DecimalField(max_digits=12, decimal_places=2)
+    cost_price    = models.DecimalField(max_digits=12, decimal_places=2)
 
 
 class OrderStatusLog(models.Model):
