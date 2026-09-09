@@ -35,6 +35,25 @@ def _get_app():
         return None
 
 
+def _logo_image_url() -> str | None:
+    """The full-color logo shown in the notification's large-icon slot —
+    only matters for a background/terminated-app push, which Android
+    auto-displays straight from this URL (downloaded on-device) rather
+    than through any of the app's own code. The foreground path instead
+    uses a bundled drawable (see mobile-app's NotificationService) since
+    the app doesn't need a network fetch for something it already ships."""
+    from api.models import SiteSetting
+    setting = SiteSetting.get()
+    if not setting.logo:
+        return None
+    try:
+        # .url is relative (MEDIA_URL='/media/') — FCM needs an absolute,
+        # publicly fetchable URL since Android downloads it directly.
+        return f'{settings.BACKEND_URL}{setting.logo.url}'
+    except Exception:
+        return None
+
+
 def _drop_invalid_tokens(tokens: list[str], responses) -> None:
     from api.models import DeviceToken
     invalid = [
@@ -56,11 +75,12 @@ def _send_to_tokens(tokens: list[str], title_bn: str, body_bn: str, data: dict |
         return 0
     import firebase_admin.messaging as messaging
 
+    image_url = _logo_image_url()
     sent = 0
     for i in range(0, len(tokens), 500):
         batch = tokens[i:i + 500]
         message = messaging.MulticastMessage(
-            notification=messaging.Notification(title=title_bn, body=body_bn),
+            notification=messaging.Notification(title=title_bn, body=body_bn, image=image_url),
             data={k: str(v) for k, v in (data or {}).items()},
             tokens=batch,
         )

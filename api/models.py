@@ -1039,6 +1039,12 @@ class PromoPush(BaseModel):
     body_en         = models.TextField(blank=True)
     sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='promo_pushes')
     recipient_count = models.PositiveIntegerField(default=0)
+    # How many of those actually got delivered per Firebase's own response —
+    # separate from recipient_count (devices targeted) so a gap between the
+    # two is visible at a glance: 0 delivered despite N targeted means
+    # Firebase itself is rejecting every token (stale tokens, misconfigured
+    # project, etc.), not an on-device display issue.
+    delivered_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['-created_at']
