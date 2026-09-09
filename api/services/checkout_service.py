@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 class CheckoutService:
 
     @transaction.atomic
-    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None, delivery_zone: str | None = None) -> SalesOrder:
+    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None,
+                 delivery_zone: str | None = None, source: str = 'WEBSITE') -> SalesOrder:
         cart  = Cart.objects.select_for_update().get(user=user)
         items = list(cart.items.select_related('product').select_for_update())
 
@@ -114,7 +115,7 @@ class CheckoutService:
             shipping_district   = s_district,
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
-            source              = 'WEBSITE',
+            source              = source,
             subtotal            = subtotal,
             discount_amount     = discount_amount,
             first_order_discount_amount = first_order_discount_amount,

@@ -40,18 +40,21 @@ class GuestCheckoutService:
     @transaction.atomic
     def checkout(self, validated_data: dict, customer: User | None = None,
                  discount_type: str = 'NONE', discount_value: Decimal = Decimal('0'),
-                 is_pos: bool = False) -> SalesOrder:
+                 is_pos: bool = False, is_mobile_app: bool = False) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
         # is_pos identifies a staff POS sale unambiguously (passed by the
         # caller, never by request data); placed_via_ai is the AI chatbot's
-        # own signal on the same public endpoint a real guest also uses, so
-        # it's the only way to tell those two apart here.
+        # own signal on the same public endpoint a real guest also uses;
+        # is_mobile_app is the same idea for a guest checkout placed from
+        # the Flutter app (view reads it off the X-Client-Platform header).
         if is_pos:
             source = 'POS'
         elif validated_data.get('placed_via_ai'):
             source = 'AI_CHATBOT'
+        elif is_mobile_app:
+            source = 'MOBILE_APP'
         else:
             source = 'WEBSITE'
 

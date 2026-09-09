@@ -83,6 +83,10 @@ def checkout(request):
     payment_method      = request.data.get('payment_method', 'COD')
     shipping_address_id = request.data.get('shipping_address_id') or None
     delivery_zone       = request.data.get('delivery_zone') or None
+    # The Flutter app sends this on every request (see mobile-app's
+    # ApiClient) — lets admin distinguish app orders from website ones in
+    # the order list, same as POS/AI_CHATBOT are already distinguished.
+    source = 'MOBILE_APP' if request.headers.get('X-Client-Platform') == 'mobile_app' else 'WEBSITE'
     if payment_method != 'COD':
         return ApiResponse(message="Invalid payment method", errors="Only COD is available right now", status_code=422)
     try:
@@ -91,6 +95,7 @@ def checkout(request):
             payment_method=payment_method,
             shipping_address_id=shipping_address_id,
             delivery_zone=delivery_zone,
+            source=source,
         )
         mail_service.send_order_created(order)
         data  = SalesOrderSerializer(order).data

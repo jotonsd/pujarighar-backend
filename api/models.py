@@ -498,6 +498,7 @@ PAYMENT_STATUS_CHOICES = [
 
 ORDER_SOURCE_CHOICES = [
     ('WEBSITE',    'ওয়েবসাইট'),
+    ('MOBILE_APP', 'মোবাইল অ্যাপ'),
     ('AI_CHATBOT', 'ব্রাহ্মণ AI'),
     ('POS',        'POS'),
 ]
