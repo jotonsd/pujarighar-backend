@@ -216,6 +216,14 @@ urlpatterns = [
     path('notifications/mark-all-read/',        views.mark_all_read,      name='notification-mark-all'),
     path('notifications/<uuid:pk>/mark-read/',  views.mark_one_read,      name='notification-mark-one'),
 
+    # ─── Device tokens (mobile push) ────────────────────────────────────────────
+    path('device-tokens/register/',   views.register_device_token,   name='device-token-register'),
+    path('device-tokens/unregister/', views.unregister_device_token, name='device-token-unregister'),
+
+    # ─── Promotional push (admin panel) ─────────────────────────────────────────
+    path('promo-notifications/',      views.list_promo_pushes,     name='promo-push-list'),
+    path('promo-notifications/send/', views.send_promo_push_view,  name='promo-push-send'),
+
     # ─── Reviews ──────────────────────────────────────────────────────────────
     path('reviews/',                            views.create_review,         name='review-create'),
     path('reviews/my-order/',                   views.my_order_reviews,      name='review-my-order'),

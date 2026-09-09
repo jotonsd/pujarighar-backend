@@ -1006,6 +1006,47 @@ class Notification(models.Model):
         return f'{self.title_en} → {self.user.email}'
 
 
+class DeviceToken(models.Model):
+    """One row per device the mobile app has registered an FCM token for —
+    see api/services/push_service.py, which is the only thing that reads
+    this. Registered at app launch regardless of login state (`user` null
+    means a guest install), so a promotional broadcast reaches every app
+    install, not just logged-in accounts; `user` gets attached on login and
+    detached (not deleted — the device keeps getting promo pushes) on
+    logout, so per-user pushes (order status, etc) only ever go out while
+    that account is actually the one signed in on that device. `token` is
+    globally unique (not per-user) so re-registering the same device moves
+    it to whichever account (or no account) is current."""
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='device_tokens', null=True, blank=True)
+    token      = models.CharField(max_length=255, unique=True)
+    platform   = models.CharField(max_length=20, default='android')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.platform} → {self.user.email if self.user else "guest"}'
+
+
+class PromoPush(BaseModel):
+    """Audit trail for an admin-triggered promotional broadcast — the
+    Notification rows and the actual FCM sends themselves aren't linked
+    back to this, it's purely a "what did we send and when" log for the
+    admin panel's history list."""
+    title_bn        = models.CharField(max_length=200)
+    title_en        = models.CharField(max_length=200)
+    body_bn         = models.TextField(blank=True)
+    body_en         = models.TextField(blank=True)
+    sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='promo_pushes')
+    recipient_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.title_en} ({self.recipient_count} recipients)'
+
+
 # ─── Reviews ──────────────────────────────────────────────────────────────────
 
 class Review(BaseModel):

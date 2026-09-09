@@ -14,6 +14,7 @@ from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.utils.order_number import generate_order_number
 from api.utils.journal_number import next_entry_number
 from api.services.notification_ws import broadcast_notification
+from api.services.push_service import send_push_to_user
 
 # Same district-set checkout_service.py/guest_service.py use to pick a zone
 # when the customer didn't explicitly choose one — the order itself has no
@@ -1260,6 +1261,12 @@ class OrderService:
             reference_id=order.id,
         )
         broadcast_notification(notification)
+        send_push_to_user(
+            order.customer,
+            title_bn=notification.title_bn, title_en=notification.title_en,
+            body_bn=notification.body_bn, body_en=notification.body_en,
+            data={'reference_type': 'STATUS_CHANGED', 'reference_id': str(order.id)},
+        )
 
     def _notify_delivery_person(self, order: SalesOrder, delivery_person: User) -> None:
         notification = Notification.objects.create(

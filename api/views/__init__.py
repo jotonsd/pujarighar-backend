@@ -50,6 +50,8 @@ from .accounting_views import (
     get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, list_all_notifications, mark_all_read, mark_one_read
+from .device_token_views import register_device_token, unregister_device_token
+from .promo_push_views import list_promo_pushes, send_promo_push_view
 from .discount_views import list_discounts, create_discount, bulk_create_discount, toggle_discount, update_discount, delete_discount, bulk_delete_discount
 from .review_views import (
     create_review, list_product_reviews, my_order_reviews,
