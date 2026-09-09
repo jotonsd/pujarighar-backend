@@ -24,7 +24,8 @@ def guest_checkout(request):
             status_code=422,
         )
     try:
-        order = _svc.checkout(serializer.validated_data)
+        is_mobile_app = request.headers.get('X-Client-Platform') == 'mobile_app'
+        order = _svc.checkout(serializer.validated_data, is_mobile_app=is_mobile_app)
         mail_service.send_order_created(order)
         data  = {
             'order_number': order.order_number,

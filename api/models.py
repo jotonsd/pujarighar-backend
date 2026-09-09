@@ -1,6 +1,6 @@
 import secrets
 import string
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
@@ -214,6 +214,12 @@ class Product(BaseModel):
     cost_price     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     unit_bn        = models.CharField(max_length=50, default='পিস')
     unit_en        = models.CharField(max_length=50, default='piece')
+    # Per-unit weight — used to estimate an order's total shipping weight at
+    # checkout (see CheckoutService/GuestCheckoutService), which then feeds
+    # DeliveryCharge.charge_for()'s weight-bracket lookup. Null/blank means
+    # "not weighed yet" and contributes 0kg to that estimate, same as today
+    # if no product on the site has a weight set at all.
+    weight_kg        = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     is_package       = models.BooleanField(default=False)
     discount_type    = models.CharField(
         max_length=12,
@@ -238,6 +244,16 @@ class Product(BaseModel):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # Matches Meta.ordering — the catalog's default sort (and the
+            # personalized-ordering tiebreak), otherwise a full sequential
+            # scan + sort on every list page load as the table grows.
+            models.Index(fields=['-created_at']),
+            # `category`/`brand` are ForeignKeys, which Django already
+            # indexes automatically — only `is_active` (a plain boolean,
+            # filtered on almost every list_products call) needs one here.
+            models.Index(fields=['is_active']),
+        ]
 
     def __str__(self):
         return f'{self.name_bn} ({self.sku})'
@@ -256,6 +272,12 @@ class Product(BaseModel):
 
     @property
     def effective_price(self) -> Decimal:
+        # ProductService.list_products annotates `_effective_price` via a
+        # correlated subquery so a list page doesn't run this discount
+        # lookup once per row — use it when present instead of re-querying.
+        annotated = getattr(self, '_effective_price', None)
+        if annotated is not None:
+            return annotated
         today = timezone.now().date()
         active = (
             self.discounts
@@ -303,6 +325,12 @@ class Product(BaseModel):
                     available.append(item.component.stock_on_hand // item.quantity)
             return min(available) if available else Decimal('0')
 
+        # ProductService.list_products annotates `_stock_on_hand` via a
+        # correlated subquery so a list page doesn't run this aggregate once
+        # per row — use it when present instead of re-querying.
+        annotated = getattr(self, '_stock_on_hand', None)
+        if annotated is not None:
+            return annotated
         from django.db.models import Sum
         result = self.stock_movements.aggregate(total=Sum('quantity'))
         return result['total'] or Decimal('0')
@@ -454,6 +482,7 @@ ORDER_STATUS = [
     ('DELIVERED',  'ডেলিভারি হয়েছে'),
     ('PARTIALLY_DELIVERED', 'আংশিক ডেলিভারি হয়েছে'),
     ('RETURNED',   'ফেরত'),
+    ('EXCHANGED',  'বিনিময় হয়েছে'),
     ('CANCELLED',  'বাতিল'),
 ]
 
@@ -469,6 +498,7 @@ PAYMENT_STATUS_CHOICES = [
 
 ORDER_SOURCE_CHOICES = [
     ('WEBSITE',    'ওয়েবসাইট'),
+    ('MOBILE_APP', 'মোবাইল অ্যাপ'),
     ('AI_CHATBOT', 'ব্রাহ্মণ AI'),
     ('POS',        'POS'),
 ]
@@ -491,7 +521,7 @@ ALLOWED_TRANSITIONS = {
     # both, reversing the already-posted payment/cashback/referral journals
     # in the second case rather than assuming a clean slate.
     'ON_THE_WAY': ['DELIVERED', 'PARTIALLY_DELIVERED'],
-    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED'],
+    'DELIVERED':  ['RETURNED', 'PARTIALLY_DELIVERED', 'EXCHANGED'],
 }
 
 
@@ -529,6 +559,11 @@ class SalesOrder(BaseModel):
     first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
+    # Snapshot of the cart's total weight (sum of product.weight_kg * qty)
+    # at checkout time, used to compute delivery_charge above via
+    # DeliveryCharge.charge_for() — kept for the record so a delivery-charge
+    # dispute can be traced back to what weight it was priced from.
+    estimated_weight_kg = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
     cashback_amount     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
@@ -539,6 +574,13 @@ class SalesOrder(BaseModel):
     # glance. WEBSITE covers both a real anonymous guest and a logged-in
     # customer's own self-checkout.
     source              = models.CharField(max_length=20, choices=ORDER_SOURCE_CHOICES, default='WEBSITE')
+    # Set only on a replacement order created by OrderService.create_exchange()
+    # — lets both order detail pages render an "Exchanged ↔" cross-link
+    # without a join through Exchange.
+    exchanged_from      = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='exchange_replacements',
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -570,6 +612,38 @@ class SalesOrderItem(models.Model):
     unit_price          = models.DecimalField(max_digits=12, decimal_places=2)
     quantity            = models.DecimalField(max_digits=10, decimal_places=3)
     line_total          = models.DecimalField(max_digits=12, decimal_places=2)
+
+
+class Exchange(BaseModel):
+    """Audit/link record for a customer exchange — NOT a parallel state
+    machine. original_order transitions to EXCHANGED (see ALLOWED_TRANSITIONS)
+    but new_order is a completely normal SalesOrder that goes through the
+    usual PENDING→...→DELIVERED pipeline unmodified."""
+    original_order = models.ForeignKey(SalesOrder, on_delete=models.PROTECT, related_name='exchanges')
+    new_order      = models.OneToOneField(SalesOrder, on_delete=models.PROTECT, related_name='exchange_source')
+    note_bn        = models.TextField(blank=True)
+    note_en        = models.TextField(blank=True)
+    delivery_charge_waived = models.BooleanField(default=False)
+    # Snapshot of total returned-item value credited back (as store credit or
+    # cash, depending on original_order.is_guest) — handy for admin display
+    # without re-summing ExchangeItems every time.
+    returned_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_by     = models.ForeignKey(User, on_delete=models.PROTECT, related_name='exchanges_created')
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ExchangeItem(models.Model):
+    id            = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    exchange      = models.ForeignKey(Exchange, on_delete=models.CASCADE, related_name='items')
+    original_item = models.ForeignKey(SalesOrderItem, on_delete=models.PROTECT, related_name='exchange_items')
+    quantity      = models.DecimalField(max_digits=10, decimal_places=3)
+    # Snapshot at exchange time — same reasoning SalesOrderItem already
+    # snapshots product_name_bn/en/unit_price instead of re-deriving from
+    # Product later, so a subsequent price/cost change never rewrites history.
+    unit_price    = models.DecimalField(max_digits=12, decimal_places=2)
+    cost_price    = models.DecimalField(max_digits=12, decimal_places=2)
 
 
 class OrderStatusLog(models.Model):
@@ -836,6 +910,13 @@ class DeliveryCharge(models.Model):
     # flat zone rate above is used, exactly as today.
     inside_dhaka_weight_tiers  = models.JSONField(default=list, blank=True)
     outside_dhaka_weight_tiers = models.JSONField(default=list, blank=True)
+    # Per-kg surcharge (rounded up to the next whole kg) applied on top of
+    # the heaviest bracket's charge for weight beyond that bracket's
+    # max_weight_kg — mirrors how couriers actually bill overweight parcels
+    # ("15 BDT/kg after 2kg") instead of capping forever at the heaviest
+    # bracket's flat rate. 0 (the default) keeps today's flat-cap behavior.
+    inside_dhaka_extra_per_kg  = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    outside_dhaka_extra_per_kg = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     updated_at    = models.DateTimeField(auto_now=True)
     updated_by    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -859,7 +940,11 @@ class DeliveryCharge(models.Model):
         for tier in sorted_tiers:
             if w <= Decimal(str(tier['max_weight_kg'])):
                 return Decimal(str(tier['charge_amount']))
-        return Decimal(str(sorted_tiers[-1]['charge_amount']))  # heaviest bracket covers "and above"
+        heaviest = sorted_tiers[-1]
+        extra_per_kg = self.inside_dhaka_extra_per_kg if zone == 'inside' else self.outside_dhaka_extra_per_kg
+        overflow_kg = w - Decimal(str(heaviest['max_weight_kg']))
+        extra_units = overflow_kg.to_integral_value(rounding=ROUND_CEILING) if overflow_kg > 0 else Decimal('0')
+        return Decimal(str(heaviest['charge_amount'])) + extra_units * extra_per_kg
 
     def __str__(self):
         return f'ডেলিভারি চার্জ — ঢাকা: ৳{self.inside_dhaka}, বাইরে: ৳{self.outside_dhaka}'
@@ -919,6 +1004,47 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'{self.title_en} → {self.user.email}'
+
+
+class DeviceToken(models.Model):
+    """One row per device the mobile app has registered an FCM token for —
+    see api/services/push_service.py, which is the only thing that reads
+    this. Registered at app launch regardless of login state (`user` null
+    means a guest install), so a promotional broadcast reaches every app
+    install, not just logged-in accounts; `user` gets attached on login and
+    detached (not deleted — the device keeps getting promo pushes) on
+    logout, so per-user pushes (order status, etc) only ever go out while
+    that account is actually the one signed in on that device. `token` is
+    globally unique (not per-user) so re-registering the same device moves
+    it to whichever account (or no account) is current."""
+    id         = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='device_tokens', null=True, blank=True)
+    token      = models.CharField(max_length=255, unique=True)
+    platform   = models.CharField(max_length=20, default='android')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.platform} → {self.user.email if self.user else "guest"}'
+
+
+class PromoPush(BaseModel):
+    """Audit trail for an admin-triggered promotional broadcast — the
+    Notification rows and the actual FCM sends themselves aren't linked
+    back to this, it's purely a "what did we send and when" log for the
+    admin panel's history list."""
+    title_bn        = models.CharField(max_length=200)
+    title_en        = models.CharField(max_length=200)
+    body_bn         = models.TextField(blank=True)
+    body_en         = models.TextField(blank=True)
+    sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='promo_pushes')
+    recipient_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.title_en} ({self.recipient_count} recipients)'
 
 
 # ─── Reviews ──────────────────────────────────────────────────────────────────
@@ -1019,6 +1145,10 @@ class SmsLog(models.Model):
     status        = models.CharField(max_length=10, choices=STATUS_CHOICES)
     response_code = models.CharField(max_length=10, blank=True, default='')
     response_text = models.CharField(max_length=255, blank=True, default='')
+    # Billed SMS units for `message` (1 for a single segment, 2+ once it
+    # splits) — computed once at send time so historical cost stays fixed
+    # even if the segment-size heuristic changes later.
+    segments      = models.PositiveSmallIntegerField(default=1)
     created_at    = models.DateTimeField(auto_now_add=True)
 
     class Meta:

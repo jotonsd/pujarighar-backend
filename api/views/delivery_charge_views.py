@@ -18,6 +18,8 @@ def _serialize(charge: DeliveryCharge) -> dict:
         'outside_dhaka':              str(charge.outside_dhaka),
         'inside_dhaka_weight_tiers':  charge.inside_dhaka_weight_tiers,
         'outside_dhaka_weight_tiers': charge.outside_dhaka_weight_tiers,
+        'inside_dhaka_extra_per_kg':  str(charge.inside_dhaka_extra_per_kg),
+        'outside_dhaka_extra_per_kg': str(charge.outside_dhaka_extra_per_kg),
         'updated_at':                 charge.updated_at.isoformat() if charge.updated_at else None,
     }
 
@@ -42,7 +44,21 @@ def _clean_tiers(raw) -> list:
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_delivery_charges(request):
-    return ApiResponse(message='Delivery charges', data=_serialize(DeliveryCharge.get()))
+    charge = DeliveryCharge.get()
+    data = _serialize(charge)
+    # Optional live quote — the cart/checkout page passes its current total
+    # weight so the price shown to the customer for each zone matches
+    # exactly what checkout will actually charge (same charge_for() call),
+    # instead of the flat rate above which ignores weight tiers entirely.
+    weight_param = request.query_params.get('weight')
+    if weight_param:
+        try:
+            weight = Decimal(weight_param)
+            data['inside_dhaka_for_weight']  = str(charge.charge_for('inside', weight))
+            data['outside_dhaka_for_weight'] = str(charge.charge_for('outside', weight))
+        except InvalidOperation:
+            pass
+    return ApiResponse(message='Delivery charges', data=data)
 
 
 @api_view(['PATCH'])
@@ -57,6 +73,10 @@ def update_delivery_charges(request):
         charge.inside_dhaka_weight_tiers = _clean_tiers(request.data.get('inside_dhaka_weight_tiers'))
     if 'outside_dhaka_weight_tiers' in request.data:
         charge.outside_dhaka_weight_tiers = _clean_tiers(request.data.get('outside_dhaka_weight_tiers'))
+    inside_extra  = request.data.get('inside_dhaka_extra_per_kg')
+    outside_extra = request.data.get('outside_dhaka_extra_per_kg')
+    if inside_extra  is not None: charge.inside_dhaka_extra_per_kg  = inside_extra
+    if outside_extra is not None: charge.outside_dhaka_extra_per_kg = outside_extra
     charge.updated_by = request.user
     charge.save()
     logger.info(f'Delivery charges updated by {request.user.email}: inside={charge.inside_dhaka} outside={charge.outside_dhaka}')

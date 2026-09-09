@@ -37,7 +37,7 @@ from .order_views import (
     confirm_order, pack_order, assign_delivery, dispatch_order,
     deliver_order, partial_deliver_order, return_order, cancel_order, pos_create_order,
     mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
-    waive_delivery_charge, lookup_recent_order_by_phone, get_sales_report,
+    waive_delivery_charge, lookup_recent_order_by_phone, get_sales_report, create_exchange,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
@@ -50,6 +50,8 @@ from .accounting_views import (
     get_dashboard_summary, create_manual_journal,
 )
 from .notification_views import list_notifications, list_all_notifications, mark_all_read, mark_one_read
+from .device_token_views import register_device_token, unregister_device_token
+from .promo_push_views import list_promo_pushes, send_promo_push_view
 from .discount_views import list_discounts, create_discount, bulk_create_discount, toggle_discount, update_discount, delete_discount, bulk_delete_discount
 from .review_views import (
     create_review, list_product_reviews, my_order_reviews,

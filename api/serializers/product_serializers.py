@@ -117,7 +117,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'brand', 'brand_name_bn', 'brand_name_en',
             'unit_price', 'cost_price', 'effective_price', 'original_price',
             'active_discount_type', 'active_discount_value',
-            'unit_bn', 'unit_en',
+            'unit_bn', 'unit_en', 'weight_kg',
             'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
             'stock_on_hand', 'images', 'package_items',
             'average_rating', 'review_count',

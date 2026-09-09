@@ -110,6 +110,7 @@ urlpatterns = [
     path('orders/<uuid:pk>/mark-cod-paid/',      views.mark_cod_paid,      name='order-mark-cod-paid'),
     path('orders/<uuid:pk>/apply-discount/',     views.apply_discount,     name='order-apply-discount'),
     path('orders/<uuid:pk>/waive-delivery/',     views.waive_delivery_charge, name='order-waive-delivery'),
+    path('orders/<uuid:pk>/exchange/',           views.create_exchange,    name='order-create-exchange'),
     path('orders/<uuid:pk>/courier/send/',       views.send_to_courier,    name='order-courier-send'),
     path('orders/<uuid:pk>/courier/status/',     views.courier_status,     name='order-courier-status'),
     path('orders/<uuid:pk>/update-shipping/',   views.update_shipping,    name='order-update-shipping'),
@@ -214,6 +215,14 @@ urlpatterns = [
     path('notifications/all/',                  views.list_all_notifications, name='notification-list-all'),
     path('notifications/mark-all-read/',        views.mark_all_read,      name='notification-mark-all'),
     path('notifications/<uuid:pk>/mark-read/',  views.mark_one_read,      name='notification-mark-one'),
+
+    # ─── Device tokens (mobile push) ────────────────────────────────────────────
+    path('device-tokens/register/',   views.register_device_token,   name='device-token-register'),
+    path('device-tokens/unregister/', views.unregister_device_token, name='device-token-unregister'),
+
+    # ─── Promotional push (admin panel) ─────────────────────────────────────────
+    path('promo-notifications/',      views.list_promo_pushes,     name='promo-push-list'),
+    path('promo-notifications/send/', views.send_promo_push_view,  name='promo-push-send'),
 
     # ─── Reviews ──────────────────────────────────────────────────────────────
     path('reviews/',                            views.create_review,         name='review-create'),

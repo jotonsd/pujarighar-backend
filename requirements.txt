@@ -21,6 +21,16 @@ google-api-python-client==2.149.0
 google-analytics-data==0.18.16
 google-genai==2.20.0
 grpcio==1.83.1
+firebase_admin==7.5.0
+google-cloud-core==2.7.0
+google-cloud-firestore==2.27.0
+google-cloud-storage==3.14.1
+google-crc32c==1.8.0
+google-resumable-media==2.10.2
+CacheControl==0.14.4
+h2==4.4.1
+hpack==4.2.0
+hyperframe==6.1.0
 annotated-types==0.8.0
 anyio==4.14.2
 distro==1.9.0

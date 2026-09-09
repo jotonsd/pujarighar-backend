@@ -1,16 +1,20 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     SalesOrder, SalesOrderItem, OrderStatusLog, DeliveryAssignment, User,
     StockMovement, Account, JournalEntry, JournalLine, Notification,
     ReferralBonus, SiteSetting, ProductPackageItem, DeliveryCharge,
+    Exchange, ExchangeItem, CashbackTier,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
+from api.utils.order_number import generate_order_number
+from api.utils.journal_number import next_entry_number
 from api.services.notification_ws import broadcast_notification
+from api.services.push_service import send_push_to_user
 
 # Same district-set checkout_service.py/guest_service.py use to pick a zone
 # when the customer didn't explicitly choose one — the order itself has no
@@ -142,11 +146,14 @@ class OrderService:
         return self._transition(order, 'PACKED', user)
 
     @transaction.atomic
-    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User, weight: Decimal = None) -> SalesOrder:
+    def assign_delivery(self, order: SalesOrder, delivery_person_id: str | None, user: User, weight: Decimal = None, note: str = '') -> SalesOrder:
         delivery_person = None
         if delivery_person_id:
             delivery_person = User.objects.get(id=delivery_person_id, role__code='DELIVERY')
-        DeliveryAssignment.objects.update_or_create(order=order, defaults={'delivery_person': delivery_person})
+        defaults = {'delivery_person': delivery_person}
+        if note:
+            defaults['tracking_note'] = note
+        DeliveryAssignment.objects.update_or_create(order=order, defaults=defaults)
         # Already ASSIGNED (e.g. assigned earlier without a delivery person) — just
         # attaching/updating the delivery person now, no status transition needed.
         updated = order if order.status == 'ASSIGNED' else self._transition(order, 'ASSIGNED', user)
@@ -156,10 +163,12 @@ class OrderService:
         return updated
 
     def recalculate_delivery_charge(self, order: SalesOrder, weight: Decimal = None) -> SalesOrder:
-        """Re-price delivery for the actual package weight, entered by admin
-        at assignment time (mirrors the courier flow's existing manual-weight
-        entry — no product in the catalog carries a weight field). A no-op
-        unless a weight was actually given, and skipped once the order is
+        """Re-price delivery for a given package weight — checkout already
+        prices delivery_charge from order.estimated_weight_kg (see
+        CheckoutService), so this only matters when a manual weight override
+        is explicitly passed in (e.g. the courier flow, when it differs from
+        the estimate). A no-op unless a weight was actually given, and
+        skipped once the order is
         already PAID (changing an already-collected amount would desync the
         books — same reasoning waive_delivery_charge applies elsewhere), so
         this never blocks assignment itself, it just silently leaves the
@@ -206,6 +215,13 @@ class OrderService:
             order.save(update_fields=['payment_status'])
         if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
             self._create_payment_journal(order, user)
+        # Self-delivery (no courier involved) pays the rider the full
+        # delivery charge collected from the customer — a pass-through, not
+        # income — so it's expensed here too. Courier-delivered orders get
+        # their own expense posted separately once the courier reports
+        # their actual fee (see CourierService._post_delivery_expense_if_needed).
+        if not hasattr(order, 'courier_consignment'):
+            self._create_self_delivery_expense_journal(order, user)
         # Credit cashback earned to customer's balance
         cb = Decimal(str(order.cashback_amount or 0))
         if cb > 0 and not order.is_guest and order.customer_id:
@@ -442,6 +458,17 @@ class OrderService:
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
         self._create_return_journal(order, user)
+        # Refund any store credit spent on this order back to the customer's
+        # wallet — the journal side of this (re-instating the liability) is
+        # posted inside _create_return_journal above.
+        cb_used = Decimal(str(order.cashback_used or 0))
+        if cb_used > 0 and not order.is_guest and order.customer_id:
+            order.customer.profile.cashback_balance = F('cashback_balance') + cb_used
+            order.customer.profile.save(update_fields=['cashback_balance'])
+        # Claw back cashback earned on this order, and any referral bonus it
+        # triggered — same treatment partial_deliver() already gives a
+        # returned slice, applied consistently to a full return too.
+        self._reverse_cashback(order, user)
         self._reverse_referral_bonus(order, user)
         return order
 
@@ -523,6 +550,8 @@ class OrderService:
                 order.save(update_fields=['payment_status'])
             if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
                 self._create_partial_payment_journal(order, user, returned_value, returned_cogs)
+            if not hasattr(order, 'courier_consignment'):
+                self._create_self_delivery_expense_journal(order, user)
 
         logger.info(
             f'Order {order.order_number} partially delivered by {user.email} '
@@ -539,10 +568,23 @@ class OrderService:
                 product=item.product, movement_type='RETURN',
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
-        # Only reverse accounting if a payment journal was already posted
-        # (pre-delivery COD cancellations have no prior financial entry)
+        # Only reverse accounting if a journal was already posted for this
+        # order — either PAYMENT (COD/online already paid before cancelling)
+        # or SALE (a POS non-COD order, which books its journal immediately
+        # at creation against Accounts Receivable rather than Cash — see
+        # guest_service._create_sale_journal — so it needs its own reversal
+        # that credits the same account back rather than crediting Cash for
+        # money never booked there). Checking PAYMENT alone missed the SALE
+        # case entirely, leaving those cancelled orders' revenue/COGS/AR
+        # permanently on the books. Pre-delivery COD cancellations have
+        # neither, so nothing to reverse.
         if JournalEntry.objects.filter(reference_id=order.id, reference_type='PAYMENT').exists():
             self._create_return_journal(order, user)
+            if order.payment_status == 'PAID':
+                order.payment_status = 'UNPAID'
+                order.save(update_fields=['payment_status'])
+        elif JournalEntry.objects.filter(reference_id=order.id, reference_type='SALE').exists():
+            self._create_sale_reversal_journal(order, user)
         # Refund cashback that was used on this order back to the customer
         cb_used = Decimal(str(order.cashback_used or 0))
         if cb_used > 0 and not order.is_guest and order.customer_id:
@@ -571,11 +613,7 @@ class OrderService:
         return order
 
     def _next_entry_number(self) -> str:
-        today  = timezone.now().date()
-        prefix = f'JE-{today:%Y%m%d}-'
-        last   = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        seq    = int(last.rsplit('-', 1)[1]) if last else 0
-        return f'{prefix}{seq + 1:04d}'
+        return next_entry_number()
 
     def _acct(self, code: str):
         try:
@@ -811,7 +849,15 @@ class OrderService:
             item.product.cost_price * item.quantity
             for item in order.items.select_related('product')
         )
-        revenue = order.subtotal  # already net of discount
+        revenue  = order.subtotal  # already net of discount
+        delivery = order.delivery_charge or Decimal('0')
+        cb_used  = Decimal(str(order.cashback_used or 0))
+        # Only the cash actually collected gets refunded — whatever portion
+        # was paid with store credit was never real cash to begin with; that
+        # portion is restored to the customer's wallet (see return_order()/
+        # cancel()) and its liability re-instated below instead of being
+        # double-refunded as cash on top of the credit.
+        cash_refund = revenue + delivery - cb_used
         entry = JournalEntry.objects.create(
             entry_number=self._next_entry_number(), reference_type='RETURN',
             reference_id=order.id,
@@ -821,9 +867,44 @@ class OrderService:
         )
         lines = [
             ('4000', revenue,       Decimal('0')),  # Dr Sales Revenue (reversal)
+            ('4200', delivery,      Decimal('0')),  # Dr Delivery Income (reversal — nothing was kept delivered)
             ('1300', cogs,          Decimal('0')),  # Dr Inventory (stock back)
-            ('1000', Decimal('0'),  revenue),       # Cr Cash (refund)
+            ('1000', Decimal('0'),  cash_refund),   # Cr Cash (refund, net of any store credit used)
             ('5000', Decimal('0'),  cogs),          # Cr COGS (reversal)
+        ]
+        if cb_used > 0:
+            lines.append(('2250', Decimal('0'), cb_used))  # Cr Cashback Payable (re-instate spent credit)
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_sale_reversal_journal(self, order: SalesOrder, user: User) -> None:
+        """Reverses a SALE-type entry — a POS non-COD order, whose journal
+        posts immediately at creation against 1100 Accounts Receivable
+        rather than 1000 Cash (see guest_service._create_sale_journal) —
+        used by cancel() when it finds a SALE journal instead of a PAYMENT
+        one, so the credit side matches what was actually debited
+        originally rather than crediting Cash for money never booked there."""
+        cogs = sum(
+            item.product.cost_price * item.quantity
+            for item in order.items.select_related('product')
+        )
+        revenue  = order.subtotal
+        delivery = order.delivery_charge or Decimal('0')
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='RETURN',
+            reference_id=order.id,
+            description_bn=f'বিক্রয় বাতিল — {order.order_number}',
+            description_en=f'Sale Cancelled — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('4000', revenue,                Decimal('0')),  # Dr Sales Revenue (reversal)
+            ('4200', delivery,               Decimal('0')),  # Dr Delivery Income (reversal)
+            ('1300', cogs,                   Decimal('0')),  # Dr Inventory (stock back)
+            ('1100', Decimal('0'), revenue + delivery),       # Cr Accounts Receivable
+            ('5000', Decimal('0'),           cogs),          # Cr COGS (reversal)
         ]
         for code, debit, credit in lines:
             acct = self._acct(code)
@@ -850,6 +931,271 @@ class OrderService:
             ('5000', Decimal('0'),   returned_cogs), # Cr COGS (reversal)
         ]
         for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    @transaction.atomic
+    def create_exchange(self, original_order: SalesOrder, user: User,
+                        returned_items: list, replacement_items: list,
+                        delivery_charge_waived: bool = False,
+                        discount_type: str = '', discount_value: Decimal = None,
+                        note_bn: str = '', note_en: str = '') -> tuple[SalesOrder, SalesOrder]:
+        """Exchange (full or partial) of a delivered order's item(s) for a
+        different product. original_order transitions to EXCHANGED (terminal,
+        like RETURNED/PARTIALLY_DELIVERED) and is never reopened; the
+        replacement ships as a brand-new SalesOrder, which gets delivery
+        assignment/invoice/tracking/apply_discount()/_create_payment_journal
+        entirely for free through the normal pipeline, with zero changes to
+        any of that machinery.
+
+        returned_items: [{'item_id': <SalesOrderItem id>, 'quantity': Decimal}, ...]
+        replacement_items: [{'product': <Product>, 'quantity': Decimal}, ...]
+
+        Settlement for the returned value: a registered customer gets store
+        credit (profile.cashback_balance, auto-applied against the new
+        order's total, same as at checkout). A guest order has no wallet to
+        credit, so it settles in cash instead — the return-reversal journal
+        credits Cash (reusing _create_partial_return_journal unmodified) and
+        the new order is just a normal order the guest pays for in full,
+        with the cash difference settled at the counter.
+        """
+        if original_order.status != 'DELIVERED':
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র ডেলিভারি হওয়া অর্ডার বিনিময় করা যায়',
+                'message_en': 'Only a delivered order can be exchanged',
+            })
+        if not returned_items:
+            raise ValidationError({
+                'message_bn': 'অন্তত একটি ফেরতযোগ্য পণ্য নির্বাচন করুন',
+                'message_en': 'Select at least one item to return',
+            })
+        if not replacement_items:
+            raise ValidationError({
+                'message_bn': 'অন্তত একটি প্রতিস্থাপন পণ্য নির্বাচন করুন',
+                'message_en': 'Select at least one replacement product',
+            })
+
+        # Merge duplicate lines (same item/product picked more than once in
+        # one request) BEFORE validating — otherwise two lines for the same
+        # item would each pass the "not over remaining quantity" check
+        # independently, since neither sees the other's claim yet.
+        returned_qty_by_id: dict[str, Decimal] = {}
+        for entry in returned_items:
+            key = str(entry['item_id'])
+            returned_qty_by_id[key] = returned_qty_by_id.get(key, Decimal('0')) + Decimal(str(entry['quantity']))
+
+        replacement_qty_by_product: dict = {}   # product.id -> (product, total_qty)
+        for entry in replacement_items:
+            product = entry['product']
+            _, prev_qty = replacement_qty_by_product.get(product.id, (product, Decimal('0')))
+            replacement_qty_by_product[product.id] = (product, prev_qty + Decimal(str(entry['quantity'])))
+
+        items_by_id = {str(i.id): i for i in original_order.items.select_related('product')}
+        resolved_returns = []
+        for item_id, qty in returned_qty_by_id.items():
+            item = items_by_id.get(item_id)
+            if not item:
+                raise ValidationError({
+                    'message_bn': 'অর্ডারে এই আইটেম পাওয়া যায়নি',
+                    'message_en': 'Item not found on this order',
+                })
+            already = ExchangeItem.objects.filter(original_item=item).aggregate(total=Sum('quantity'))['total'] or Decimal('0')
+            if qty <= 0 or already + qty > item.quantity:
+                raise ValidationError({
+                    'message_bn': f'{item.product_name_bn} এর জন্য সঠিক পরিমাণ দিন',
+                    'message_en': f'Enter a valid quantity for {item.product_name_en}',
+                })
+            resolved_returns.append((item, qty))
+
+        resolved_replacements = list(replacement_qty_by_product.values())
+        for product, qty in resolved_replacements:
+            if qty <= 0:
+                raise ValidationError({
+                    'message_bn': 'পরিমাণ শূন্যের বেশি হতে হবে',
+                    'message_en': 'Quantity must be greater than zero',
+                })
+
+        original_order = self._transition(original_order, 'EXCHANGED', user, note_bn, note_en)
+
+        returned_value = Decimal('0')
+        returned_cogs  = Decimal('0')
+        for item, qty in resolved_returns:
+            self._return_order_item_stock(item.product, qty, original_order.id, user)
+            returned_value += item.unit_price * qty
+            returned_cogs  += item.product.cost_price * qty
+
+        profile = None
+        if original_order.is_guest or not original_order.customer_id:
+            # Guest: no wallet to credit — settle in cash (reuses the
+            # existing cash-refund journal shape unmodified).
+            self._create_partial_return_journal(original_order, user, returned_value, returned_cogs)
+        else:
+            self._create_exchange_return_journal(original_order, user, returned_value, returned_cogs)
+            profile = original_order.customer.profile
+            profile.cashback_balance = F('cashback_balance') + returned_value
+            profile.save(update_fields=['cashback_balance'])
+            profile.refresh_from_db(fields=['cashback_balance'])  # F() doesn't update the in-memory value
+
+        # Claw back cashback earned on the original order, and any referral
+        # bonus it triggered — same treatment partial_deliver()/return_order()
+        # already give a return, applied consistently here too. Both are
+        # no-ops if nothing was ever earned on this order.
+        self._reverse_cashback(original_order, user)
+        self._reverse_referral_bonus(original_order, user)
+        if profile is not None:
+            # _reverse_cashback (if it fired) left an unresolved F()
+            # expression on this same cached profile instance — refresh
+            # before the cashback_used clamp below reads it as a real number.
+            profile.refresh_from_db(fields=['cashback_balance'])
+
+        original_subtotal = sum((p.original_price * q for p, q in resolved_replacements), Decimal('0'))
+        subtotal          = sum((p.effective_price * q for p, q in resolved_replacements), Decimal('0'))
+        total_weight      = sum(((p.weight_kg or Decimal('0')) * q for p, q in resolved_replacements), Decimal('0'))
+
+        zone = 'inside' if (original_order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
+        delivery = Decimal('0') if delivery_charge_waived else DeliveryCharge.get().charge_for(zone, total_weight)
+
+        # cashback_used starts at 0 here deliberately — it's only computed
+        # AFTER any discretionary discount is applied below (apply_discount's
+        # own _recalc_order_totals reads the current stored cashback_used to
+        # rebuild grand_total; if cashback had already been clamped against
+        # the pre-discount total, a big enough discount would push
+        # grand_total negative instead of the discount simply amplifying how
+        # much cashback should have been usable).
+        new_order = SalesOrder.objects.create(
+            order_number=generate_order_number(),
+            customer=original_order.customer, is_guest=original_order.is_guest,
+            guest_email=original_order.guest_email,
+            exchanged_from=original_order,
+            payment_method=original_order.payment_method, payment_status='UNPAID', status='PENDING',
+            shipping_name_bn=original_order.shipping_name_bn, shipping_name_en=original_order.shipping_name_en,
+            shipping_phone=original_order.shipping_phone,
+            shipping_address_bn=original_order.shipping_address_bn, shipping_address_en=original_order.shipping_address_en,
+            shipping_district=original_order.shipping_district, shipping_thana=original_order.shipping_thana,
+            shipping_post_code=original_order.shipping_post_code,
+            source=original_order.source,
+            subtotal=subtotal, discount_amount=original_subtotal - subtotal,
+            delivery_charge=delivery, estimated_weight_kg=total_weight,
+            grand_total=subtotal + delivery, cashback_used=Decimal('0'),
+        )
+
+        for product, qty in resolved_replacements:
+            SalesOrderItem.objects.create(
+                order=new_order, product=product,
+                product_name_bn=product.name_bn, product_name_en=product.name_en,
+                original_unit_price=product.original_price, unit_price=product.effective_price,
+                quantity=qty, line_total=product.effective_price * qty,
+            )
+            self._adjust_order_item_stock(product, qty, new_order.id, user)
+
+        OrderStatusLog.objects.create(order=new_order, from_status='', to_status='PENDING', changed_by=user)
+
+        if discount_type and discount_value:
+            new_order = self.apply_discount(new_order, discount_type, discount_value, user)
+
+        if profile is not None:
+            cashback_used = min(profile.cashback_balance, new_order.grand_total)
+            if cashback_used > 0:
+                new_order.grand_total -= cashback_used
+                new_order.cashback_used = cashback_used
+                new_order.save(update_fields=['grand_total', 'cashback_used'])
+                profile.cashback_balance -= cashback_used
+                profile.save(update_fields=['cashback_balance'])
+            cashback_earned = CashbackTier.calculate(new_order.grand_total)
+            if cashback_earned > 0:
+                new_order.cashback_amount = cashback_earned
+                new_order.save(update_fields=['cashback_amount'])
+
+        exchange = Exchange.objects.create(
+            original_order=original_order, new_order=new_order,
+            note_bn=note_bn, note_en=note_en,
+            delivery_charge_waived=delivery_charge_waived,
+            returned_value=returned_value, created_by=user,
+        )
+        for item, qty in resolved_returns:
+            ExchangeItem.objects.create(
+                exchange=exchange, original_item=item, quantity=qty,
+                unit_price=item.unit_price, cost_price=item.product.cost_price,
+            )
+
+        logger.info(
+            f'Exchange created: {original_order.order_number} → {new_order.order_number} '
+            f'by {user.email} (returned ৳{returned_value}, settled via {"credit" if profile is not None else "cash"})'
+        )
+        return original_order, new_order
+
+    def _return_order_item_stock(self, product, qty: Decimal, order_id, user: User) -> None:
+        """RETURN-side counterpart to _adjust_order_item_stock — fans a
+        returned package out to its components. return_order()/
+        partial_deliver() instead create a single RETURN movement against
+        the package product itself, which silently restocks nothing since
+        Product.stock_on_hand for a package is derived only from its
+        components' movements — this new path deliberately doesn't repeat
+        that gap."""
+        if product.is_package:
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+                StockMovement.objects.create(
+                    product=pi.component, movement_type='RETURN',
+                    quantity=pi.quantity * qty, reference_id=order_id, created_by=user,
+                )
+        else:
+            StockMovement.objects.create(
+                product=product, movement_type='RETURN',
+                quantity=qty, reference_id=order_id, created_by=user,
+            )
+
+    def _create_exchange_return_journal(self, order: SalesOrder, user: User,
+                                        returned_value: Decimal, returned_cogs: Decimal) -> None:
+        """Same shape as _create_partial_return_journal, except credits 2250
+        Cashback Payable instead of 1000 Cash — a registered customer's
+        exchange settles as store credit, not a cash refund (create_exchange
+        uses this only for non-guest orders; guests use the Cash-crediting
+        version directly)."""
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='RETURN',
+            reference_id=order.id,
+            description_bn=f'বিনিময় ফেরত — {order.order_number}',
+            description_en=f'Exchange Return — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        lines = [
+            ('4000', returned_value, Decimal('0')),  # Dr Sales Revenue (reversal)
+            ('1300', returned_cogs,  Decimal('0')),  # Dr Inventory (stock back)
+            ('5000', Decimal('0'),   returned_cogs), # Cr COGS (reversal)
+            ('2250', Decimal('0'),   returned_value),# Cr Cashback Payable (store credit issued)
+        ]
+        for code, debit, credit in lines:
+            acct = self._acct(code)
+            if acct and (debit or credit):
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+    def _create_self_delivery_expense_journal(self, order: SalesOrder, user: User) -> None:
+        """Internal delivery (no courier) pays the rider the full
+        order.delivery_charge collected from the customer — a pure
+        pass-through per the business's own rider-pay model, so it's
+        expensed here rather than left as pure income. Courier-delivered
+        orders never reach this (guarded by the caller checking
+        courier_consignment) — those get CourierService's own expense entry
+        once the courier reports their actual (possibly different) fee.
+        Guarded against double-posting if called from both deliver() and
+        partial_deliver()'s fresh-COD branch for the same order."""
+        delivery = order.delivery_charge or Decimal('0')
+        if delivery <= 0:
+            return
+        if JournalEntry.objects.filter(reference_type='EXPENSE', reference_id=order.id).exists():
+            return
+        entry = JournalEntry.objects.create(
+            entry_number=self._next_entry_number(), reference_type='EXPENSE',
+            reference_id=order.id,
+            description_bn=f'ডেলিভারি রাইডার খরচ — {order.order_number}',
+            description_en=f'Delivery Rider Expense — {order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('6500', delivery,      Decimal('0')),  # Dr Delivery Expense
+            ('1000', Decimal('0'),  delivery),       # Cr Cash (paid to the rider)
+        ]:
             acct = self._acct(code)
             if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
@@ -889,30 +1235,6 @@ class OrderService:
             if acct and (debit or credit):
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
-    def _create_reversal_journal(self, order: SalesOrder, user: User) -> None:
-        cogs = sum(
-            item.product.cost_price * item.quantity
-            for item in order.items.select_related('product')
-        )
-        revenue = order.subtotal  # already net of discount
-        entry = JournalEntry.objects.create(
-            entry_number=self._next_entry_number(), reference_type='RETURN',
-            reference_id=order.id,
-            description_bn=f'বিক্রয় বিপরীত — {order.order_number}',
-            description_en=f'Sale reversal — {order.order_number}',
-            created_by=user, is_posted=True,
-        )
-        lines = [
-            ('4000', revenue,      Decimal('0')),  # Dr Sales Revenue
-            ('1300', cogs,         Decimal('0')),  # Dr Inventory
-            ('1100', Decimal('0'), revenue),       # Cr AR
-            ('5000', Decimal('0'), cogs),          # Cr COGS
-        ]
-        for code, debit, credit in lines:
-            acct = self._acct(code)
-            if acct and (debit or credit):
-                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
-
     def _notify_customer(self, order: SalesOrder, to_status: str) -> None:
         if order.is_guest or not order.customer_id:
             return
@@ -923,6 +1245,7 @@ class OrderService:
             'ON_THE_WAY': {'bn': 'পথে আছে',               'en': 'Out for Delivery'},
             'DELIVERED':  {'bn': 'ডেলিভারি হয়েছে',        'en': 'Delivered'},
             'RETURNED':   {'bn': 'ফেরত হয়েছে',            'en': 'Returned'},
+            'EXCHANGED':  {'bn': 'বিনিময় হয়েছে',           'en': 'Exchanged'},
             'CANCELLED':  {'bn': 'বাতিল হয়েছে',           'en': 'Cancelled'},
         }
         label = STATUS_LABELS.get(to_status)
@@ -938,6 +1261,12 @@ class OrderService:
             reference_id=order.id,
         )
         broadcast_notification(notification)
+        send_push_to_user(
+            order.customer,
+            title_bn=notification.title_bn, title_en=notification.title_en,
+            body_bn=notification.body_bn, body_en=notification.body_en,
+            data={'reference_type': 'STATUS_CHANGED', 'reference_id': str(order.id)},
+        )
 
     def _notify_delivery_person(self, order: SalesOrder, delivery_person: User) -> None:
         notification = Notification.objects.create(

@@ -26,6 +26,9 @@ media/
 .env.local
 .env.production
 
+# Secrets (service account keys, etc.) — never committed
+secrets/
+
 # Testing
 .pytest_cache/
 .coverage

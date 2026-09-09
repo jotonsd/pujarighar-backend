@@ -13,13 +13,20 @@ class CartItemSerializer(serializers.ModelSerializer):
     is_package          = serializers.BooleanField(source='product.is_package', read_only=True)
     package_items       = serializers.SerializerMethodField()
     product_image       = serializers.SerializerMethodField()
+    weight_kg           = serializers.SerializerMethodField()
 
     class Meta:
         model  = CartItem
         fields = ['id', 'product', 'product_name_bn', 'product_name_en',
                   'unit_price', 'original_unit_price', 'quantity', 'line_total', 'stock_on_hand',
-                  'is_package', 'package_items', 'product_image']
+                  'is_package', 'package_items', 'product_image', 'weight_kg']
         read_only_fields = ['id']
+
+    def get_weight_kg(self, obj):
+        # Per-unit weight — the app sums weight_kg * quantity across lines to
+        # get the cart's total weight for a live delivery-charge quote (see
+        # CheckoutService._cart_weight for the server-side equivalent).
+        return str(obj.product.weight_kg or Decimal('0'))
 
     def get_product_image(self, obj):
         img = obj.product.images.order_by('order').first()
@@ -58,10 +65,22 @@ class CartSerializer(serializers.ModelSerializer):
     subtotal        = serializers.SerializerMethodField()
     discount_amount = serializers.SerializerMethodField()
     item_count      = serializers.SerializerMethodField()
+    weight_kg       = serializers.SerializerMethodField()
 
     class Meta:
         model  = Cart
-        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count']
+        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count', 'weight_kg']
+
+    def get_weight_kg(self, obj):
+        # Approximate — sum of each product's declared weight * quantity,
+        # same calculation checkout uses to price delivery (see
+        # CheckoutService._cart_weight), so this is what the delivery charge
+        # will actually be based on, not a separate estimate.
+        total = sum(
+            ((item.product.weight_kg or Decimal('0')) * item.quantity for item in obj.items.all()),
+            Decimal('0'),
+        )
+        return str(total)
 
     def get_subtotal(self, obj):
         return str(sum(item.product.effective_price * item.quantity for item in obj.items.all()))

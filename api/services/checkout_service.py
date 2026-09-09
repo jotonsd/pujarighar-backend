@@ -14,13 +14,19 @@ from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
-def _delivery_charge(district: str, zone: str | None = None) -> Decimal:
-    cfg = DeliveryCharge.get()
-    if zone == 'inside':
-        return cfg.inside_dhaka
-    if zone == 'outside':
-        return cfg.outside_dhaka
-    return cfg.inside_dhaka if district.strip().lower() in _DHAKA_DISTRICTS else cfg.outside_dhaka
+def _delivery_charge(district: str, zone: str | None = None, weight: Decimal | None = None) -> Decimal:
+    resolved_zone = zone if zone in ('inside', 'outside') else (
+        'inside' if district.strip().lower() in _DHAKA_DISTRICTS else 'outside'
+    )
+    return DeliveryCharge.get().charge_for(resolved_zone, weight)
+
+
+def _cart_weight(items) -> Decimal:
+    """Sum of product.weight_kg * quantity across cart items — items without
+    a weight set contribute 0, so this only affects pricing once weight
+    brackets are actually configured (DeliveryCharge.charge_for falls back
+    to the flat zone rate when none are)."""
+    return sum(((i.product.weight_kg or Decimal('0')) * i.quantity for i in items), Decimal('0'))
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +34,8 @@ logger = logging.getLogger(__name__)
 class CheckoutService:
 
     @transaction.atomic
-    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None, delivery_zone: str | None = None) -> SalesOrder:
+    def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None,
+                 delivery_zone: str | None = None, source: str = 'WEBSITE') -> SalesOrder:
         cart  = Cart.objects.select_for_update().get(user=user)
         items = list(cart.items.select_related('product').select_for_update())
 
@@ -85,7 +92,8 @@ class CheckoutService:
 
         subtotal        = subtotal - first_order_discount_amount
         discount_amount = product_discount + first_order_discount_amount
-        delivery         = _delivery_charge(s_district or '', delivery_zone)
+        total_weight     = _cart_weight(items)
+        delivery         = _delivery_charge(s_district or '', delivery_zone, total_weight)
         grand_total      = subtotal + delivery
 
         # Auto-apply user's cashback balance
@@ -107,11 +115,12 @@ class CheckoutService:
             shipping_district   = s_district,
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
-            source              = 'WEBSITE',
+            source              = source,
             subtotal            = subtotal,
             discount_amount     = discount_amount,
             first_order_discount_amount = first_order_discount_amount,
             delivery_charge     = delivery,
+            estimated_weight_kg = total_weight,
             grand_total         = grand_total,
             cashback_used       = cashback_used,
         )

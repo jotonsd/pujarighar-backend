@@ -9,7 +9,7 @@ from api.services.guest_service import GuestCheckoutService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
-    AddOrderItemSerializer, PartialDeliverSerializer,
+    AddOrderItemSerializer, PartialDeliverSerializer, CreateExchangeSerializer,
 )
 from api.services.order_service import OrderService
 from api.services import mail_service
@@ -208,7 +208,8 @@ def assign_delivery(request, pk):
     try:
         delivery_person_id = serializer.validated_data.get('delivery_person_id')
         weight = serializer.validated_data.get('weight')
-        updated = _svc.assign_delivery(order, str(delivery_person_id) if delivery_person_id else None, request.user, weight)
+        note = serializer.validated_data.get('note', '')
+        updated = _svc.assign_delivery(order, str(delivery_person_id) if delivery_person_id else None, request.user, weight, note)
         return ApiResponse(message="Delivery assigned", data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         return api_error(e)
@@ -341,6 +342,38 @@ def waive_delivery_charge(request, pk):
         return ApiResponse(message='Delivery charge waived', data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f'Waive delivery charge error: {e}', exc_info=True)
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
+def create_exchange(request, pk):
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    serializer = CreateExchangeSerializer(data=request.data)
+    if not serializer.is_valid():
+        return ApiResponse(message='Validation failed', errors=serializer.errors, status_code=422)
+    d = serializer.validated_data
+
+    try:
+        replacement_items = [
+            {'product': Product.objects.get(pk=ri['product_id']), 'quantity': ri['quantity']}
+            for ri in d['replacement_items']
+        ]
+        original, new_order = _svc.create_exchange(
+            order, request.user, d['returned_items'], replacement_items,
+            d['delivery_charge_waived'], d.get('discount_type') or '', d.get('discount_value'),
+            d.get('note_bn', ''), d.get('note_en', ''),
+        )
+        return ApiResponse(message='Exchange created', data={
+            'original_order': SalesOrderSerializer(original, context={'request': request}).data,
+            'new_order': SalesOrderSerializer(new_order, context={'request': request}).data,
+        })
+    except Exception as e:
+        logger.error(f'Create exchange error: {e}', exc_info=True)
         return api_error(e)
 
 

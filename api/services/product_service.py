@@ -4,12 +4,13 @@ from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 from django.db import transaction
-from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Value, When
-from django.db.models.functions import Greatest
+from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Sum, Value, When
+from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
 from api.utils.dates import local_day_start, local_day_end_exclusive
+from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,61 @@ class ProductService:
             review_count=Subquery(cnt_sq, output_field=IntegerField()),
         )
 
+    def _with_stock(self, qs):
+        """Leading underscore avoids colliding with the `stock_on_hand`
+        property name — Product.stock_on_hand reads this annotation back
+        when present (see models.py) instead of re-querying per instance,
+        which is what made list pages do 1 extra query per row."""
+        stock_sq = (
+            StockMovement.objects.filter(product=OuterRef('pk'))
+            .values('product')
+            .annotate(v=Sum('quantity'))
+            .values('v')
+        )
+        return qs.annotate(_stock_on_hand=Coalesce(
+            Subquery(stock_sq, output_field=DecimalField(max_digits=12, decimal_places=3)),
+            Value(Decimal('0'), output_field=DecimalField(max_digits=12, decimal_places=3)),
+        ))
+
+    def _with_discount_annotations(self, qs):
+        """The single active Discount per product (if any) — shared base for
+        both _with_effective_price and the discount_asc/desc ordering below,
+        so the same per-product Discount lookup isn't built twice."""
+        disc_type = Subquery(
+            Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+            .values('discount_type')[:1]
+        )
+        disc_val = Subquery(
+            Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+            .values('discount_value')[:1]
+        )
+        return qs.annotate(_disc_type=disc_type, _disc_val=disc_val)
+
+    def _with_effective_price(self, qs):
+        """Leading underscore avoids colliding with the `effective_price`
+        property name — Product.effective_price reads this annotation back
+        when present instead of re-querying per instance."""
+        qs = self._with_discount_annotations(qs)
+        return qs.annotate(
+            _effective_price=Case(
+                When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
+                    F('unit_price') - F('unit_price') * F('_disc_val') / Value(Decimal('100')),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                )),
+                When(_disc_type='FLAT', then=ExpressionWrapper(
+                    Greatest(Value(Decimal('0')), F('unit_price') - F('_disc_val')),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                )),
+                default=F('unit_price'),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )
+
     def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, payment_method=None, personalize_user=None, personalize_guest_id=''):
         qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
         qs = self._with_ratings(qs)
+        qs = self._with_stock(qs)
+        qs = self._with_effective_price(qs)
         if is_active is not None:
             qs = qs.filter(is_active=str(is_active).lower() == 'true')
         elif not include_inactive:
@@ -157,39 +210,11 @@ class ProductService:
             # ordered by creation date among themselves.
             qs = qs.filter(badges__contains=['new']).order_by('-created_at')
         elif ordering in ('price_asc', 'price_desc'):
-            disc_type = Subquery(
-                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-                .values('discount_type')[:1]
-            )
-            disc_val = Subquery(
-                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-                .values('discount_value')[:1]
-            )
-            qs = qs.annotate(_disc_type=disc_type, _disc_val=disc_val).annotate(
-                _effective_price=Case(
-                    When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
-                        F('unit_price') - F('unit_price') * F('_disc_val') / Value(Decimal('100')),
-                        output_field=DecimalField(max_digits=12, decimal_places=2),
-                    )),
-                    When(_disc_type='FLAT', then=ExpressionWrapper(
-                        Greatest(Value(Decimal('0')), F('unit_price') - F('_disc_val')),
-                        output_field=DecimalField(max_digits=12, decimal_places=2),
-                    )),
-                    default=F('unit_price'),
-                    output_field=DecimalField(max_digits=12, decimal_places=2),
-                )
-            )
+            # _effective_price is already annotated above (_with_effective_price)
             qs = qs.order_by('_effective_price' if ordering == 'price_asc' else '-_effective_price')
         elif ordering in ('discount_asc', 'discount_desc'):
-            disc_type = Subquery(
-                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-                .values('discount_type')[:1]
-            )
-            disc_val = Subquery(
-                Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-                .values('discount_value')[:1]
-            )
-            qs = qs.annotate(_disc_type=disc_type, _disc_val=disc_val).annotate(
+            # _disc_type/_disc_val are already annotated above (_with_effective_price → _with_discount_annotations)
+            qs = qs.annotate(
                 _disc_amount=Case(
                     When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
                         F('unit_price') * F('_disc_val') / Value(Decimal('100')),
@@ -492,10 +517,7 @@ class StockService:
     def _create_purchase_journal(self, product: Product, quantity: Decimal,
                                   unit_cost: Decimal, movement: StockMovement, user,
                                   payment_method: str = 'CASH') -> None:
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        entry_number = next_entry_number()
         total_cost   = unit_cost * quantity
         credit_acct  = '1000' if payment_method == 'CASH' else '2000'
 
@@ -529,10 +551,7 @@ class StockService:
         """Mirror image of the purchase journal: stock leaves inventory, and we
         either get cash back or owe the supplier less (Accounts Payable shrinks).
         """
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-        entry_number = f'{prefix}{last + 1:04d}'
+        entry_number = next_entry_number()
         total_value  = unit_cost * quantity
         debit_acct   = '1000' if payment_method == 'CASH' else '2000'
 

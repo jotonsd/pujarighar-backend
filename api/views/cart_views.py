@@ -38,7 +38,7 @@ def add_to_cart(request):
             serializer.validated_data['product'],
             serializer.validated_data['quantity'],
         )
-        return ApiResponse(message="Item added to cart", data=CartSerializer(cart).data, status_code=201)
+        return ApiResponse(message="Item added to cart", data=CartSerializer(cart, context={'request': request}).data, status_code=201)
     except Exception as e:
         logger.error(f"Add to cart error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
@@ -58,7 +58,7 @@ def update_cart_item(request, item_id):
     try:
         cart    = _cart_svc.get_or_create_cart(request.user)
         updated = _cart_svc.update_item(cart, str(item_id), serializer.validated_data['quantity'])
-        return ApiResponse(message="Cart item updated", data=CartSerializer(updated).data)
+        return ApiResponse(message="Cart item updated", data=CartSerializer(updated, context={'request': request}).data)
     except CartItem.DoesNotExist:
         return ApiResponse(message="Item not found", errors="Not found", status_code=404)
     except Exception as e:
@@ -83,6 +83,10 @@ def checkout(request):
     payment_method      = request.data.get('payment_method', 'COD')
     shipping_address_id = request.data.get('shipping_address_id') or None
     delivery_zone       = request.data.get('delivery_zone') or None
+    # The Flutter app sends this on every request (see mobile-app's
+    # ApiClient) — lets admin distinguish app orders from website ones in
+    # the order list, same as POS/AI_CHATBOT are already distinguished.
+    source = 'MOBILE_APP' if request.headers.get('X-Client-Platform') == 'mobile_app' else 'WEBSITE'
     if payment_method != 'COD':
         return ApiResponse(message="Invalid payment method", errors="Only COD is available right now", status_code=422)
     try:
@@ -91,6 +95,7 @@ def checkout(request):
             payment_method=payment_method,
             shipping_address_id=shipping_address_id,
             delivery_zone=delivery_zone,
+            source=source,
         )
         mail_service.send_order_created(order)
         data  = SalesOrderSerializer(order).data

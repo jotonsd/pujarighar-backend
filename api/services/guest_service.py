@@ -2,7 +2,6 @@ import logging
 import math
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
@@ -13,16 +12,25 @@ from api.models import (
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.utils.order_number import generate_order_number
+from api.utils.journal_number import next_entry_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
-def _delivery_charge(district: str, zone: str | None = None) -> Decimal:
-    cfg = DeliveryCharge.get()
-    if zone == 'inside':
-        return cfg.inside_dhaka
-    if zone == 'outside':
-        return cfg.outside_dhaka
-    return cfg.inside_dhaka if district.strip().lower() in _DHAKA_DISTRICTS else cfg.outside_dhaka
+def _delivery_charge(district: str, zone: str | None = None, weight: Decimal | None = None) -> Decimal:
+    resolved_zone = zone if zone in ('inside', 'outside') else (
+        'inside' if district.strip().lower() in _DHAKA_DISTRICTS else 'outside'
+    )
+    return DeliveryCharge.get().charge_for(resolved_zone, weight)
+
+
+def _cart_weight(items) -> Decimal:
+    """Sum of product.weight_kg * quantity across cart items — see the
+    identical helper in checkout_service.py (this one takes dict items,
+    that one CartItem model instances, otherwise the same logic)."""
+    return sum(
+        ((i['product'].weight_kg or Decimal('0')) * i['quantity'] for i in items),
+        Decimal('0'),
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +40,21 @@ class GuestCheckoutService:
     @transaction.atomic
     def checkout(self, validated_data: dict, customer: User | None = None,
                  discount_type: str = 'NONE', discount_value: Decimal = Decimal('0'),
-                 is_pos: bool = False) -> SalesOrder:
+                 is_pos: bool = False, is_mobile_app: bool = False) -> SalesOrder:
         items          = validated_data['items']
         shipping       = validated_data
         payment_method = validated_data.get('payment_method', 'COD')
         # is_pos identifies a staff POS sale unambiguously (passed by the
         # caller, never by request data); placed_via_ai is the AI chatbot's
-        # own signal on the same public endpoint a real guest also uses, so
-        # it's the only way to tell those two apart here.
+        # own signal on the same public endpoint a real guest also uses;
+        # is_mobile_app is the same idea for a guest checkout placed from
+        # the Flutter app (view reads it off the X-Client-Platform header).
         if is_pos:
             source = 'POS'
         elif validated_data.get('placed_via_ai'):
             source = 'AI_CHATBOT'
+        elif is_mobile_app:
+            source = 'MOBILE_APP'
         else:
             source = 'WEBSITE'
 
@@ -71,7 +82,8 @@ class GuestCheckoutService:
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')
-        delivery          = _delivery_charge(shipping.get('district', ''), zone) if apply_deliv else Decimal('0')
+        total_weight      = _cart_weight(items)
+        delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
         grand_total       = subtotal + delivery
 
         order = SalesOrder.objects.create(
@@ -96,6 +108,7 @@ class GuestCheckoutService:
             discount_amount       = discount_amount,
             staff_discount_amount = extra_discount,
             delivery_charge       = delivery,
+            estimated_weight_kg   = total_weight,
             grand_total           = grand_total,
         )
 
@@ -170,10 +183,7 @@ class GuestCheckoutService:
         if not user:
             return
 
-        today        = timezone.now().date()
-        prefix       = f'JE-{today:%Y%m%d}-'
-        last         = JournalEntry.objects.filter(entry_number__startswith=prefix).order_by('-entry_number').values_list('entry_number', flat=True).first()
-        entry_number = f'{prefix}{(int(last.rsplit("-", 1)[1]) if last else 0) + 1:04d}'
+        entry_number = next_entry_number()
 
         cogs = sum(
             item.product.cost_price * item.quantity

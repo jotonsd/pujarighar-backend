@@ -5,14 +5,15 @@ from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
 from api.models import (
-    CourierConsignment, CourierProvider, CourierReturnRequest, CourierTrackingEvent,
-    Notification, SalesOrder, User,
+    Account, CourierConsignment, CourierProvider, CourierReturnRequest, CourierTrackingEvent,
+    JournalEntry, JournalLine, Notification, SalesOrder, User,
 )
 from api.services import mail_service
 from api.services.courier.registry import get_courier_service
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.services.order_service import OrderService
+from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,12 @@ class CourierService:
 
     @transaction.atomic
     def send_order(self, order: SalesOrder, provider_id, user: User, weight=None, note=None) -> CourierConsignment:
+        # No manual weight entry needed any more — Product.weight_kg lets
+        # checkout estimate this already (order.estimated_weight_kg), so
+        # that's what the courier API and our own delivery-charge
+        # recalculation both use unless a manual weight is explicitly given.
+        if weight is None:
+            weight = order.estimated_weight_kg
         # Sending to courier is offered as an alternative to internal delivery
         # assignment (same "who delivers this" decision point), so it's only
         # valid from the same states assign_delivery() accepts from.
@@ -253,6 +260,54 @@ class CourierService:
     def _get_system_user(self) -> User:
         return User.objects.filter(role__code='ADMIN').first()
 
+    def _acct(self, code: str):
+        try:
+            return Account.objects.get(code=code)
+        except Account.DoesNotExist:
+            return None
+
+    def _post_delivery_expense_if_needed(self, consignment: CourierConsignment, user: User | None) -> None:
+        """The delivery_charge a courier reports (Pathao's delivery_fee /
+        Steadfast's delivery_charge) is what they deduct from the COD they
+        collect before remitting the rest — it's a real cost to the
+        business, not part of your income, but order_service's PAYMENT
+        journal (posted at deliver()) books the FULL grand_total as Cash
+        received, with no visibility into what the courier will end up
+        keeping. This posts that cost as a separate expense once the
+        courier tells us the number, rather than trying to net it into the
+        payment journal (which may well have already been posted by the
+        time this webhook data arrives). Only ever fires for a courier
+        consignment — internal/self delivery has no CourierConsignment at
+        all, so its full delivery charge stays 100% income, untouched.
+        Guarded against the same webhook firing more than once for the same
+        consignment."""
+        if consignment.delivery_charge <= 0:
+            return
+        if JournalEntry.objects.filter(reference_type='EXPENSE', reference_id=consignment.order_id).exists():
+            return
+        if not user:
+            logger.error(
+                f'Courier delivery expense (৳{consignment.delivery_charge}) known for order '
+                f'{consignment.order.order_number} but no ADMIN-role user exists — no journal posted. '
+                f'Needs manual reconciliation.'
+            )
+            return
+        entry = JournalEntry.objects.create(
+            entry_number=next_entry_number(), reference_type='EXPENSE',
+            reference_id=consignment.order_id,
+            description_bn=f'কুরিয়ার ডেলিভারি খরচ — {consignment.order.order_number}',
+            description_en=f'Courier Delivery Expense — {consignment.order.order_number}',
+            created_by=user, is_posted=True,
+        )
+        for code, debit, credit in [
+            ('6500', consignment.delivery_charge, Decimal('0')),  # Dr Delivery Expense
+            ('1000', Decimal('0'), consignment.delivery_charge),  # Cr Cash (courier's cut of the COD)
+        ]:
+            acct = self._acct(code)
+            if acct:
+                JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+        logger.info(f'Delivery expense ৳{consignment.delivery_charge} posted for order {consignment.order.order_number}')
+
     def _apply_courier_status_to_order(self, consignment: CourierConsignment, action: str | None) -> None:
         """Shared by both the Steadfast and Pathao webhook handlers, so a
         courier reporting "delivered"/"returned"/"in transit" auto-advances
@@ -325,6 +380,8 @@ class CourierService:
         consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
         consignment.save()
 
+        self._post_delivery_expense_if_needed(consignment, self._get_system_user())
+
         CourierTrackingEvent.objects.create(
             consignment=consignment,
             status=consignment.status,
@@ -372,6 +429,8 @@ class CourierService:
             consignment.delivery_charge = Decimal(str(payload.get('delivery_fee') or 0))
         consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
         consignment.save()
+
+        self._post_delivery_expense_if_needed(consignment, self._get_system_user())
 
         extra_note = self._pathao_extra_note(payload)
         message = payload.get('reason', '') or extra_note

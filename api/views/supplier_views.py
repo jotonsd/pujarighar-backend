@@ -1,6 +1,5 @@
 import logging
 from decimal import Decimal
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -8,6 +7,7 @@ from api.models import Account, JournalEntry, JournalLine, Supplier, SupplierPay
 from api.serializers.product_serializers import SupplierPaymentSerializer, SupplierSerializer
 from api.utils.response import ApiResponse
 from api.permissions import has_permission, has_any_permission
+from api.utils.journal_number import next_entry_number as _next_je_number
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +73,6 @@ def delete_supplier(_request, pk):
 
 
 # ─── Supplier Payments ────────────────────────────────────────────────────────
-
-def _next_je_number():
-    today  = timezone.now().date()
-    prefix = f'JE-{today:%Y%m%d}-'
-    last   = JournalEntry.objects.filter(entry_number__startswith=prefix).count()
-    return f'{prefix}{last + 1:04d}'
-
 
 def _create_supplier_payment_journal(payment: SupplierPayment, user) -> None:
     """Dr Accounts Payable (2000) / Cr Cash (1000) — reduces what we owe the supplier."""

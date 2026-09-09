@@ -185,6 +185,17 @@ PASSWORD_RESET_TIMEOUT = 1800  # 30 minutes
 # ─── Google OAuth ─────────────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 
+# ─── Firebase Cloud Messaging (mobile app push notifications) ─────────────────
+# Path to the Firebase service-account JSON, relative to BASE_DIR unless
+# absolute. api/services/push_service.py no-ops (logs, doesn't raise) when
+# this is unset or the file is missing, so push notifications are purely
+# additive — the in-app Notification row is still created either way.
+_firebase_key_path = config('FIREBASE_SERVICE_ACCOUNT_PATH', default='')
+FIREBASE_SERVICE_ACCOUNT_PATH = (
+    str(BASE_DIR / _firebase_key_path) if _firebase_key_path and not _firebase_key_path.startswith('/')
+    else _firebase_key_path
+)
+
 # ─── Google Analytics / Search Console integration ─────────────────────────────
 # Separate OAuth client from GOOGLE_CLIENT_ID above — that one is the client-side,
 # no-refresh-token flow used for customer login. This needs a server-side
