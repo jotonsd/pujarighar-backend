@@ -35,23 +35,23 @@ def _get_app():
         return None
 
 
-def _logo_image_url() -> str | None:
+def _logo_image_url() -> str:
     """The full-color logo shown in the notification's large-icon slot —
     only matters for a background/terminated-app push, which Android
     auto-displays straight from this URL (downloaded on-device) rather
     than through any of the app's own code. The foreground path instead
     uses a bundled drawable (see mobile-app's NotificationService) since
-    the app doesn't need a network fetch for something it already ships."""
-    from api.models import SiteSetting
-    setting = SiteSetting.get()
-    if not setting.logo:
-        return None
-    try:
-        # .url is relative (MEDIA_URL='/media/') — FCM needs an absolute,
-        # publicly fetchable URL since Android downloads it directly.
-        return f'{settings.BACKEND_URL}{setting.logo.url}'
-    except Exception:
-        return None
+    the app doesn't need a network fetch for something it already ships.
+
+    Deliberately NOT SiteSetting.logo — that's whatever raw file an admin
+    uploads for the website, no guaranteed aspect ratio, and Android
+    center-crops a non-square large-icon image rather than letterboxing
+    it, chopping off the sides of a wide logo. This points at a
+    pre-squared, letterboxed derivative committed alongside the code
+    (api/static/api/notification_logo.png, generated from api/assets/
+    logo.png) so it deploys automatically via collectstatic and never
+    depends on what's currently uploaded as the site logo."""
+    return f'{settings.BACKEND_URL}{settings.STATIC_URL}api/notification_logo.png'
 
 
 def _drop_invalid_tokens(tokens: list[str], responses) -> None:
