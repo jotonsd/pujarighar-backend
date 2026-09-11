@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from api.models import SalesOrder, User
+from api.models import Role, SalesOrder, User
 from api.serializers.auth_serializers import (
     RegisterSerializer, LoginSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
 )
@@ -154,9 +154,15 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
     if not email:
         return None
 
+    # role has no DB-level default — every self-registered account is a
+    # CUSTOMER, matching RegisterSerializer.create's normal signup path.
+    customer_role, _ = Role.objects.get_or_create(
+        code='CUSTOMER',
+        defaults={'name_bn': 'গ্রাহক', 'name_en': 'Customer', 'is_system': True},
+    )
     user, created = User.objects.get_or_create(
         email=email,
-        defaults={'is_active': True},
+        defaults={'is_active': True, 'role': customer_role},
     )
 
     if created:
