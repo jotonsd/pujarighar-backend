@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from api.utils.image_resize import resize_image_field
+
 
 def _gen_referral_code():
     chars = string.ascii_uppercase + string.digits
@@ -345,6 +347,15 @@ class ProductImage(BaseModel):
 
     class Meta:
         ordering = ['order']
+
+    def save(self, *args, **kwargs):
+        # `_committed` is False only for a just-assigned, not-yet-uploaded
+        # file — skips reprocessing (and thus a full decode+encode pass) on
+        # every unrelated edit (reordering, alt text) to an image that's
+        # already been resized.
+        if self.image and not getattr(self.image, '_committed', True):
+            resize_image_field(self.image)
+        super().save(*args, **kwargs)
 
 
 class ProductPackageItem(models.Model):
@@ -849,6 +860,11 @@ class Banner(BaseModel):
     class Meta:
         ordering = ['order', 'created_at']
 
+    def save(self, *args, **kwargs):
+        if self.image and not getattr(self.image, '_committed', True):
+            resize_image_field(self.image)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.title_en
 
@@ -868,6 +884,11 @@ class HeroSlide(BaseModel):
 
     class Meta:
         ordering = ['order', 'created_at']
+
+    def save(self, *args, **kwargs):
+        if self.image and not getattr(self.image, '_committed', True):
+            resize_image_field(self.image)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title_en or self.title_bn or f'Slide {self.order}'
