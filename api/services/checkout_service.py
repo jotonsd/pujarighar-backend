@@ -35,7 +35,7 @@ class CheckoutService:
 
     @transaction.atomic
     def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None,
-                 delivery_zone: str | None = None, source: str = 'WEBSITE') -> SalesOrder:
+                 delivery_zone: str | None = None, source: str = 'WEBSITE', notes_bn: str = '') -> SalesOrder:
         cart  = Cart.objects.select_for_update().get(user=user)
         items = list(cart.items.select_related('product').select_for_update())
 
@@ -116,6 +116,7 @@ class CheckoutService:
             shipping_thana      = s_thana,
             shipping_post_code  = s_post_code,
             source              = source,
+            notes_bn            = notes_bn,
             subtotal            = subtotal,
             discount_amount     = discount_amount,
             first_order_discount_amount = first_order_discount_amount,

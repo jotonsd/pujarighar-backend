@@ -83,6 +83,7 @@ def checkout(request):
     payment_method      = request.data.get('payment_method', 'COD')
     shipping_address_id = request.data.get('shipping_address_id') or None
     delivery_zone       = request.data.get('delivery_zone') or None
+    notes_bn            = (request.data.get('notes_bn') or '').strip()
     # The Flutter app sends this on every request (see mobile-app's
     # ApiClient) — lets admin distinguish app orders from website ones in
     # the order list, same as POS/AI_CHATBOT are already distinguished.
@@ -96,6 +97,7 @@ def checkout(request):
             shipping_address_id=shipping_address_id,
             delivery_zone=delivery_zone,
             source=source,
+            notes_bn=notes_bn,
         )
         mail_service.send_order_created(order)
         data  = SalesOrderSerializer(order).data
