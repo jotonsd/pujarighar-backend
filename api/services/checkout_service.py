@@ -42,6 +42,15 @@ class CheckoutService:
         if not items:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
+        # Re-checked here (not just at add-to-cart time) because stock can
+        # move between then and checkout — another order selling the same
+        # product out, or an admin adjustment — and because a guest/local
+        # cart (mobile app's offline cart, see CartRepository) never goes
+        # through CartService.add_item/update_item's validation at all, so
+        # this is the only stock check some checkouts ever see.
+        for item in items:
+            self._validate_stock(item.product, item.quantity)
+
         # Resolve shipping address: explicit id → default saved → profile fallback
         addr = None
         if shipping_address_id:
@@ -164,6 +173,22 @@ class CheckoutService:
         return order
 
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _validate_stock(self, product, quantity: Decimal) -> None:
+        if product.is_package:
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+                needed = pi.quantity * quantity
+                if pi.component.stock_on_hand < needed:
+                    raise ValidationError({
+                        'message_bn': f'{pi.component.name_bn}: পর্যাপ্ত স্টক নেই',
+                        'message_en': f'{pi.component.name_en}: Insufficient stock',
+                    })
+        else:
+            if product.stock_on_hand < quantity:
+                raise ValidationError({
+                    'message_bn': f'{product.name_bn}: পর্যাপ্ত স্টক নেই',
+                    'message_en': f'{product.name_en}: Insufficient stock',
+                })
 
     def _deduct_stock(self, product, quantity: Decimal, order_id, user) -> None:
         if product.is_package:
