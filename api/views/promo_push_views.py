@@ -1,4 +1,5 @@
 import logging
+from django.conf import settings
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -18,6 +19,7 @@ def _serialize(p: PromoPush) -> dict:
         'title_en':         p.title_en,
         'body_bn':          p.body_bn,
         'body_en':          p.body_en,
+        'image_url':        f"{settings.BACKEND_URL}{p.image.url}" if p.image else None,
         'sent_by':          p.sent_by.email if p.sent_by else None,
         'recipient_count':  p.recipient_count,
         'delivered_count':  p.delivered_count,
@@ -57,12 +59,25 @@ def send_promo_push_view(request):
     if not device_count:
         return ApiResponse(message="No app installs to notify yet", errors="No registered devices", status_code=422)
 
-    delivered_count = send_promo_push(title_bn, body_bn, data={'reference_type': 'PROMOTIONAL'})
-
-    campaign = PromoPush.objects.create(
+    # Saved before sending (not after, like recipient/delivered counts are)
+    # because the push itself needs the uploaded image's URL — Django only
+    # actually writes the file to storage on save(), which is also what
+    # populates `.image.url`.
+    campaign = PromoPush(
         title_bn=title_bn, title_en=title_en, body_bn=body_bn, body_en=body_en,
-        sent_by=request.user, recipient_count=device_count, delivered_count=delivered_count,
+        sent_by=request.user, recipient_count=device_count,
     )
+    image_file = request.FILES.get('image')
+    if image_file:
+        campaign.image = image_file
+    campaign.save()
+
+    image_url = f"{settings.BACKEND_URL}{campaign.image.url}" if campaign.image else None
+    delivered_count = send_promo_push(
+        title_bn, body_bn, data={'reference_type': 'PROMOTIONAL'}, image_url=image_url,
+    )
+    campaign.delivered_count = delivered_count
+    campaign.save(update_fields=['delivered_count'])
     log_fn = logger.info if delivered_count else logger.warning
     log_fn(
         f"Promo push '{title_en}' sent by {request.user.email}: "

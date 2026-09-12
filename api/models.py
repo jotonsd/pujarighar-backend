@@ -1038,6 +1038,11 @@ class PromoPush(BaseModel):
     body_bn         = models.TextField(blank=True)
     body_en         = models.TextField(blank=True)
     sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='promo_pushes')
+    # Optional per-campaign large image shown in the expanded push
+    # notification — falls back to the fixed site logo (see
+    # push_service._logo_image_url) when not provided. Standard FCM
+    # recommendation: 2:1 ratio, 1024x512px, under 1MB.
+    image           = models.ImageField(upload_to='promo_pushes/', blank=True, null=True)
     recipient_count = models.PositiveIntegerField(default=0)
     # How many of those actually got delivered per Firebase's own response —
     # separate from recipient_count (devices targeted) so a gap between the

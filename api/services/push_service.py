@@ -65,7 +65,8 @@ def _drop_invalid_tokens(tokens: list[str], responses) -> None:
         DeviceToken.objects.filter(token__in=invalid).delete()
 
 
-def _send_to_tokens(tokens: list[str], title_bn: str, body_bn: str, data: dict | None = None) -> int:
+def _send_to_tokens(tokens: list[str], title_bn: str, body_bn: str, data: dict | None = None,
+                     image_url: str | None = None) -> int:
     """Sends one multicast per <=500 tokens (FCM's hard cap per call) and
     returns how many actually succeeded. Title/body are Bangla-only — see
     send_push_to_user's docstring for why per-recipient language can't be
@@ -75,7 +76,7 @@ def _send_to_tokens(tokens: list[str], title_bn: str, body_bn: str, data: dict |
         return 0
     import firebase_admin.messaging as messaging
 
-    image_url = _logo_image_url()
+    image_url = image_url or _logo_image_url()
     sent = 0
     for i in range(0, len(tokens), 500):
         batch = tokens[i:i + 500]
@@ -108,12 +109,14 @@ def send_push_to_user(user, title_bn: str, title_en: str, body_bn: str, body_en:
     _send_to_tokens(tokens, title_bn, body_bn, data)
 
 
-def send_promo_push(title_bn: str, body_bn: str, data: dict | None = None) -> int:
+def send_promo_push(title_bn: str, body_bn: str, data: dict | None = None,
+                     image_url: str | None = None) -> int:
     """Broadcasts to every registered device across all customers. Returns
     how many pushes actually succeeded (for the admin panel's confirmation
     / campaign log), 0 if Firebase isn't configured — callers should still
     treat that as "the in-app Notification rows went out fine" since this
-    only ever adds an OS-level push on top of those."""
+    only ever adds an OS-level push on top of those. `image_url`, when
+    given, overrides the fixed site-logo image for this one campaign."""
     from api.models import DeviceToken
     tokens = list(DeviceToken.objects.values_list('token', flat=True).distinct())
-    return _send_to_tokens(tokens, title_bn, body_bn, data)
+    return _send_to_tokens(tokens, title_bn, body_bn, data, image_url=image_url)
