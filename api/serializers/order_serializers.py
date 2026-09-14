@@ -162,7 +162,11 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
 
     def get_status_label(self, obj):
-        return dict(SalesOrder._meta.get_field('status').choices).get(obj.status, obj.status)
+        if obj.status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj, is_bn=True)
+            if courier_label:
+                return courier_label
+        return STATUS_LABELS_BN.get(obj.status, obj.status)
 
     def get_courier_consignment(self, obj):
         from api.serializers.courier_serializers import CourierConsignmentSerializer
