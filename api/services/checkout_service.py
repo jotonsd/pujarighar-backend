@@ -9,7 +9,8 @@ from api.models import (
     ShippingAddress, Notification, SiteSetting,
 )
 from api.services.notification_recipients import get_notified_users
-from api.services.notification_ws import broadcast_notifications
+from api.services.notification_ws import broadcast_notification, broadcast_notifications
+from api.services.push_service import send_push_to_user
 from api.utils.order_number import generate_order_number
 
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
@@ -168,6 +169,7 @@ class CheckoutService:
         # still fail/be abandoned overstates the books until payment lands.
         cart.items.all().delete()
         self._notify_admins(order)
+        self._notify_customer_created(order, user)
 
         logger.info(f"Order created: {order.order_number} customer={user.email} payment={payment_method}")
         return order
@@ -222,3 +224,26 @@ class CheckoutService:
         ]
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
+
+    def _notify_customer_created(self, order: SalesOrder, user) -> None:
+        # This checkout() path is only ever reached by a logged-in customer
+        # (guest checkout is the separate GuestCheckoutService) — every
+        # subsequent status change already pushes to them via
+        # OrderService._notify_customer; this is just the missing first one,
+        # confirming the order itself was placed.
+        notification = Notification.objects.create(
+            user=user,
+            title_bn=f'অর্ডার সফল হয়েছে — {order.order_number}',
+            title_en=f'Order Placed — {order.order_number}',
+            body_bn=f'আপনার অর্ডার #{order.order_number} সফলভাবে গৃহীত হয়েছে।',
+            body_en=f'Your order #{order.order_number} has been placed successfully.',
+            reference_type='ORDER_CREATED',
+            reference_id=order.id,
+        )
+        broadcast_notification(notification)
+        send_push_to_user(
+            user,
+            title_bn=notification.title_bn, title_en=notification.title_en,
+            body_bn=notification.body_bn, body_en=notification.body_en,
+            data={'reference_type': 'ORDER_CREATED', 'reference_id': str(order.id)},
+        )

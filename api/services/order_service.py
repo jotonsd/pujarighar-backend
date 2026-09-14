@@ -1242,6 +1242,7 @@ class OrderService:
             'CONFIRMED':  {'bn': 'নিশ্চিত হয়েছে',        'en': 'Confirmed'},
             'PACKED':     {'bn': 'প্যাক হয়েছে',           'en': 'Packed'},
             'ASSIGNED':   {'bn': 'ডেলিভারি এসাইন্ড হয়েছে', 'en': 'Delivery Assigned'},
+            'PICKED':     {'bn': 'পিকআপ হয়েছে',           'en': 'Picked Up'},
             'ON_THE_WAY': {'bn': 'পথে আছে',               'en': 'Out for Delivery'},
             'DELIVERED':  {'bn': 'ডেলিভারি হয়েছে',        'en': 'Delivered'},
             'RETURNED':   {'bn': 'ফেরত হয়েছে',            'en': 'Returned'},
