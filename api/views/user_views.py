@@ -1,7 +1,9 @@
 import logging
 import re
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.storage import default_storage
+from django.core.validators import validate_email
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -322,6 +324,30 @@ def update_me(request):
                 status_code=422,
             )
 
+    email = request.data.get('email')
+    if email:
+        email = email.strip()
+        try:
+            validate_email(email)
+        except DjangoValidationError:
+            return ApiResponse(
+                message="Validation failed",
+                errors={'email': {
+                    'message_bn': 'সঠিক ইমেইল ঠিকানা দিন',
+                    'message_en': 'Enter a valid email address',
+                }},
+                status_code=422,
+            )
+        if User.objects.exclude(pk=request.user.pk).filter(email=email).exists():
+            return ApiResponse(
+                message="Validation failed",
+                errors={'email': {
+                    'message_bn': 'এই ইমেইলটি ইতিমধ্যে ব্যবহৃত হচ্ছে',
+                    'message_en': 'This email is already in use',
+                }},
+                status_code=422,
+            )
+
     avatar_file = request.FILES.get('avatar')
     if avatar_file:
         ALLOWED_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
@@ -354,6 +380,7 @@ def update_me(request):
             **serializer.validated_data,
             'preferred_language': request.data.get('preferred_language'),
             'phone': phone,
+            'email': email,
         }
         if avatar_file:
             path = default_storage.save(f'avatars/{avatar_file.name}', avatar_file)

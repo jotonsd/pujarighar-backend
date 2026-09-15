@@ -53,6 +53,7 @@ class UserService:
         profile: Profile = user.profile
         preferred_language = validated_data.pop('preferred_language', None)
         phone = validated_data.pop('phone', None)
+        email = validated_data.pop('email', None)
         for attr, value in validated_data.items():
             setattr(profile, attr, value)
         profile.save()
@@ -63,6 +64,9 @@ class UserService:
         if phone:
             user.phone = phone
             update_fields.append('phone')
+        if email:
+            user.email = email
+            update_fields.append('email')
         if update_fields:
             user.save(update_fields=update_fields)
         return user
