@@ -14,14 +14,20 @@ class CartService:
         return cart
 
     def add_item(self, user, product: Product, quantity: Decimal) -> Cart:
-        self._validate_stock(product, quantity)
         cart = self.get_or_create_cart(user)
-        item, created = CartItem.objects.get_or_create(
-            cart=cart, product=product, defaults={'quantity': quantity}
-        )
-        if not created:
-            item.quantity += quantity
-            item.save(update_fields=['quantity'])
+        # _validate_stock must see the RESULTING total for this line, not
+        # just the delta being added this call — checking only `quantity`
+        # (always 1 from the product card's "+" button) let it pass every
+        # single tap regardless of how much was already in the cart,
+        # letting the line grow past stock_on_hand indefinitely.
+        existing = cart.items.filter(product=product).first()
+        total_quantity = (existing.quantity if existing else Decimal('0')) + quantity
+        self._validate_stock(product, total_quantity)
+        if existing:
+            existing.quantity = total_quantity
+            existing.save(update_fields=['quantity'])
+        else:
+            CartItem.objects.create(cart=cart, product=product, quantity=quantity)
         logger.info(f"Cart item added: user={user.email} product={product.sku} qty={quantity}")
         return cart
 
