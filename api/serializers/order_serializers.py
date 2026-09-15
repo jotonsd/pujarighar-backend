@@ -69,7 +69,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'পেন্ডিং', 'CONFIRMED': 'নিশ্চিত',
             'PACKED': 'প্যাক হয়েছে', 'ASSIGNED': 'এসাইন্ড',
-            'PICKED': 'পিকডআপ', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারড',
+            'PICKED': 'পিকড', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারড',
             'PARTIALLY_DELIVERED': 'আংশিক ডেলিভারি হয়েছে',
             'RETURNED': 'ফেরত', 'CANCELLED': 'বাতিল',
         }
@@ -83,7 +83,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
         labels = {
             'PENDING': 'Pending', 'CONFIRMED': 'Confirmed',
             'PACKED': 'Packed', 'ASSIGNED': 'Assigned',
-            'PICKED': 'Picked Up', 'ON_THE_WAY': 'On the Way', 'DELIVERED': 'Delivered',
+            'PICKED': 'Picked', 'ON_THE_WAY': 'Transit', 'DELIVERED': 'Delivered',
             'PARTIALLY_DELIVERED': 'Partially Delivered',
             'RETURNED': 'Returned', 'CANCELLED': 'Cancelled',
         }
@@ -191,13 +191,13 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 
 STATUS_LABELS_BN = {
     'PENDING':'পেন্ডিং', 'CONFIRMED':'নিশ্চিত', 'PACKED':'প্যাক হয়েছে',
-    'ASSIGNED':'এসাইন্ড', 'PICKED':'পিকডআপ', 'ON_THE_WAY':'পথে আছে',
+    'ASSIGNED':'এসাইন্ড', 'PICKED':'পিকড', 'ON_THE_WAY':'পথে আছে',
     'DELIVERED':'ডেলিভারড', 'PARTIALLY_DELIVERED':'আংশিক ডেলিভারি হয়েছে',
     'RETURNED':'ফেরত', 'EXCHANGED':'বিনিময় হয়েছে', 'CANCELLED':'বাতিল',
 }
 STATUS_LABELS_EN = {
     'PENDING':'Pending', 'CONFIRMED':'Confirmed', 'PACKED':'Packed',
-    'ASSIGNED':'Assigned', 'PICKED':'Picked Up', 'ON_THE_WAY':'On the Way',
+    'ASSIGNED':'Assigned', 'PICKED':'Picked', 'ON_THE_WAY':'Transit',
     'DELIVERED':'Delivered', 'PARTIALLY_DELIVERED':'Partially Delivered',
     'RETURNED':'Returned', 'EXCHANGED':'Exchanged', 'CANCELLED':'Cancelled',
 }
