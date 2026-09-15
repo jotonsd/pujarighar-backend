@@ -1075,6 +1075,18 @@ class PromoPush(BaseModel):
     class Meta:
         ordering = ['-created_at']
 
+    def save(self, *args, **kwargs):
+        if self.image and not getattr(self.image, '_committed', True):
+            # 1024px cap (not the shared helper's 1600px default) to match
+            # FCM's own recommended long side for a notification image —
+            # a multi-MB upload here isn't just slow, it can make the
+            # image silently fail to render in the push entirely (see
+            # push_service._send_to_tokens and notification_service.dart's
+            # foreground image fetch, both of which give up quietly on a
+            # slow/failed download rather than erroring).
+            resize_image_field(self.image, max_dimension=1024)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f'{self.title_en} ({self.recipient_count} recipients)'
 
