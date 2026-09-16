@@ -141,6 +141,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
     delivery            = DeliveryAssignmentSerializer(read_only=True)
     customer_email      = serializers.EmailField(source='customer.email', read_only=True)
     status_label        = serializers.SerializerMethodField()
+    status_label_en     = serializers.SerializerMethodField()
     courier_consignment = serializers.SerializerMethodField()
     exchanges           = serializers.SerializerMethodField()
     exchanged_from       = serializers.SerializerMethodField()
@@ -148,7 +149,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SalesOrder
         fields = [
-            'id', 'order_number', 'customer', 'customer_email', 'is_guest', 'status', 'status_label',
+            'id', 'order_number', 'customer', 'customer_email', 'is_guest', 'status', 'status_label', 'status_label_en',
             'source',
             'payment_method', 'payment_status',
             'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
@@ -167,6 +168,13 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             if courier_label:
                 return courier_label
         return STATUS_LABELS_BN.get(obj.status, obj.status)
+
+    def get_status_label_en(self, obj):
+        if obj.status == 'ASSIGNED':
+            courier_label = _courier_status_label(obj, is_bn=False)
+            if courier_label:
+                return courier_label
+        return STATUS_LABELS_EN.get(obj.status, obj.status)
 
     def get_courier_consignment(self, obj):
         from api.serializers.courier_serializers import CourierConsignmentSerializer

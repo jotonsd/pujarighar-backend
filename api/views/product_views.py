@@ -100,6 +100,20 @@ def get_recommended_products(request):
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+def get_similar_products(request, pk):
+    try:
+        limit = int(request.query_params.get('limit', 12))
+    except ValueError:
+        limit = 12
+    products = _svc.get_similar_products(pk, limit=limit)
+    return ApiResponse(
+        message="Similar products retrieved",
+        data=ProductSerializer(products, many=True, context=_ctx(request)).data,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def get_product(request, pk):
     try:
         product = _svc.get_product(pk)
