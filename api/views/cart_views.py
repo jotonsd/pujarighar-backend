@@ -1,6 +1,7 @@
 import logging
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from api.models import CartItem
@@ -39,6 +40,15 @@ def add_to_cart(request):
             serializer.validated_data['quantity'],
         )
         return ApiResponse(message="Item added to cart", data=CartSerializer(cart, context={'request': request}).data, status_code=201)
+    except DRFValidationError as e:
+        # str(e) on a DRF ValidationError stringifies the raw Python dict
+        # of ErrorDetail objects (e.g. "{'message_bn': ErrorDetail(...)}"),
+        # which is what a client would otherwise show verbatim in a toast
+        # instead of the clean message_bn/message_en it's built from —
+        # pass e.detail through as the errors payload instead so callers
+        # can pick message_bn/message_en back out of it, same as every
+        # other validation error path in this API.
+        return ApiResponse(message="Validation failed", errors=e.detail, status_code=422)
     except Exception as e:
         logger.error(f"Add to cart error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
@@ -61,6 +71,8 @@ def update_cart_item(request, item_id):
         return ApiResponse(message="Cart item updated", data=CartSerializer(updated, context={'request': request}).data)
     except CartItem.DoesNotExist:
         return ApiResponse(message="Item not found", errors="Not found", status_code=404)
+    except DRFValidationError as e:
+        return ApiResponse(message="Validation failed", errors=e.detail, status_code=422)
     except Exception as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
@@ -108,6 +120,8 @@ def checkout(request):
             return ApiResponse(message="Proceed to payment", data=data, status_code=status.HTTP_201_CREATED)
 
         return ApiResponse(message="Order placed successfully", data=data, status_code=status.HTTP_201_CREATED)
+    except DRFValidationError as e:
+        return ApiResponse(message="Validation failed", errors=e.detail, status_code=422)
     except Exception as e:
         logger.error(f"Checkout error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
