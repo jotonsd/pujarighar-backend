@@ -1,4 +1,3 @@
-import json
 import logging
 from collections import defaultdict
 from datetime import timedelta
@@ -9,7 +8,7 @@ from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, 
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, SiteSetting, StockMovement, Supplier, PRODUCT_BADGES
+from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.utils.journal_number import next_entry_number
 
@@ -328,32 +327,15 @@ class ProductService:
         return qs.order_by(preserve)
 
     def get_similar_products(self, product_id: str, limit: int = 12):
-        """"You may like" for a product detail page — asks Gemini to pick
-        similar items from this store's own catalog by understanding the
-        product's name (not just its category), so e.g. a specific idol
-        surfaces other idols/puja items a shopper would actually associate
-        it with, not just whatever else happens to share its category row.
-        Falls back to a plain same-category query (same shape as
-        get_recommended_products above) on ANY failure — missing/invalid
-        API key, network error, malformed model output, empty result —
-        so this section never breaks the product page, it just quietly
-        degrades to a non-AI pick."""
+        """"You may like" for a product detail page — same-category
+        products first (ranked by site-wide view count), padded with other
+        popular active products if the category doesn't have enough."""
         try:
-            target = Product.objects.only('id', 'name_bn', 'name_en', 'category_id').get(pk=product_id, is_active=True)
+            target = Product.objects.only('id', 'category_id').get(pk=product_id, is_active=True)
         except Product.DoesNotExist:
             return Product.objects.none()
 
-        candidates = list(
-            Product.objects.filter(is_active=True, is_package=False)
-            .exclude(pk=target.pk)
-            .values('id', 'name_bn', 'name_en')[:200]
-        )
-        if not candidates:
-            return Product.objects.none()
-
-        result_ids = self._similar_via_ai(target, candidates, limit)
-        if not result_ids:
-            result_ids = self._similar_via_query(target, limit)
+        result_ids = self._similar_via_query(target, limit)
         if not result_ids:
             return Product.objects.none()
 
@@ -364,48 +346,6 @@ class ProductService:
             output_field=IntegerField(),
         )
         return qs.order_by(preserve)
-
-    def _similar_via_ai(self, target, candidates: list[dict], limit: int) -> list[str]:
-        s = SiteSetting.get()
-        if not s.gemini_api_key:
-            return []
-        try:
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=s.gemini_api_key)
-            model = s.gemini_model or 'gemini-3.6-flash'
-            catalog = [
-                {'id': str(c['id']), 'name_bn': c['name_bn'], 'name_en': c['name_en']}
-                for c in candidates
-            ]
-            prompt = (
-                'You are picking a "customers also liked" list for a Bangladeshi religious/puja goods '
-                'store\'s product page. Target product:\n'
-                f'{{"name_bn": {json.dumps(target.name_bn)}, "name_en": {json.dumps(target.name_en)}}}\n\n'
-                f'Candidate products (pick ONLY from these, by id):\n{json.dumps(catalog, ensure_ascii=False)}\n\n'
-                f'Return the {limit} candidates most likely to interest a shopper who is viewing the target '
-                'product, ordered best match first. Reply with ONLY a JSON array of id strings, nothing else, '
-                'e.g. ["id1","id2"].'
-            )
-            response = client.models.generate_content(
-                model=model,
-                contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-            )
-            text = (response.text or '').strip()
-            # Models sometimes wrap JSON in a ```json fence despite the
-            # "nothing else" instruction — strip that before parsing.
-            if text.startswith('```'):
-                text = text.strip('`')
-                if text.lower().startswith('json'):
-                    text = text[4:]
-                text = text.strip()
-            picked = json.loads(text)
-            valid_ids = {str(c['id']) for c in candidates}
-            return [pid for pid in picked if isinstance(pid, str) and pid in valid_ids][:limit]
-        except Exception as e:
-            logger.warning(f'get_similar_products AI pick failed, falling back to query: {e}')
-            return []
 
     def _similar_via_query(self, target, limit: int) -> list[str]:
         qs = Product.objects.filter(is_active=True, is_package=False).exclude(pk=target.pk)
