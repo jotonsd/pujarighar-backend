@@ -172,16 +172,29 @@ def _build_nav_menu(user) -> list:
 @permission_classes([IsAuthenticated, has_permission('users_admin', 'view')])
 def list_users(request):
     try:
-        qs = _svc.list_users(
+        base_qs = _svc.list_users(
             role=request.query_params.get('role', ''),
             search=request.query_params.get('search', ''),
             is_active=request.query_params.get('is_active', ''),
         )
+        # Platform counts reflect role/search/is_active filters (so they
+        # stay meaningful alongside those) but not registered_via itself —
+        # otherwise picking one platform in the dropdown would zero out the
+        # other's count.
+        platform_counts = {
+            'website': base_qs.filter(registered_via='WEBSITE').count(),
+            'mobile_app': base_qs.filter(registered_via='MOBILE_APP').count(),
+        }
+        qs = base_qs
+        registered_via = request.query_params.get('registered_via', '')
+        if registered_via:
+            qs = qs.filter(registered_via=registered_via.upper())
         page_data, pagination = paginate_queryset(qs, request)
         return ApiResponse(
             message="Users retrieved successfully",
             data=UserSerializer(page_data, many=True).data,
             pagination=pagination,
+            meta={'platform_counts': platform_counts},
             status_code=status.HTTP_200_OK,
         )
     except Exception as e:

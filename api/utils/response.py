@@ -23,6 +23,7 @@ class ApiResponse(Response):
         status_code: int = 200,
         errors=None,
         pagination: dict = None,
+        meta: dict = None,
         **kwargs,
     ):
         body = {
@@ -33,6 +34,8 @@ class ApiResponse(Response):
         }
         if pagination is not None:
             body["pagination"] = pagination
+        if meta is not None:
+            body["meta"] = meta
 
         super().__init__(data=body, status=status_code, **kwargs)
 

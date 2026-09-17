@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class UserService:
 
-    def list_users(self, role: str = '', search: str = '', is_active: str = ''):
+    def list_users(self, role: str = '', search: str = '', is_active: str = '', registered_via: str = ''):
         qs = User.objects.select_related('profile').all()
         if role:
             qs = qs.filter(role_id=role)
@@ -15,6 +15,8 @@ class UserService:
             qs = qs.filter(Q(email__icontains=search) | Q(phone__icontains=search))
         if is_active != '':
             qs = qs.filter(is_active=is_active.lower() == 'true')
+        if registered_via:
+            qs = qs.filter(registered_via=registered_via.upper())
         return qs
 
     def get_user(self, pk: str) -> User:

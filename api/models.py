@@ -108,6 +108,15 @@ class User(AbstractUser):
     )
     is_active   = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
+    # Set once at signup from the X-Client-Platform header (same header
+    # cart_views.py/guest_views.py already read to tag SalesOrder.source) —
+    # tells the admin panel whether this account was created through the
+    # mobile app or the website. Pre-existing accounts default to WEBSITE.
+    registered_via = models.CharField(
+        max_length=10,
+        choices=[('WEBSITE', 'Website'), ('MOBILE_APP', 'Mobile App')],
+        default='WEBSITE',
+    )
 
     USERNAME_FIELD  = 'email'
     REQUIRED_FIELDS = ['phone']

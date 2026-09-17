@@ -33,7 +33,10 @@ def register(request):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
     try:
-        user   = serializer.save()
+        user = serializer.save()
+        if request.headers.get('X-Client-Platform') == 'mobile_app':
+            user.registered_via = 'MOBILE_APP'
+            user.save(update_fields=['registered_via'])
         tokens = _auth.register(user)
         # Link any guest orders placed with this phone number
         _link_guest_orders(user)
@@ -147,7 +150,7 @@ def logout(request):
 token_refresh = TokenRefreshView.as_view()
 
 
-def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: str):
+def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: str, is_mobile_app: bool = False):
     """Shared get-or-create + sign-in logic for social login providers. Returns
     the User, or None if the provider didn't give us an email to key on."""
     email = (email or '').lower()
@@ -162,7 +165,11 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
     )
     user, created = User.objects.get_or_create(
         email=email,
-        defaults={'is_active': True, 'role': customer_role},
+        defaults={
+            'is_active': True,
+            'role': customer_role,
+            'registered_via': 'MOBILE_APP' if is_mobile_app else 'WEBSITE',
+        },
     )
 
     if created:
@@ -214,7 +221,10 @@ def google_login(request):
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
-    user = _oauth_login_or_create(data.get('email', ''), data.get('name', ''), data.get('picture', ''), 'Google')
+    user = _oauth_login_or_create(
+        data.get('email', ''), data.get('name', ''), data.get('picture', ''), 'Google',
+        is_mobile_app=request.headers.get('X-Client-Platform') == 'mobile_app',
+    )
     if not user:
         return ApiResponse(
             message="Google account has no email",
@@ -258,7 +268,10 @@ def facebook_login(request):
         )
 
     picture = (data.get('picture') or {}).get('data', {}).get('url', '')
-    user = _oauth_login_or_create(data.get('email', ''), data.get('name', ''), picture, 'Facebook')
+    user = _oauth_login_or_create(
+        data.get('email', ''), data.get('name', ''), picture, 'Facebook',
+        is_mobile_app=request.headers.get('X-Client-Platform') == 'mobile_app',
+    )
     if not user:
         # Facebook only returns an email if the account has one verified and the
         # user granted the `email` permission — neither is guaranteed.
