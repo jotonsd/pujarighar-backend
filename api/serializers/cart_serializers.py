@@ -1,6 +1,6 @@
 from decimal import Decimal
 from rest_framework import serializers
-from api.models import Cart, CartItem, Product
+from api.models import Cart, CartItem, Product, SiteSetting
 
 
 class CartItemSerializer(serializers.ModelSerializer):
@@ -82,14 +82,32 @@ class CartSerializer(serializers.ModelSerializer):
         )
         return str(total)
 
+    def _mobile_app_discount(self, subtotal: Decimal) -> Decimal:
+        # Preview only — mirrors CheckoutService.checkout's identical
+        # source == 'MOBILE_APP' discount so this cart view (and the app's
+        # checkout screen, which reads it) shows what checkout will
+        # actually charge instead of the full pre-discount price. Gated on
+        # the same X-Client-Platform header checkout itself reads, so a
+        # website request (no such header) never sees this.
+        request = self.context.get('request')
+        if not request or request.headers.get('X-Client-Platform') != 'mobile_app':
+            return Decimal('0')
+        pct = SiteSetting.get().mobile_app_order_discount_percent
+        if pct <= 0:
+            return Decimal('0')
+        return min((subtotal * pct / Decimal('100')).quantize(Decimal('0.01')), subtotal)
+
     def get_subtotal(self, obj):
-        return str(sum(item.product.effective_price * item.quantity for item in obj.items.all()))
+        subtotal = sum(item.product.effective_price * item.quantity for item in obj.items.all())
+        return str(subtotal - self._mobile_app_discount(subtotal))
 
     def get_discount_amount(self, obj):
+        subtotal = sum(item.product.effective_price * item.quantity for item in obj.items.all())
         total = sum(
             (item.product.original_price - item.product.effective_price) * item.quantity
             for item in obj.items.all()
         )
+        total += self._mobile_app_discount(subtotal)
         return str(max(total, Decimal('0')))
 
     def get_item_count(self, obj):

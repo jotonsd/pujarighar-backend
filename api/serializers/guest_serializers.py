@@ -31,7 +31,10 @@ class GuestCheckoutSerializer(serializers.Serializer):
     thana            = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
     post_code        = serializers.CharField(max_length=10,  required=False, allow_blank=True, default='')
     notes_bn         = serializers.CharField(required=False, allow_blank=True, default='')
-    payment_method   = serializers.ChoiceField(choices=['COD', 'SSLCOMMERZ', 'BKASH', 'NAGAD', 'STRIPE'], default='COD')
+    # Not a ChoiceField — validated against the live PaymentMethod table
+    # instead (see guest_views.py), so a newly admin-added method works
+    # here without a code change once it's actually enabled.
+    payment_method   = serializers.CharField(max_length=20, default='COD')
     apply_delivery   = serializers.BooleanField(default=True)
     delivery_zone    = serializers.ChoiceField(choices=['inside', 'outside'], required=False, allow_null=True, default=None)
     # Set by the AI support chatbot's create_order call — never something a

@@ -1236,9 +1236,14 @@ class PaymentMethod(models.Model):
     code          = models.CharField(max_length=20, unique=True)
     name_bn       = models.CharField(max_length=50)
     name_en       = models.CharField(max_length=50)
+    logo          = models.ImageField(upload_to='payment_methods/', null=True, blank=True)
     is_enabled    = models.BooleanField(default=False)
     # Whether a real gateway service exists in code for this row yet —
-    # read-only from the admin API, flipped only by a future code change.
+    # never settable via the admin API's create/update endpoints, only by
+    # a future code change wiring that gateway up (same as COD/SSLCOMMERZ
+    # were). An admin-added row (e.g. a new mobile wallet) starts False —
+    # it can be pre-configured (name, logo, charge) but not enabled — same
+    # as the seeded BKASH/NAGAD/STRIPE placeholders.
     is_integrated = models.BooleanField(default=False)
     charge_type   = models.CharField(max_length=10, choices=CHARGE_TYPE_CHOICES, default='NONE')
     # Percent (e.g. 2.50 = 2.5%) when charge_type='PERCENT', a flat Taka

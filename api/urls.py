@@ -240,6 +240,7 @@ urlpatterns = [
 
     # ─── Payment Methods ───────────────────────────────────────────────────────
     path('payment-methods/',            views.list_payment_methods,   name='payment-methods'),
+    path('payment-methods/create/',     views.create_payment_method,  name='payment-method-create'),
     path('payment-methods/<int:pk>/update/', views.update_payment_method, name='payment-method-update'),
 
     # ─── Logs ──────────────────────────────────────────────────────────────────

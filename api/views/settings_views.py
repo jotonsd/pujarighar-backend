@@ -40,6 +40,11 @@ def _serialize(s: SiteSetting, request=None) -> dict:
         # Public — cart/checkout pages (including anonymous guest checkout)
         # show "free delivery over ৳X" messaging from this.
         'free_delivery_min_subtotal': str(s.free_delivery_min_subtotal),
+        # Public — the app's checkout screen needs this to preview the
+        # discount checkout will actually apply for source='MOBILE_APP'
+        # (see CheckoutService.checkout); harmless for the website to see
+        # too, since it only ever applies to app orders.
+        'mobile_app_order_discount_percent': str(s.mobile_app_order_discount_percent),
     }
 
     user = getattr(request, 'user', None) if request else None
@@ -53,7 +58,6 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'email_default_from':       s.email_default_from,
             'referral_bonus_amount':    str(s.referral_bonus_amount),
             'first_order_discount_percent': str(s.first_order_discount_percent),
-            'mobile_app_order_discount_percent': str(s.mobile_app_order_discount_percent),
             'has_telegram_bot_token':   bool(s.telegram_bot_token),
             'telegram_chat_id':         s.telegram_chat_id,
             'has_gemini_api_key':       bool(s.gemini_api_key),
