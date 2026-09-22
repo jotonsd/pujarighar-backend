@@ -238,6 +238,10 @@ urlpatterns = [
     path('settings/',        views.get_site_settings,    name='site-settings'),
     path('settings/update/', views.update_site_settings, name='site-settings-update'),
 
+    # ─── Payment Methods ───────────────────────────────────────────────────────
+    path('payment-methods/',            views.list_payment_methods,   name='payment-methods'),
+    path('payment-methods/<int:pk>/update/', views.update_payment_method, name='payment-method-update'),
+
     # ─── Logs ──────────────────────────────────────────────────────────────────
     path('logs/',              views.list_log_files, name='log-list'),
     path('logs/<str:filename>/', views.get_log_file,  name='log-detail'),

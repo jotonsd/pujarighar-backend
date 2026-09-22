@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from api.models import CartItem
+from api.models import CartItem, PaymentMethod
 from api.serializers.cart_serializers import CartSerializer, AddToCartSerializer, UpdateCartItemSerializer
 from api.services.cart_service import CartService
 from api.services.checkout_service import CheckoutService
@@ -100,8 +100,13 @@ def checkout(request):
     # ApiClient) — lets admin distinguish app orders from website ones in
     # the order list, same as POS/AI_CHATBOT are already distinguished.
     source = 'MOBILE_APP' if request.headers.get('X-Client-Platform') == 'mobile_app' else 'WEBSITE'
-    if payment_method != 'COD':
-        return ApiResponse(message="Invalid payment method", errors="Only COD is available right now", status_code=422)
+    method = PaymentMethod.objects.filter(code=payment_method).first()
+    if not method or not method.is_enabled:
+        return ApiResponse(
+            message="Payment method unavailable",
+            errors="This payment method is currently disabled",
+            status_code=422,
+        )
     try:
         order = _checkout_svc.checkout(
             request.user,
@@ -114,7 +119,7 @@ def checkout(request):
         mail_service.send_order_created(order)
         data  = SalesOrderSerializer(order).data
 
-        if payment_method == 'ONLINE':
+        if payment_method == 'SSLCOMMERZ':
             gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
             data = {**data, 'gateway_url': gateway_url}
             return ApiResponse(message="Proceed to payment", data=data, status_code=status.HTTP_201_CREATED)

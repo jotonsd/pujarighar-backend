@@ -666,10 +666,12 @@ class OrderService:
         product_discount = original_total - raw_total
         staff_discount = order.staff_discount_amount or Decimal('0')
         first_order_discount = order.first_order_discount_amount or Decimal('0')
+        mobile_app_discount = order.mobile_app_discount_amount or Decimal('0')
+        gateway_charge = order.gateway_charge_amount or Decimal('0')
 
-        order.subtotal        = raw_total - staff_discount - first_order_discount
-        order.discount_amount = product_discount + staff_discount + first_order_discount
-        order.grand_total     = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.subtotal        = raw_total - staff_discount - first_order_discount - mobile_app_discount
+        order.discount_amount = product_discount + staff_discount + first_order_discount + mobile_app_discount
+        order.grand_total     = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used + gateway_charge
         order.save(update_fields=['subtotal', 'discount_amount', 'grand_total'])
 
     def _resync_order_item_journal(self, order: SalesOrder) -> None:

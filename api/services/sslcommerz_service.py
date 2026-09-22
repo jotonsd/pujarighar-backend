@@ -1,10 +1,18 @@
 import logging
+import math
 import requests
 from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
-from api.models import SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine
+from api.models import (
+    SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine,
+    StockMovement, ProductPackageItem, Notification, PaymentMethod,
+)
 from api.services import mail_service
+from api.services.notification_recipients import get_notified_users
+from api.services.notification_ws import broadcast_notification, broadcast_notifications
+from api.services.push_service import send_push_to_user
+from api.services.telegram_service import send_telegram_message
 from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
@@ -135,6 +143,14 @@ class SSLCommerzService:
         order.status         = 'CONFIRMED'
         order.save(update_fields=['payment_status', 'status', 'updated_at'])
 
+        # Stock was deliberately NOT committed at checkout for an online
+        # order (see CheckoutService.checkout / GuestCheckoutService.
+        # checkout) — this is the first point payment is actually
+        # confirmed, so it's committed here instead. The top-of-function
+        # `txn.status == 'PAID'` guard makes this idempotent against a
+        # duplicate IPN/redirect callback for the same transaction.
+        self._deduct_stock(order)
+
         admin = User.objects.filter(role__code='ADMIN').first()
         if admin:
             OrderStatusLog.objects.create(
@@ -153,8 +169,103 @@ class SSLCommerzService:
             )
 
         mail_service.send_order_confirmed(order)
+        self._notify_admins_paid(order)
+        self._notify_customer_paid(order)
+        _, method_en = self._method_label(order.payment_method)
+        send_telegram_message(
+            f"💳 <b>Payment Received — Order #{order.order_number}</b>\n"
+            f"Customer: {order.shipping_name_bn or order.shipping_name_en}\n"
+            f"Method: {method_en}\n"
+            f"Total: ৳{math.ceil(order.grand_total):,}"
+        )
         logger.info(f'Payment confirmed for order {order.order_number}')
         return order
+
+    def _method_label(self, code: str) -> tuple[str, str]:
+        """Friendly (bn, en) display name for a payment_method code, e.g.
+        'SSLCOMMERZ' -> ('অনলাইন পেমেন্ট (SSLCommerz)', 'Online Payment
+        (SSLCommerz)') — falls back to the raw code if the PaymentMethod
+        row is somehow missing (never expected, but notifications should
+        degrade gracefully rather than error)."""
+        method = PaymentMethod.objects.filter(code=code).first()
+        if method:
+            return method.name_bn, method.name_en
+        return code, code
+
+    def _notify_admins_paid(self, order: SalesOrder) -> None:
+        """In-app admin notification for a confirmed ONLINE payment —
+        mirrors CheckoutService._notify_admins exactly, just fired at
+        payment confirmation instead of order placement (which already
+        got its own ORDER_CREATED notification via that method)."""
+        admins  = get_notified_users()
+        amount  = f'৳{math.ceil(order.grand_total):,}'
+        name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
+        name_en = order.shipping_name_en or order.shipping_name_bn or '—'
+        method_bn, method_en = self._method_label(order.payment_method)
+        notifications = [
+            Notification(
+                user=admin,
+                title_bn=f'পেমেন্ট সফল হয়েছে — {order.order_number}',
+                title_en=f'Payment Received — {order.order_number}',
+                body_bn=f'{name_bn}-এর অর্ডারের **{amount}** পেমেন্ট নিশ্চিত হয়েছে।\nপেমেন্ট পদ্ধতি: **{method_bn}**',
+                body_en=f'Payment of **{amount}** confirmed for {name_en}\'s order.\nPayment Method: **{method_en}**',
+                reference_type='PAYMENT_CONFIRMED',
+                reference_id=order.id,
+            )
+            for admin in admins
+        ]
+        Notification.objects.bulk_create(notifications)
+        broadcast_notifications(notifications)
+
+    def _notify_customer_paid(self, order: SalesOrder) -> None:
+        """In-app + push notification to the customer — reaches whichever
+        device(s) they're registered on (mobile app included) via
+        send_push_to_user, same mechanism CheckoutService uses for
+        ORDER_CREATED. No-ops quietly for a guest order (no account to
+        notify)."""
+        if order.is_guest or not order.customer_id:
+            return
+        amount = f'৳{math.ceil(order.grand_total):,}'
+        method_bn, method_en = self._method_label(order.payment_method)
+        notification = Notification.objects.create(
+            user=order.customer,
+            title_bn=f'পেমেন্ট সফল হয়েছে — {order.order_number}',
+            title_en=f'Payment Successful — {order.order_number}',
+            body_bn=f'আপনার অর্ডার #{order.order_number}-এর **{amount}** পেমেন্ট সফলভাবে সম্পন্ন হয়েছে।\nপেমেন্ট পদ্ধতি: **{method_bn}**',
+            body_en=f'Your **{amount}** payment for order #{order.order_number} was successful.\nPayment Method: **{method_en}**',
+            reference_type='PAYMENT_CONFIRMED',
+            reference_id=order.id,
+        )
+        broadcast_notification(notification)
+        send_push_to_user(
+            order.customer,
+            title_bn=notification.title_bn, title_en=notification.title_en,
+            body_bn=notification.body_bn, body_en=notification.body_en,
+            data={'reference_type': 'PAYMENT_CONFIRMED', 'reference_id': str(order.id)},
+        )
+
+    def _deduct_stock(self, order: SalesOrder) -> None:
+        """Mirrors CheckoutService._deduct_stock / GuestCheckoutService.
+        _deduct_stock exactly — package-aware SALE StockMovement per item,
+        just triggered at payment confirmation instead of checkout time."""
+        # StockMovement.created_by is required (no guest equivalent) — same
+        # ADMIN fallback GuestCheckoutService._get_system_user() already uses.
+        user = order.customer or User.objects.filter(role__code='ADMIN').first()
+        for item in order.items.select_related('product'):
+            product = item.product
+            if product.is_package:
+                for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+                    StockMovement.objects.create(
+                        product=pi.component, movement_type='SALE',
+                        quantity=-(pi.quantity * item.quantity), reference_id=order.id,
+                        created_by=user,
+                    )
+            else:
+                StockMovement.objects.create(
+                    product=product, movement_type='SALE',
+                    quantity=-item.quantity, reference_id=order.id,
+                    created_by=user,
+                )
 
     def _create_payment_journal(self, order: SalesOrder, user) -> None:
         """Revenue is recognized here, at the moment payment is actually
@@ -192,6 +303,7 @@ class SSLCommerzService:
                 return None
 
         cb_used = Decimal(str(order.cashback_used or 0))
+        gateway_charge = Decimal(str(order.gateway_charge_amount or 0))
         lines = [
             ('1000', order.grand_total,                    Decimal('0')),  # Dr Cash
             ('5000', cogs,                                 Decimal('0')),  # Dr COGS
@@ -201,6 +313,12 @@ class SSLCommerzService:
         ]
         if cb_used > 0:
             lines.append(('2250', cb_used, Decimal('0')))  # Dr Cashback Payable
+        if gateway_charge > 0:
+            # Balances the gateway charge folded into grand_total above —
+            # a real charge passed on to the customer, booked as other
+            # income (offset separately, if ever, against the actual
+            # SSLCommerz merchant fee expense at settlement/reconciliation).
+            lines.append(('4300', Decimal('0'), gateway_charge))  # Cr Other Income
 
         for code, debit, credit in lines:
             acct = _acct(code)

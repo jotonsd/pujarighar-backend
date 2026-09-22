@@ -507,8 +507,15 @@ ORDER_STATUS = [
 ]
 
 PAYMENT_METHOD_CHOICES = [
-    ('COD',    'ক্যাশ অন ডেলিভারি'),
-    ('ONLINE', 'অনলাইন পেমেন্ট'),
+    ('COD',        'ক্যাশ অন ডেলিভারি'),
+    ('SSLCOMMERZ', 'অনলাইন পেমেন্ট (SSLCommerz)'),
+    ('BKASH',      'বিকাশ'),
+    ('NAGAD',      'নগদ'),
+    ('STRIPE',     'স্ট্রাইপ (কার্ড)'),
+    # Legacy value from before payment_method tracked the specific gateway
+    # — kept only so existing historical orders still deserialize/display
+    # correctly. Never written by new checkouts.
+    ('ONLINE',     'অনলাইন পেমেন্ট'),
 ]
 
 PAYMENT_STATUS_CHOICES = [
@@ -577,6 +584,10 @@ class SalesOrder(BaseModel):
     # (_recalc_order_totals) keeps subtracting it correctly instead of
     # silently losing it.
     first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Same idea as first_order_discount_amount above, but for
+    # SiteSetting.mobile_app_order_discount_percent — applies whenever
+    # source='MOBILE_APP' rather than only on a first order.
+    mobile_app_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     # Snapshot of the cart's total weight (sum of product.weight_kg * qty)
@@ -584,6 +595,12 @@ class SalesOrder(BaseModel):
     # DeliveryCharge.charge_for() — kept for the record so a delivery-charge
     # dispute can be traced back to what weight it was priced from.
     estimated_weight_kg = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
+    # The matching PaymentMethod row's charge_for(...) for whichever
+    # gateway was actually used (e.g. code='SSLCOMMERZ') — already folded
+    # into grand_total below; kept separately so the invoice and order
+    # detail can show it as its own line item rather than an unexplained
+    # gap between subtotal+delivery and grand_total.
+    gateway_charge_amount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     grand_total         = models.DecimalField(max_digits=12, decimal_places=2)
     cashback_amount     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     cashback_used       = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
@@ -1150,6 +1167,18 @@ class SiteSetting(models.Model):
     # Auto-applied on a registered customer's very first order (self-checkout
     # only) — 0 disables it.
     first_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('20.00'))
+    # Auto-applied on every checkout placed through the mobile app (source
+    # derived from the X-Client-Platform header, same signal
+    # User.registered_via and SalesOrder.source already use) — a standing
+    # incentive to use the app, not a one-time thing like the first-order
+    # discount above. Stacks with it and with per-product discounts. 0
+    # disables it.
+    mobile_app_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
+    # Delivery charge is waived when the order subtotal (after all other
+    # discounts) is at or above this amount — applies uniformly to every
+    # checkout channel (website, guest, mobile app; see CheckoutService.
+    # checkout and GuestCheckoutService.checkout). 0 disables it.
+    free_delivery_min_subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
     # Telegram admin notifications
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
@@ -1184,6 +1213,51 @@ class SiteSetting(models.Model):
     def get(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class PaymentMethod(models.Model):
+    """One row per checkout payment option — a separate table (rather than
+    booleans on SiteSetting) so new gateways can be added as data, not a
+    schema change every time. `code` matches SalesOrder.PAYMENT_METHOD_CHOICES
+    and is exactly what checkout requests send as payment_method — 'COD' or
+    'SSLCOMMERZ' today, validated and charged via this row (see
+    CheckoutService.checkout and GuestCheckoutService.checkout). BKASH/
+    NAGAD/STRIPE rows exist purely so an admin can pre-configure them
+    (enabled + charge %) before the gateway integration exists; toggling
+    one on has no effect on checkout until that integration is actually
+    built (it will branch on is_integrated / code the same way SSLCOMMERZ
+    does now).
+    """
+    CHARGE_TYPE_CHOICES = [
+        ('NONE',    'কোনো চার্জ নেই'),
+        ('PERCENT', 'শতাংশ'),
+        ('FLAT',    'নির্দিষ্ট পরিমাণ'),
+    ]
+    code          = models.CharField(max_length=20, unique=True)
+    name_bn       = models.CharField(max_length=50)
+    name_en       = models.CharField(max_length=50)
+    is_enabled    = models.BooleanField(default=False)
+    # Whether a real gateway service exists in code for this row yet —
+    # read-only from the admin API, flipped only by a future code change.
+    is_integrated = models.BooleanField(default=False)
+    charge_type   = models.CharField(max_length=10, choices=CHARGE_TYPE_CHOICES, default='NONE')
+    # Percent (e.g. 2.50 = 2.5%) when charge_type='PERCENT', a flat Taka
+    # amount when charge_type='FLAT', ignored when charge_type='NONE'.
+    charge_value  = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0'))
+    sort_order    = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order']
+
+    def __str__(self):
+        return self.name_en
+
+    def charge_for(self, amount: Decimal) -> Decimal:
+        if self.charge_type == 'PERCENT':
+            return (amount * self.charge_value / Decimal('100')).quantize(Decimal('0.01'))
+        if self.charge_type == 'FLAT':
+            return self.charge_value
+        return Decimal('0')
 
 
 class SmsLog(models.Model):

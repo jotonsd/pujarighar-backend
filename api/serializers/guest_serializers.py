@@ -31,7 +31,7 @@ class GuestCheckoutSerializer(serializers.Serializer):
     thana            = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
     post_code        = serializers.CharField(max_length=10,  required=False, allow_blank=True, default='')
     notes_bn         = serializers.CharField(required=False, allow_blank=True, default='')
-    payment_method   = serializers.ChoiceField(choices=['COD'], default='COD')
+    payment_method   = serializers.ChoiceField(choices=['COD', 'SSLCOMMERZ', 'BKASH', 'NAGAD', 'STRIPE'], default='COD')
     apply_delivery   = serializers.BooleanField(default=True)
     delivery_zone    = serializers.ChoiceField(choices=['inside', 'outside'], required=False, allow_null=True, default=None)
     # Set by the AI support chatbot's create_order call — never something a

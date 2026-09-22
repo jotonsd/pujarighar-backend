@@ -7,7 +7,7 @@ from api.models import (
     DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
-    User, Notification,
+    User, Notification, PaymentMethod, SiteSetting,
 )
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
@@ -79,12 +79,44 @@ class GuestCheckoutService:
         extra_discount = min(extra_discount, subtotal)
         subtotal -= extra_discount
 
+        # Standing app-adoption incentive — mirrors CheckoutService.checkout's
+        # identical block; source='MOBILE_APP' already rules out POS/AI/website.
+        mobile_app_discount_amount = Decimal('0')
+        if source == 'MOBILE_APP':
+            pct = SiteSetting.get().mobile_app_order_discount_percent
+            if pct > 0:
+                mobile_app_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+        subtotal -= mobile_app_discount_amount
+
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')
         total_weight      = _cart_weight(items)
         delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
+        free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
+        if apply_deliv and free_delivery_min > 0 and subtotal >= free_delivery_min:
+            delivery = Decimal('0')
         grand_total       = subtotal + delivery
+
+        # Gateway charge — public guest checkout only (POS's own in-person
+        # card/mobile-money payments aren't run through an online gateway,
+        # so they never carry this charge). payment_method is the specific
+        # gateway code itself (e.g. 'SSLCOMMERZ'), not a generic bucket.
+        gateway_charge = Decimal('0')
+        if payment_method != 'COD' and not is_pos:
+            method = PaymentMethod.objects.filter(code=payment_method).first()
+            if method:
+                gateway_charge = method.charge_for(grand_total)
+        grand_total += gateway_charge
+        # Round up to a whole Taka — see CheckoutService.checkout's
+        # identical block for why (this domain never charges poisha).
+        if payment_method != 'COD' and not is_pos:
+            ceiled = Decimal(math.ceil(grand_total))
+            gateway_charge += ceiled - grand_total
+            grand_total = ceiled
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
@@ -107,8 +139,10 @@ class GuestCheckoutService:
             subtotal              = subtotal,
             discount_amount       = discount_amount,
             staff_discount_amount = extra_discount,
+            mobile_app_discount_amount = mobile_app_discount_amount,
             delivery_charge       = delivery,
             estimated_weight_kg   = total_weight,
+            gateway_charge_amount = gateway_charge,
             grand_total           = grand_total,
         )
 
@@ -123,7 +157,13 @@ class GuestCheckoutService:
                 quantity             = item['quantity'],
                 line_total           = item['product'].effective_price * item['quantity'],
             )
-            self._deduct_stock(item['product'], item['quantity'], order.id)
+            # Same deferral as CheckoutService.checkout — COD (and POS,
+            # which has already collected payment in person regardless of
+            # payment_method) commits stock now; a public ONLINE guest
+            # checkout defers to SSLCommerzService.confirm_payment so an
+            # abandoned/failed payment never holds real inventory hostage.
+            if payment_method == 'COD' or is_pos:
+                self._deduct_stock(item['product'], item['quantity'], order.id)
 
         system_user = self._get_system_user()
         OrderStatusLog.objects.create(

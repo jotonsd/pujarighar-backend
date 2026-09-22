@@ -50,7 +50,9 @@ def payment_success(request):
     if order is None:
         return HttpResponseRedirect(f'{frontend}/bn/payment/fail?reason=verification_failed')
 
-    return HttpResponseRedirect(f'{frontend}/bn/payment/success?order_id={order.id}')
+    return HttpResponseRedirect(
+        f'{frontend}/bn/payment/success?order_id={order.id}&order_number={order.order_number}'
+    )
 
 
 @csrf_exempt

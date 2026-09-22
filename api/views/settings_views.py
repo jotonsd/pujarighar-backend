@@ -17,7 +17,7 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
 INT_FIELDS         = ['email_port']
 BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled', 'whatsapp_enabled']
 FILE_FIELDS        = ['logo', 'favicon']
-DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent']
+DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent', 'mobile_app_order_discount_percent', 'free_delivery_min_subtotal']
 
 
 def _serialize(s: SiteSetting, request=None) -> dict:
@@ -37,6 +37,9 @@ def _serialize(s: SiteSetting, request=None) -> dict:
         'address_en':          s.address_en,
         'logo':                img_url('logo'),
         'favicon':             img_url('favicon'),
+        # Public — cart/checkout pages (including anonymous guest checkout)
+        # show "free delivery over ৳X" messaging from this.
+        'free_delivery_min_subtotal': str(s.free_delivery_min_subtotal),
     }
 
     user = getattr(request, 'user', None) if request else None
@@ -50,6 +53,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'email_default_from':       s.email_default_from,
             'referral_bonus_amount':    str(s.referral_bonus_amount),
             'first_order_discount_percent': str(s.first_order_discount_percent),
+            'mobile_app_order_discount_percent': str(s.mobile_app_order_discount_percent),
             'has_telegram_bot_token':   bool(s.telegram_bot_token),
             'telegram_chat_id':         s.telegram_chat_id,
             'has_gemini_api_key':       bool(s.gemini_api_key),
@@ -109,7 +113,7 @@ def update_site_settings(request):
         if field in request.data:
             try:
                 value = Decimal(str(request.data[field]))
-                if field == 'first_order_discount_percent' and value > 100:
+                if field in ('first_order_discount_percent', 'mobile_app_order_discount_percent') and value > 100:
                     continue
                 if value >= 0:
                     setattr(s, field, value)

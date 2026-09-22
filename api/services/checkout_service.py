@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    ShippingAddress, Notification, SiteSetting,
+    ShippingAddress, Notification, SiteSetting, PaymentMethod,
 )
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notification, broadcast_notifications
@@ -101,15 +101,51 @@ class CheckoutService:
                 )
 
         subtotal        = subtotal - first_order_discount_amount
-        discount_amount = product_discount + first_order_discount_amount
+
+        # Standing app-adoption incentive — applies to every mobile-app
+        # order, not just a first one, and stacks with the discount above.
+        mobile_app_discount_amount = Decimal('0')
+        if source == 'MOBILE_APP':
+            pct = SiteSetting.get().mobile_app_order_discount_percent
+            if pct > 0:
+                mobile_app_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+        subtotal        = subtotal - mobile_app_discount_amount
+
+        discount_amount = product_discount + first_order_discount_amount + mobile_app_discount_amount
         total_weight     = _cart_weight(items)
         delivery         = _delivery_charge(s_district or '', delivery_zone, total_weight)
+        free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
+        if free_delivery_min > 0 and subtotal >= free_delivery_min:
+            delivery = Decimal('0')
         grand_total      = subtotal + delivery
 
         # Auto-apply user's cashback balance
         profile          = user.profile
         cashback_used    = min(profile.cashback_balance, grand_total)
         grand_total      = grand_total - cashback_used
+
+        # Gateway charge — computed on what's actually left to pay through
+        # the gateway (post-cashback), not the pre-cashback subtotal.
+        # payment_method is the specific gateway code itself (e.g.
+        # 'SSLCOMMERZ') now, not a generic 'ONLINE' bucket.
+        gateway_charge = Decimal('0')
+        if payment_method != 'COD':
+            method = PaymentMethod.objects.filter(code=payment_method).first()
+            if method:
+                gateway_charge = method.charge_for(grand_total)
+        grand_total += gateway_charge
+        # Round the customer-facing total up to a whole Taka (this domain
+        # never charges poisha — same convention as the ceil() already used
+        # for SMS amount text elsewhere) — the few poisha this adds are
+        # folded into gateway_charge itself so subtotal/delivery/cashback
+        # stay exactly as computed and the payment journal still balances.
+        if payment_method != 'COD':
+            ceiled = Decimal(math.ceil(grand_total))
+            gateway_charge += ceiled - grand_total
+            grand_total = ceiled
 
         order = SalesOrder.objects.create(
             order_number        = order_number,
@@ -130,8 +166,10 @@ class CheckoutService:
             subtotal            = subtotal,
             discount_amount     = discount_amount,
             first_order_discount_amount = first_order_discount_amount,
+            mobile_app_discount_amount = mobile_app_discount_amount,
             delivery_charge     = delivery,
             estimated_weight_kg = total_weight,
+            gateway_charge_amount = gateway_charge,
             grand_total         = grand_total,
             cashback_used       = cashback_used,
         )
@@ -151,7 +189,14 @@ class CheckoutService:
                 quantity             = item.quantity,
                 line_total           = item.product.effective_price * item.quantity,
             )
-            self._deduct_stock(item.product, item.quantity, order.id, user)
+            # COD: stock is committed immediately, same as always. Online
+            # gateway: the customer hasn't actually paid yet at this point
+            # (see the journal-posting comment below) — deducting stock now
+            # would hold real inventory hostage for every abandoned/failed
+            # online payment attempt. Deferred to SSLCommerzService.
+            # confirm_payment, which only runs once payment is confirmed.
+            if payment_method == 'COD':
+                self._deduct_stock(item.product, item.quantity, order.id, user)
 
         OrderStatusLog.objects.create(
             order=order, from_status='', to_status='PENDING', changed_by=user,
