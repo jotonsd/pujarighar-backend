@@ -34,22 +34,28 @@ def guest_checkout(request):
         )
     try:
         is_mobile_app = request.headers.get('X-Client-Platform') == 'mobile_app'
-        order = _svc.checkout(serializer.validated_data, is_mobile_app=is_mobile_app)
-        mail_service.send_order_created(order)
-        data  = {
-            'order_number': order.order_number,
-            'order_id':     str(order.id),
-            'grand_total':  str(order.grand_total),
-            'gateway_charge_amount': str(order.gateway_charge_amount),
-            'status':       order.status,
-        }
 
-        if serializer.validated_data.get('payment_method') == 'SSLCOMMERZ':
-            gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
-            data['gateway_url'] = gateway_url
-            return ApiResponse(message="Proceed to payment", data=data, status_code=201)
+        if payment_method == 'COD':
+            order = _svc.checkout(serializer.validated_data, is_mobile_app=is_mobile_app)
+            mail_service.send_order_created(order)
+            data = {
+                'order_number': order.order_number,
+                'order_id':     str(order.id),
+                'grand_total':  str(order.grand_total),
+                'gateway_charge_amount': str(order.gateway_charge_amount),
+                'status':       order.status,
+            }
+            return ApiResponse(message="Order placed successfully", data=data, status_code=201)
 
-        return ApiResponse(message="Order placed successfully", data=data, status_code=201)
+        # Online gateway — no order exists yet, same deferral as the
+        # registered-customer checkout view (see cart_views.checkout).
+        pending = _svc.initiate_online_checkout(serializer.validated_data, is_mobile_app=is_mobile_app)
+        gateway_url = SSLCommerzService().initiate_payment_for_pending(pending, django_settings.BACKEND_URL)
+        return ApiResponse(
+            message="Proceed to payment",
+            data={'gateway_url': gateway_url, 'grand_total': str(pending.grand_total)},
+            status_code=201,
+        )
     except Exception as e:
         logger.error(f"Guest checkout error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=400)

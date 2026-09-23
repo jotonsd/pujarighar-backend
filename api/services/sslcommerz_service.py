@@ -5,8 +5,9 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from api.models import (
-    SalesOrder, PaymentTransaction, OrderStatusLog, User, Account, JournalEntry, JournalLine,
-    StockMovement, ProductPackageItem, Notification, PaymentMethod,
+    SalesOrder, SalesOrderItem, PaymentTransaction, PendingCheckout, OrderStatusLog,
+    User, Account, JournalEntry, JournalLine,
+    StockMovement, ProductPackageItem, Notification, PaymentMethod, Cart,
 )
 from api.services import mail_service
 from api.services.notification_recipients import get_notified_users
@@ -14,6 +15,7 @@ from api.services.notification_ws import broadcast_notification, broadcast_notif
 from api.services.push_service import send_push_to_user
 from api.services.telegram_service import send_telegram_message
 from api.utils.journal_number import next_entry_number
+from api.utils.order_number import generate_order_number
 
 logger = logging.getLogger(__name__)
 
@@ -26,50 +28,40 @@ class SSLCommerzService:
         self.api_url    = settings.SSLCOMMERZ_API_URL
         self.val_url    = settings.SSLCOMMERZ_VALIDATION_URL
 
-    def initiate_payment(self, order: SalesOrder, backend_url: str) -> str:
-        tran_id = f'PG-{order.order_number}'
-
-        cus_email = 'guest@pujarighar.local'
-        if order.customer and order.customer.email:
-            cus_email = order.customer.email
-        elif order.guest_email:
-            cus_email = order.guest_email
-
-        cus_name  = order.shipping_name_bn or order.shipping_name_en or 'Customer'
-        cus_add1  = order.shipping_address_bn or 'N/A'
-        cus_city  = order.shipping_district or 'Dhaka'
-        post_code = order.shipping_post_code or '1000'
-
+    def _post_to_gateway(self, tran_id: str, amount: Decimal, num_items: int, backend_url: str,
+                          cus_name: str, cus_email: str, cus_phone: str,
+                          cus_add1: str, cus_city: str, post_code: str) -> str:
+        """Shared by initiate_payment (an already-existing order — e.g. the
+        "Pay Now" retry on an unpaid COD order) and initiate_payment_for_pending
+        (a brand-new online checkout, order not created yet). Only the
+        customer/amount details differ between those two callers."""
         post_data = {
             'store_id':        self.store_id,
             'store_passwd':    self.store_pass,
-            'total_amount':    str(order.grand_total),
+            'total_amount':    str(amount),
             'currency':        'BDT',
             'tran_id':         tran_id,
             'success_url':     f'{backend_url}/api/payments/success/',
             'fail_url':        f'{backend_url}/api/payments/fail/',
             'cancel_url':      f'{backend_url}/api/payments/cancel/',
             'ipn_url':         f'{backend_url}/api/payments/ipn/',
-            # Customer info
             'cus_name':        cus_name,
             'cus_email':       cus_email,
-            'cus_phone':       order.shipping_phone,
+            'cus_phone':       cus_phone,
             'cus_add1':        cus_add1,
             'cus_city':        cus_city,
             'cus_postcode':    post_code,
             'cus_country':     'Bangladesh',
-            # Shipping info (required by SSLCommerz)
             'ship_name':       cus_name,
             'ship_add1':       cus_add1,
             'ship_city':       cus_city,
             'ship_postcode':   post_code,
             'ship_country':    'Bangladesh',
-            # Product info
             'shipping_method': 'Courier',
             'product_name':    'Pujarighar Products',
             'product_category':'Religious Goods',
             'product_profile': 'general',
-            'num_of_item':     str(order.items.count()),
+            'num_of_item':     str(num_items),
         }
 
         try:
@@ -85,14 +77,66 @@ class SSLCommerzService:
             logger.error(f'SSLCommerz initiation failed: {reason}')
             raise Exception(reason)
 
-        PaymentTransaction.objects.create(
-            order       = order,
-            tran_id     = tran_id,
-            session_key = data.get('sessionkey', ''),
+        return data['GatewayPageURL']
+
+    def initiate_payment(self, order: SalesOrder, backend_url: str) -> str:
+        """For an order that already exists — e.g. "Pay Now" on an unpaid
+        COD order (see order_views.pay_order). Not used by the normal
+        online-checkout flow anymore; see initiate_payment_for_pending for
+        that (order isn't created until payment actually succeeds)."""
+        tran_id = f'PG-{order.order_number}-{PaymentTransaction.objects.filter(order=order).count() + 1}'
+
+        cus_email = 'guest@pujarighar.local'
+        if order.customer and order.customer.email:
+            cus_email = order.customer.email
+        elif order.guest_email:
+            cus_email = order.guest_email
+
+        gateway_url = self._post_to_gateway(
+            tran_id, order.grand_total, order.items.count(), backend_url,
+            cus_name  = order.shipping_name_bn or order.shipping_name_en or 'Customer',
+            cus_email = cus_email,
+            cus_phone = order.shipping_phone,
+            cus_add1  = order.shipping_address_bn or 'N/A',
+            cus_city  = order.shipping_district or 'Dhaka',
+            post_code = order.shipping_post_code or '1000',
         )
 
-        logger.info(f'SSLCommerz session created for order {order.order_number}')
-        return data['GatewayPageURL']
+        # order is a OneToOneField on PaymentTransaction — a second "Pay
+        # Now" click after backing out of a first attempt would otherwise
+        # violate that uniqueness trying to INSERT another row for the same
+        # order. update_or_create reuses/resets the existing one instead,
+        # so a retry always gets a fresh tran_id/INITIATED status.
+        PaymentTransaction.objects.update_or_create(
+            order=order,
+            defaults={'tran_id': tran_id, 'status': 'INITIATED', 'val_id': '', 'bank_tran_id': '', 'card_type': ''},
+        )
+        logger.info(f'SSLCommerz session created for existing order {order.order_number}')
+        return gateway_url
+
+    def initiate_payment_for_pending(self, pending: PendingCheckout, backend_url: str) -> str:
+        """The normal online-checkout path — pending.tran_id was already
+        generated when the PendingCheckout was created (see CheckoutService.
+        initiate_online_checkout / GuestCheckoutService.initiate_online_checkout);
+        the SalesOrder itself doesn't exist yet and won't until confirm_payment
+        sees this succeed."""
+        cus_email = 'guest@pujarighar.local'
+        if pending.user and pending.user.email:
+            cus_email = pending.user.email
+        elif pending.guest_email:
+            cus_email = pending.guest_email
+
+        gateway_url = self._post_to_gateway(
+            pending.tran_id, pending.grand_total, len(pending.items_snapshot), backend_url,
+            cus_name  = pending.shipping_name_bn or pending.shipping_name_en or 'Customer',
+            cus_email = cus_email,
+            cus_phone = pending.shipping_phone,
+            cus_add1  = pending.shipping_address_bn or 'N/A',
+            cus_city  = pending.shipping_district or 'Dhaka',
+            post_code = pending.shipping_post_code or '1000',
+        )
+        logger.info(f'SSLCommerz session created for pending checkout {pending.tran_id}')
+        return gateway_url
 
     def verify_transaction(self, val_id: str) -> dict:
         try:
@@ -108,19 +152,26 @@ class SSLCommerzService:
             logger.error(f'SSLCommerz verification failed: {e}', exc_info=True)
             return {'status': 'FAILED'}
 
-    @transaction.atomic
     def confirm_payment(self, tran_id: str, val_id: str, post_data: dict) -> SalesOrder | None:
-        """
-        Validate the payment and confirm the linked order.
-        Returns the order if successful, None otherwise.
-        Guards against double-processing.
-        """
-        try:
-            txn = PaymentTransaction.objects.select_related('order').get(tran_id=tran_id)
-        except PaymentTransaction.DoesNotExist:
-            logger.warning(f'PaymentTransaction not found for tran_id={tran_id}')
-            return None
+        """Validates the payment and either (a) marks an already-existing
+        order paid (the "Pay Now" retry path), or (b) actually creates the
+        order for the first time from its PendingCheckout snapshot (the
+        normal online-checkout path). Returns the order if successful,
+        None otherwise. Idempotent against a duplicate IPN/redirect
+        callback for the same transaction either way."""
+        txn = PaymentTransaction.objects.select_related('order').filter(tran_id=tran_id).first()
+        if txn:
+            return self._confirm_existing_order_payment(txn, val_id, post_data)
 
+        pending = PendingCheckout.objects.filter(tran_id=tran_id).first()
+        if pending:
+            return self._confirm_pending_checkout(pending, val_id, post_data)
+
+        logger.warning(f'No PaymentTransaction or PendingCheckout found for tran_id={tran_id}')
+        return None
+
+    @transaction.atomic
+    def _confirm_existing_order_payment(self, txn: PaymentTransaction, val_id: str, post_data: dict) -> SalesOrder | None:
         if txn.status == 'PAID':
             return txn.order
 
@@ -128,7 +179,7 @@ class SSLCommerzService:
         if verification.get('status') not in ('VALID', 'VALIDATED'):
             txn.status = 'FAILED'
             txn.save(update_fields=['status', 'updated_at'])
-            logger.warning(f'SSLCommerz verification failed for tran_id={tran_id}')
+            logger.warning(f'SSLCommerz verification failed for tran_id={txn.tran_id}')
             return None
 
         txn.status       = 'PAID'
@@ -140,37 +191,167 @@ class SSLCommerzService:
 
         order = txn.order
         order.payment_status = 'PAID'
-        order.status         = 'CONFIRMED'
-        order.save(update_fields=['payment_status', 'status', 'updated_at'])
-
-        # Stock was deliberately NOT committed at checkout for an online
-        # order (see CheckoutService.checkout / GuestCheckoutService.
-        # checkout) — this is the first point payment is actually
-        # confirmed, so it's committed here instead. The top-of-function
-        # `txn.status == 'PAID'` guard makes this idempotent against a
-        # duplicate IPN/redirect callback for the same transaction.
-        self._deduct_stock(order)
-
+        # This "Pay Now" retry path is SSLCommerz-specific (initiate_payment
+        # is only ever called for that gateway) — update the order's
+        # recorded method to match reality instead of leaving it at
+        # whatever it was chosen as originally (typically COD).
+        order.payment_method = 'SSLCOMMERZ'
+        # Stock was already committed when this order was first placed
+        # (only COD/already-created orders reach this path — see
+        # initiate_payment's docstring) — nothing to deduct here, unlike
+        # the brand-new-order path in _confirm_pending_checkout.
+        update_fields = ['payment_status', 'payment_method', 'updated_at']
         admin = User.objects.filter(role__code='ADMIN').first()
+        if order.status == 'PENDING' and admin:
+            order.status = 'CONFIRMED'
+            update_fields.append('status')
+        order.save(update_fields=update_fields)
+
         if admin:
-            OrderStatusLog.objects.create(
-                order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
-            )
+            if order.status == 'CONFIRMED':
+                OrderStatusLog.objects.create(
+                    order=order, from_status='PENDING', to_status='CONFIRMED', changed_by=admin,
+                )
             self._create_payment_journal(order, admin)
         else:
-            # Real gateway money already moved and the order is already
-            # marked PAID above — don't fail the customer's payment
-            # confirmation over a missing admin account, but this must not
-            # disappear silently: no journal gets posted for this order
-            # until an admin exists again and someone reconciles it by hand.
             logger.error(
                 f'Payment confirmed for order {order.order_number} but no ADMIN-role user exists — '
-                f'no OrderStatusLog/PAYMENT journal was posted for this order. Needs manual reconciliation.'
+                f'no PAYMENT journal was posted for this order. Needs manual reconciliation.'
             )
 
         mail_service.send_order_confirmed(order)
         self._notify_admins_paid(order)
         self._notify_customer_paid(order)
+        self._send_payment_telegram(order)
+        logger.info(f'Payment confirmed for existing order {order.order_number}')
+        return order
+
+    def _confirm_pending_checkout(self, pending: PendingCheckout, val_id: str, post_data: dict) -> SalesOrder | None:
+        if pending.status == 'CONFIRMED':
+            return pending.created_order
+        if pending.status in ('FAILED', 'CANCELLED'):
+            # A stale retry (e.g. duplicate IPN) after the customer already
+            # backed out via payment_fail/payment_cancel — nothing to do.
+            return pending.created_order
+
+        verification = self.verify_transaction(val_id)
+        if verification.get('status') not in ('VALID', 'VALIDATED'):
+            pending.status = 'FAILED'
+            pending.save(update_fields=['status', 'updated_at'])
+            logger.warning(f'SSLCommerz verification failed for tran_id={pending.tran_id}')
+            return None
+
+        # DB work only, inside its own transaction — notifications (below,
+        # outside it) include an async SMS thread (mail_service's
+        # _send_async pattern) that writes to the DB on a separate
+        # connection; firing that before this transaction commits raced
+        # ahead of the order actually existing and hit a FK violation.
+        order = self._create_order_from_pending(pending, val_id, post_data)
+
+        mail_service.send_order_created(order)
+        mail_service.send_order_confirmed(order)
+        self._notify_admins_paid(order)
+        self._notify_customer_paid(order)
+        self._send_payment_telegram(order)
+        logger.info(f'Payment confirmed, order created: {order.order_number} (was {pending.tran_id})')
+        return order
+
+    @transaction.atomic
+    def _create_order_from_pending(self, pending: PendingCheckout, val_id: str, post_data: dict) -> SalesOrder:
+        admin = User.objects.filter(role__code='ADMIN').first()
+        order_user = pending.user
+
+        order = SalesOrder.objects.create(
+            order_number        = generate_order_number(),
+            customer            = order_user,
+            is_guest            = pending.is_guest,
+            guest_email         = pending.guest_email,
+            payment_method      = pending.payment_method,
+            payment_status      = 'PAID',
+            status              = 'CONFIRMED',
+            shipping_name_bn    = pending.shipping_name_bn,
+            shipping_name_en    = pending.shipping_name_en,
+            shipping_phone      = pending.shipping_phone,
+            shipping_address_bn = pending.shipping_address_bn,
+            shipping_address_en = pending.shipping_address_en,
+            shipping_district   = pending.shipping_district,
+            shipping_thana      = pending.shipping_thana,
+            shipping_post_code  = pending.shipping_post_code,
+            notes_bn            = pending.notes_bn,
+            source              = pending.source,
+            subtotal            = pending.subtotal,
+            discount_amount     = pending.discount_amount,
+            first_order_discount_amount = pending.first_order_discount_amount,
+            mobile_app_discount_amount  = pending.mobile_app_discount_amount,
+            delivery_charge     = pending.delivery_charge,
+            estimated_weight_kg = pending.estimated_weight_kg,
+            gateway_charge_amount = pending.gateway_charge_amount,
+            grand_total         = pending.grand_total,
+            cashback_used       = pending.cashback_used_estimate,
+        )
+
+        # cashback_used_estimate was computed against the customer's balance
+        # at checkout time — re-clamp the actual deduction against their
+        # CURRENT balance (it could have shifted, e.g. spent on another
+        # order, in the time it took to complete payment) so it can never
+        # go negative. The order's own recorded numbers stay exactly what
+        # SSLCommerz was actually told to charge, since that's real money
+        # already moved.
+        if order_user and pending.cashback_used_estimate > 0:
+            profile = order_user.profile
+            actual_deduction = min(pending.cashback_used_estimate, profile.cashback_balance)
+            if actual_deduction > 0:
+                profile.cashback_balance -= actual_deduction
+                profile.save(update_fields=['cashback_balance'])
+
+        for snap in pending.items_snapshot:
+            SalesOrderItem.objects.create(
+                order                = order,
+                product_id           = snap['product_id'],
+                product_name_bn      = snap['product_name_bn'],
+                product_name_en      = snap['product_name_en'],
+                original_unit_price  = Decimal(snap['original_unit_price']),
+                unit_price           = Decimal(snap['unit_price']),
+                quantity             = Decimal(snap['quantity']),
+                line_total           = Decimal(snap['line_total']),
+            )
+
+        self._deduct_stock(order)
+
+        OrderStatusLog.objects.create(
+            order=order, from_status='', to_status='CONFIRMED',
+            changed_by=order_user or admin,
+        )
+
+        if admin:
+            self._create_payment_journal(order, admin)
+        else:
+            logger.error(
+                f'Order {order.order_number} created from paid checkout but no ADMIN-role user '
+                f'exists — no PAYMENT journal was posted. Needs manual reconciliation.'
+            )
+
+        # Registered customer only — a guest has no server-side Cart to
+        # clear (their cart lives client-side, cleared by the frontend once
+        # it lands on the success page).
+        if order_user:
+            cart = Cart.objects.filter(user=order_user).first()
+            if cart:
+                cart.items.all().delete()
+
+        PaymentTransaction.objects.create(
+            order=order, tran_id=pending.tran_id, val_id=val_id,
+            bank_tran_id=post_data.get('bank_tran_id', ''),
+            card_type=post_data.get('card_type', ''),
+            amount=post_data.get('amount'), status='PAID',
+        )
+
+        pending.status = 'CONFIRMED'
+        pending.created_order = order
+        pending.save(update_fields=['status', 'created_order', 'updated_at'])
+        return order
+
+    def _send_payment_telegram(self, order: SalesOrder) -> None:
         _, method_en = self._method_label(order.payment_method)
         send_telegram_message(
             f"💳 <b>Payment Received — Order #{order.order_number}</b>\n"
@@ -178,8 +359,6 @@ class SSLCommerzService:
             f"Method: {method_en}\n"
             f"Total: ৳{math.ceil(order.grand_total):,}"
         )
-        logger.info(f'Payment confirmed for order {order.order_number}')
-        return order
 
     def _method_label(self, code: str) -> tuple[str, str]:
         """Friendly (bn, en) display name for a payment_method code, e.g.
@@ -193,10 +372,7 @@ class SSLCommerzService:
         return code, code
 
     def _notify_admins_paid(self, order: SalesOrder) -> None:
-        """In-app admin notification for a confirmed ONLINE payment —
-        mirrors CheckoutService._notify_admins exactly, just fired at
-        payment confirmation instead of order placement (which already
-        got its own ORDER_CREATED notification via that method)."""
+        """In-app admin notification for a confirmed ONLINE payment."""
         admins  = get_notified_users()
         amount  = f'৳{math.ceil(order.grand_total):,}'
         name_bn = order.shipping_name_bn or order.shipping_name_en or '—'
@@ -220,8 +396,7 @@ class SSLCommerzService:
     def _notify_customer_paid(self, order: SalesOrder) -> None:
         """In-app + push notification to the customer — reaches whichever
         device(s) they're registered on (mobile app included) via
-        send_push_to_user, same mechanism CheckoutService uses for
-        ORDER_CREATED. No-ops quietly for a guest order (no account to
+        send_push_to_user. No-ops quietly for a guest order (no account to
         notify)."""
         if order.is_guest or not order.customer_id:
             return
@@ -245,11 +420,10 @@ class SSLCommerzService:
         )
 
     def _deduct_stock(self, order: SalesOrder) -> None:
-        """Mirrors CheckoutService._deduct_stock / GuestCheckoutService.
-        _deduct_stock exactly — package-aware SALE StockMovement per item,
-        just triggered at payment confirmation instead of checkout time."""
-        # StockMovement.created_by is required (no guest equivalent) — same
-        # ADMIN fallback GuestCheckoutService._get_system_user() already uses.
+        """Package-aware SALE StockMovement per item — mirrors
+        CheckoutService._deduct_stock / GuestCheckoutService._deduct_stock
+        exactly, just triggered at payment confirmation instead of
+        checkout time for an online order that's only just been created."""
         user = order.customer or User.objects.filter(role__code='ADMIN').first()
         for item in order.items.select_related('product'):
             product = item.product
@@ -269,12 +443,7 @@ class SSLCommerzService:
 
     def _create_payment_journal(self, order: SalesOrder, user) -> None:
         """Revenue is recognized here, at the moment payment is actually
-        confirmed — checkout no longer posts a speculative SALE journal
-        before the customer has paid (see CheckoutService._create_order,
-        which used to post Dr AR / Cr Revenue immediately at checkout; a
-        sale that fails or is abandoned mid-payment would have overstated
-        the books until someone noticed). This posts the full entry in one
-        go instead — Dr Cash+COGS / Cr Revenue+Delivery+Inventory — mirroring
+        confirmed — Dr Cash+COGS / Cr Revenue+Delivery+Inventory, mirroring
         COD's own OrderService._create_payment_journal exactly, tagged the
         same way (reference_type='PAYMENT') so downstream idempotency checks
         (e.g. OrderService.deliver()) recognize this order as already settled.

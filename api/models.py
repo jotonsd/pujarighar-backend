@@ -721,6 +721,72 @@ class PaymentTransaction(models.Model):
         return f'{self.tran_id} — {self.status}'
 
 
+class PendingCheckout(models.Model):
+    """Tracks an online-payment checkout attempt from the moment SSLCommerz
+    is initiated until payment is actually confirmed. The SalesOrder itself
+    is only created once payment succeeds (see SSLCommerzService.
+    confirm_payment) — not at checkout time — so a customer who opens the
+    gateway page and backs out without paying leaves no abandoned PENDING/
+    UNPAID order behind, and their cart is never touched. Everything here
+    mirrors exactly what CheckoutService.checkout / GuestCheckoutService.
+    checkout would otherwise put straight onto a SalesOrder; confirm_payment
+    replays these fields to actually build one."""
+    STATUS_CHOICES = [
+        ('PENDING',   'অপেক্ষমান'),
+        ('CONFIRMED', 'নিশ্চিত'),
+        ('FAILED',    'ব্যর্থ'),
+        ('CANCELLED', 'বাতিল'),
+    ]
+    id     = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    tran_id = models.CharField(max_length=100, unique=True)
+    status  = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+
+    user        = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    is_guest    = models.BooleanField(default=False)
+    guest_email = models.EmailField(blank=True)
+
+    shipping_name_bn    = models.CharField(max_length=200)
+    shipping_name_en    = models.CharField(max_length=200, blank=True)
+    shipping_phone      = models.CharField(max_length=15)
+    shipping_address_bn = models.TextField()
+    shipping_address_en = models.TextField(blank=True)
+    shipping_district   = models.CharField(max_length=100)
+    shipping_thana      = models.CharField(max_length=100)
+    shipping_post_code  = models.CharField(max_length=10)
+    notes_bn            = models.TextField(blank=True)
+
+    # [{product_id, product_name_bn, product_name_en, quantity, unit_price,
+    #   original_unit_price, line_total}, ...] — quantity/prices as strings
+    # (JSONField can't hold Decimal), parsed back to Decimal in confirm_payment.
+    items_snapshot = models.JSONField(default=list)
+
+    subtotal                    = models.DecimalField(max_digits=12, decimal_places=2)
+    discount_amount             = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    mobile_app_discount_amount  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    delivery_charge             = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    estimated_weight_kg         = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
+    gateway_charge_amount       = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    grand_total                 = models.DecimalField(max_digits=12, decimal_places=2)
+    # What the customer's cashback balance would cover at checkout time —
+    # re-clamped against their live balance in confirm_payment, since it
+    # could shift (another order, an admin adjustment) before payment
+    # actually completes.
+    cashback_used_estimate = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+
+    payment_method = models.CharField(max_length=20)
+    source         = models.CharField(max_length=20, default='WEBSITE')
+
+    created_order = models.OneToOneField(
+        SalesOrder, null=True, blank=True, on_delete=models.SET_NULL, related_name='pending_checkout',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'PendingCheckout {self.tran_id} ({self.status})'
+
+
 class DeliveryAssignment(BaseModel):
     order           = models.OneToOneField(SalesOrder, on_delete=models.CASCADE, related_name='delivery')
     delivery_person = models.ForeignKey(

@@ -108,7 +108,28 @@ def checkout(request):
             status_code=422,
         )
     try:
-        order = _checkout_svc.checkout(
+        if payment_method == 'COD':
+            order = _checkout_svc.checkout(
+                request.user,
+                payment_method=payment_method,
+                shipping_address_id=shipping_address_id,
+                delivery_zone=delivery_zone,
+                source=source,
+                notes_bn=notes_bn,
+            )
+            mail_service.send_order_created(order)
+            return ApiResponse(
+                message="Order placed successfully",
+                data=SalesOrderSerializer(order).data,
+                status_code=status.HTTP_201_CREATED,
+            )
+
+        # Online gateway — no order exists yet. It's only created once
+        # SSLCommerzService.confirm_payment sees payment actually succeed
+        # (see CheckoutService.initiate_online_checkout's docstring for
+        # why: backing out of the gateway page this way leaves no
+        # abandoned order and the cart untouched).
+        pending = _checkout_svc.initiate_online_checkout(
             request.user,
             payment_method=payment_method,
             shipping_address_id=shipping_address_id,
@@ -116,15 +137,12 @@ def checkout(request):
             source=source,
             notes_bn=notes_bn,
         )
-        mail_service.send_order_created(order)
-        data  = SalesOrderSerializer(order).data
-
-        if payment_method == 'SSLCOMMERZ':
-            gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
-            data = {**data, 'gateway_url': gateway_url}
-            return ApiResponse(message="Proceed to payment", data=data, status_code=status.HTTP_201_CREATED)
-
-        return ApiResponse(message="Order placed successfully", data=data, status_code=status.HTTP_201_CREATED)
+        gateway_url = SSLCommerzService().initiate_payment_for_pending(pending, django_settings.BACKEND_URL)
+        return ApiResponse(
+            message="Proceed to payment",
+            data={'gateway_url': gateway_url, 'grand_total': str(pending.grand_total)},
+            status_code=status.HTTP_201_CREATED,
+        )
     except DRFValidationError as e:
         return ApiResponse(message="Validation failed", errors=e.detail, status_code=422)
     except Exception as e:

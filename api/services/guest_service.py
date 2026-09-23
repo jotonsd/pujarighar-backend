@@ -1,5 +1,6 @@
 import logging
 import math
+import uuid
 from decimal import Decimal
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
@@ -7,7 +8,7 @@ from api.models import (
     DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
     Account, JournalEntry, JournalLine,
-    User, Notification, PaymentMethod, SiteSetting,
+    User, Notification, PaymentMethod, SiteSetting, PendingCheckout,
 )
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
@@ -182,6 +183,96 @@ class GuestCheckoutService:
         self._notify_admins(order)
         logger.info(f"Guest order created: {order.order_number} phone={order.shipping_phone}")
         return order
+
+    @transaction.atomic
+    def initiate_online_checkout(self, validated_data: dict, is_mobile_app: bool = False) -> PendingCheckout:
+        """Public guest checkout's online-payment path only (never POS/AI —
+        those already collect payment differently, see checkout() above).
+        Mirrors CheckoutService.initiate_online_checkout: prices the cart
+        and snapshots it, but creates no SalesOrder, deducts no stock, until
+        SSLCommerzService.confirm_payment sees the payment actually
+        succeed — so backing out of the gateway page leaves nothing
+        abandoned behind."""
+        items    = validated_data['items']
+        shipping = validated_data
+        payment_method = validated_data.get('payment_method', 'COD')
+        source = 'MOBILE_APP' if is_mobile_app else 'WEBSITE'
+
+        for item in items:
+            self._validate_stock(item['product'], item['quantity'])
+
+        original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
+        subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
+
+        mobile_app_discount_amount = Decimal('0')
+        if source == 'MOBILE_APP':
+            pct = SiteSetting.get().mobile_app_order_discount_percent
+            if pct > 0:
+                mobile_app_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+        subtotal -= mobile_app_discount_amount
+
+        discount_amount   = original_subtotal - subtotal
+        apply_deliv       = validated_data.get('apply_delivery', True)
+        zone              = validated_data.get('delivery_zone')
+        total_weight      = _cart_weight(items)
+        delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
+        free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
+        if apply_deliv and free_delivery_min > 0 and subtotal >= free_delivery_min:
+            delivery = Decimal('0')
+        grand_total = subtotal + delivery
+
+        gateway_charge = Decimal('0')
+        method = PaymentMethod.objects.filter(code=payment_method).first()
+        if method:
+            gateway_charge = method.charge_for(grand_total)
+        grand_total += gateway_charge
+        ceiled = Decimal(math.ceil(grand_total))
+        gateway_charge += ceiled - grand_total
+        grand_total = ceiled
+
+        items_snapshot = [
+            {
+                'product_id':          str(item['product'].id),
+                'product_name_bn':     item['product'].name_bn,
+                'product_name_en':     item['product'].name_en,
+                'quantity':            str(item['quantity']),
+                'unit_price':          str(item['product'].effective_price),
+                'original_unit_price': str(item['product'].original_price),
+                'line_total':          str(item['product'].effective_price * item['quantity']),
+            }
+            for item in items
+        ]
+
+        pending = PendingCheckout.objects.create(
+            tran_id      = f'PG-{uuid.uuid4().hex[:20].upper()}',
+            user         = None,
+            is_guest     = True,
+            guest_email  = shipping.get('email', ''),
+            payment_method = payment_method,
+            source       = source,
+            notes_bn     = shipping.get('notes_bn', ''),
+            items_snapshot = items_snapshot,
+            shipping_name_bn    = shipping['name_bn'],
+            shipping_name_en    = shipping.get('name_en', ''),
+            shipping_phone      = shipping['phone'],
+            shipping_address_bn = shipping['address_bn'],
+            shipping_address_en = shipping.get('address_en', ''),
+            shipping_district   = shipping['district'],
+            shipping_thana      = shipping['thana'],
+            shipping_post_code  = shipping['post_code'],
+            subtotal                    = subtotal,
+            discount_amount             = discount_amount,
+            mobile_app_discount_amount  = mobile_app_discount_amount,
+            delivery_charge             = delivery,
+            estimated_weight_kg         = total_weight,
+            gateway_charge_amount       = gateway_charge,
+            grand_total                 = grand_total,
+        )
+        logger.info(f"Guest pending checkout created: {pending.tran_id} phone={shipping['phone']}")
+        return pending
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

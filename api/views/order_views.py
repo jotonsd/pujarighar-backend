@@ -1,11 +1,13 @@
 import logging
 from decimal import Decimal
+from django.conf import settings as django_settings
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.models import SalesOrder, OrderStatusLog, Product
+from api.models import SalesOrder, OrderStatusLog, Product, PaymentMethod
 from api.serializers.guest_serializers import POSCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
+from api.services.sslcommerz_service import SSLCommerzService
 from api.serializers.order_serializers import (
     SalesOrderSerializer, OrderStatusLogSerializer,
     OrderTrackingSerializer, AssignDeliverySerializer, OrderCancelSerializer,
@@ -406,6 +408,43 @@ def cancel_order(request, pk):
     except Exception as e:
         logger.error(f"Cancel order error: {e}", exc_info=True)
         return api_error(e, locale_hint=request.LANGUAGE_CODE)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def pay_order(request, pk):
+    """Lets a logged-in customer pay online for their own still-UNPAID
+    order (e.g. they chose COD, then changed their mind before it's
+    delivered) — reuses SSLCommerzService.initiate_payment on the
+    already-existing order (unlike the normal checkout flow, which defers
+    creating the order at all until payment confirms; there's nothing to
+    defer here since the order already exists)."""
+    try:
+        order = _svc.get_order(pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message="Order not found", errors="Not found", status_code=404)
+
+    if order.is_guest or order.customer != request.user:
+        return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+    if order.payment_status == 'PAID':
+        return ApiResponse(message="Already paid", errors="This order is already paid", status_code=400)
+    if order.status in ('CANCELLED', 'RETURNED', 'EXCHANGED'):
+        return ApiResponse(message="Cannot pay for this order", errors="Invalid order status", status_code=400)
+
+    payment_method = request.data.get('payment_method', 'SSLCOMMERZ')
+    method = PaymentMethod.objects.filter(code=payment_method).first()
+    if not method or not method.is_enabled:
+        return ApiResponse(
+            message="Payment method unavailable",
+            errors="This payment method is currently disabled",
+            status_code=422,
+        )
+    try:
+        gateway_url = SSLCommerzService().initiate_payment(order, django_settings.BACKEND_URL)
+        return ApiResponse(message="Proceed to payment", data={'gateway_url': gateway_url})
+    except Exception as e:
+        logger.error(f"Pay order error: {e}", exc_info=True)
+        return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
 @api_view(['PATCH'])

@@ -1,7 +1,20 @@
 import logging
+import re
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_BOLD_MARKER = re.compile(r'\*\*(.+?)\*\*')
+
+
+def _strip_bold_markers(text: str) -> str:
+    """The in-app Notification body_bn/body_en convention wraps emphasis in
+    **markdown** (see checkout_service.py/sslcommerz_service.py) — the
+    website and app both parse that into real bold text, but the OS
+    notification tray just renders whatever string FCM is given verbatim,
+    so it would show the literal asterisks. Strip them for push only; the
+    in-app Notification row (and its own screen) keeps the markers."""
+    return _BOLD_MARKER.sub(r'\1', text)
 
 _firebase_app = None
 _firebase_unavailable = False
@@ -77,6 +90,7 @@ def _send_to_tokens(tokens: list[str], title_bn: str, body_bn: str, data: dict |
     import firebase_admin.messaging as messaging
 
     image_url = image_url or _logo_image_url()
+    body_bn = _strip_bold_markers(body_bn)
     sent = 0
     for i in range(0, len(tokens), 500):
         batch = tokens[i:i + 500]

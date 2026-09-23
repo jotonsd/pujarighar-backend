@@ -1,12 +1,13 @@
 import logging
 import math
+import uuid
 from decimal import Decimal
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 from api.models import (
     Cart, CashbackTier, DeliveryCharge, SalesOrder, SalesOrderItem, OrderStatusLog,
     StockMovement, ProductPackageItem,
-    ShippingAddress, Notification, SiteSetting, PaymentMethod,
+    ShippingAddress, Notification, SiteSetting, PaymentMethod, PendingCheckout,
 )
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notification, broadcast_notifications
@@ -37,145 +38,38 @@ class CheckoutService:
     @transaction.atomic
     def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None,
                  delivery_zone: str | None = None, source: str = 'WEBSITE', notes_bn: str = '') -> SalesOrder:
+        """COD only — an online gateway method never reaches this method
+        (see cart_views.checkout, which routes those to
+        initiate_online_checkout instead). COD is paid on delivery, so
+        there's nothing to defer: the order, its stock deduction and its
+        cart-clear all happen immediately, exactly as before."""
         cart  = Cart.objects.select_for_update().get(user=user)
         items = list(cart.items.select_related('product').select_for_update())
 
         if not items:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
-        # Re-checked here (not just at add-to-cart time) because stock can
-        # move between then and checkout — another order selling the same
-        # product out, or an admin adjustment — and because a guest/local
-        # cart (mobile app's offline cart, see CartRepository) never goes
-        # through CartService.add_item/update_item's validation at all, so
-        # this is the only stock check some checkouts ever see.
         for item in items:
             self._validate_stock(item.product, item.quantity)
 
-        # Resolve shipping address: explicit id → default saved → profile fallback
-        addr = None
-        if shipping_address_id:
-            addr = ShippingAddress.objects.filter(id=shipping_address_id, user=user).first()
-        if addr is None:
-            addr = ShippingAddress.objects.filter(user=user, is_default=True).first()
-
-        if addr:
-            s_name_bn    = addr.full_name_bn
-            s_name_en    = addr.full_name_en
-            s_phone      = addr.phone
-            s_address_bn = addr.address_bn
-            s_address_en = addr.address_en
-            s_district   = addr.district
-            s_thana      = addr.thana
-            s_post_code  = addr.post_code
-        else:
-            profile      = user.profile
-            s_name_bn    = profile.full_name_bn
-            s_name_en    = profile.full_name_en
-            s_phone      = user.phone
-            s_address_bn = profile.address_bn
-            s_address_en = profile.address_en
-            s_district   = profile.district
-            s_thana      = profile.thana
-            s_post_code  = profile.post_code
-
-        order_number = generate_order_number()
-
-        original_subtotal = sum(i.product.original_price * i.quantity for i in items)
-        subtotal          = sum(i.product.effective_price * i.quantity for i in items)
-        product_discount  = original_subtotal - subtotal
-
-        # Welcome discount — a registered customer's very first order only
-        # (guest/POS checkouts go through GuestCheckoutService, not here, so
-        # this never applies to them). "First" means no prior SalesOrder at
-        # all, regardless of its status, so cancel-and-reorder can't be used
-        # to re-earn it.
-        first_order_discount_amount = Decimal('0')
-        is_first_order = not SalesOrder.objects.filter(customer=user).exists()
-        if is_first_order:
-            pct = SiteSetting.get().first_order_discount_percent
-            if pct > 0:
-                first_order_discount_amount = min(
-                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
-                    subtotal,
-                )
-
-        subtotal        = subtotal - first_order_discount_amount
-
-        # Standing app-adoption incentive — applies to every mobile-app
-        # order, not just a first one, and stacks with the discount above.
-        mobile_app_discount_amount = Decimal('0')
-        if source == 'MOBILE_APP':
-            pct = SiteSetting.get().mobile_app_order_discount_percent
-            if pct > 0:
-                mobile_app_discount_amount = min(
-                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
-                    subtotal,
-                )
-        subtotal        = subtotal - mobile_app_discount_amount
-
-        discount_amount = product_discount + first_order_discount_amount + mobile_app_discount_amount
-        total_weight     = _cart_weight(items)
-        delivery         = _delivery_charge(s_district or '', delivery_zone, total_weight)
-        free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
-        if free_delivery_min > 0 and subtotal >= free_delivery_min:
-            delivery = Decimal('0')
-        grand_total      = subtotal + delivery
-
-        # Auto-apply user's cashback balance
-        profile          = user.profile
-        cashback_used    = min(profile.cashback_balance, grand_total)
-        grand_total      = grand_total - cashback_used
-
-        # Gateway charge — computed on what's actually left to pay through
-        # the gateway (post-cashback), not the pre-cashback subtotal.
-        # payment_method is the specific gateway code itself (e.g.
-        # 'SSLCOMMERZ') now, not a generic 'ONLINE' bucket.
-        gateway_charge = Decimal('0')
-        if payment_method != 'COD':
-            method = PaymentMethod.objects.filter(code=payment_method).first()
-            if method:
-                gateway_charge = method.charge_for(grand_total)
-        grand_total += gateway_charge
-        # Round the customer-facing total up to a whole Taka (this domain
-        # never charges poisha — same convention as the ceil() already used
-        # for SMS amount text elsewhere) — the few poisha this adds are
-        # folded into gateway_charge itself so subtotal/delivery/cashback
-        # stay exactly as computed and the payment journal still balances.
-        if payment_method != 'COD':
-            ceiled = Decimal(math.ceil(grand_total))
-            gateway_charge += ceiled - grand_total
-            grand_total = ceiled
+        shipping = self._resolve_shipping(user, shipping_address_id)
+        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone)
 
         order = SalesOrder.objects.create(
-            order_number        = order_number,
+            order_number        = generate_order_number(),
             customer            = user,
             payment_method      = payment_method,
             payment_status      = 'UNPAID',
             status              = 'PENDING',
-            shipping_name_bn    = s_name_bn,
-            shipping_name_en    = s_name_en,
-            shipping_phone      = s_phone,
-            shipping_address_bn = s_address_bn,
-            shipping_address_en = s_address_en,
-            shipping_district   = s_district,
-            shipping_thana      = s_thana,
-            shipping_post_code  = s_post_code,
-            source              = source,
             notes_bn            = notes_bn,
-            subtotal            = subtotal,
-            discount_amount     = discount_amount,
-            first_order_discount_amount = first_order_discount_amount,
-            mobile_app_discount_amount = mobile_app_discount_amount,
-            delivery_charge     = delivery,
-            estimated_weight_kg = total_weight,
-            gateway_charge_amount = gateway_charge,
-            grand_total         = grand_total,
-            cashback_used       = cashback_used,
+            source              = source,
+            **shipping,
+            **pricing['order_fields'],
         )
 
-        if cashback_used > 0:
-            profile.cashback_balance -= cashback_used
+        if pricing['cashback_used'] > 0:
+            profile = user.profile
+            profile.cashback_balance -= pricing['cashback_used']
             profile.save(update_fields=['cashback_balance'])
 
         for item in items:
@@ -189,29 +83,17 @@ class CheckoutService:
                 quantity             = item.quantity,
                 line_total           = item.product.effective_price * item.quantity,
             )
-            # COD: stock is committed immediately, same as always. Online
-            # gateway: the customer hasn't actually paid yet at this point
-            # (see the journal-posting comment below) — deducting stock now
-            # would hold real inventory hostage for every abandoned/failed
-            # online payment attempt. Deferred to SSLCommerzService.
-            # confirm_payment, which only runs once payment is confirmed.
-            if payment_method == 'COD':
-                self._deduct_stock(item.product, item.quantity, order.id, user)
+            self._deduct_stock(item.product, item.quantity, order.id, user)
 
         OrderStatusLog.objects.create(
             order=order, from_status='', to_status='PENDING', changed_by=user,
         )
 
-        cashback = CashbackTier.calculate(grand_total)
+        cashback = CashbackTier.calculate(order.grand_total)
         if cashback > 0:
             order.cashback_amount = cashback
             order.save(update_fields=['cashback_amount'])
 
-        # No journal posted here — for an ONLINE order the customer hasn't
-        # actually paid yet at this point (that's confirmed later via
-        # SSLCommerzService.confirm_payment, which posts the full revenue +
-        # cash journal in one go). Posting revenue for a sale that might
-        # still fail/be abandoned overstates the books until payment lands.
         cart.items.all().delete()
         self._notify_admins(order)
         self._notify_customer_created(order, user)
@@ -219,7 +101,170 @@ class CheckoutService:
         logger.info(f"Order created: {order.order_number} customer={user.email} payment={payment_method}")
         return order
 
+    @transaction.atomic
+    def initiate_online_checkout(self, user, payment_method: str, shipping_address_id: str | None = None,
+                                  delivery_zone: str | None = None, source: str = 'WEBSITE',
+                                  notes_bn: str = '') -> PendingCheckout:
+        """Prices the cart and snapshots everything needed to build the real
+        order later, but does NOT create a SalesOrder, deduct stock, spend
+        cashback or touch the cart — SSLCommerzService.confirm_payment does
+        all of that, only once payment actually succeeds. Backing out of
+        the gateway page this way leaves no abandoned order and the cart
+        intact, unlike creating a PENDING/UNPAID order upfront."""
+        cart  = Cart.objects.select_for_update().get(user=user)
+        items = list(cart.items.select_related('product').select_for_update())
+
+        if not items:
+            raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
+
+        for item in items:
+            self._validate_stock(item.product, item.quantity)
+
+        shipping = self._resolve_shipping(user, shipping_address_id)
+        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone)
+        of       = pricing['order_fields']
+
+        items_snapshot = [
+            {
+                'product_id':          str(item.product.id),
+                'product_name_bn':     item.product.name_bn,
+                'product_name_en':     item.product.name_en,
+                'quantity':            str(item.quantity),
+                'unit_price':          str(item.product.effective_price),
+                'original_unit_price': str(item.product.original_price),
+                'line_total':          str(item.product.effective_price * item.quantity),
+            }
+            for item in items
+        ]
+
+        pending = PendingCheckout.objects.create(
+            tran_id      = f'PG-{uuid.uuid4().hex[:20].upper()}',
+            user         = user,
+            is_guest     = False,
+            payment_method = payment_method,
+            source       = source,
+            notes_bn     = notes_bn,
+            items_snapshot = items_snapshot,
+            shipping_name_bn    = shipping['shipping_name_bn'],
+            shipping_name_en    = shipping['shipping_name_en'],
+            shipping_phone      = shipping['shipping_phone'],
+            shipping_address_bn = shipping['shipping_address_bn'],
+            shipping_address_en = shipping['shipping_address_en'],
+            shipping_district   = shipping['shipping_district'],
+            shipping_thana      = shipping['shipping_thana'],
+            shipping_post_code  = shipping['shipping_post_code'],
+            subtotal                    = of['subtotal'],
+            discount_amount             = of['discount_amount'],
+            first_order_discount_amount = of['first_order_discount_amount'],
+            mobile_app_discount_amount  = of['mobile_app_discount_amount'],
+            delivery_charge             = of['delivery_charge'],
+            estimated_weight_kg         = of['estimated_weight_kg'],
+            gateway_charge_amount       = of['gateway_charge_amount'],
+            grand_total                 = of['grand_total'],
+            cashback_used_estimate      = of['cashback_used'],
+        )
+        logger.info(f"Pending checkout created: {pending.tran_id} customer={user.email} payment={payment_method}")
+        return pending
+
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _resolve_shipping(self, user, shipping_address_id: str | None) -> dict:
+        addr = None
+        if shipping_address_id:
+            addr = ShippingAddress.objects.filter(id=shipping_address_id, user=user).first()
+        if addr is None:
+            addr = ShippingAddress.objects.filter(user=user, is_default=True).first()
+
+        if addr:
+            return {
+                'shipping_name_bn': addr.full_name_bn, 'shipping_name_en': addr.full_name_en,
+                'shipping_phone': addr.phone,
+                'shipping_address_bn': addr.address_bn, 'shipping_address_en': addr.address_en,
+                'shipping_district': addr.district, 'shipping_thana': addr.thana,
+                'shipping_post_code': addr.post_code,
+            }
+        profile = user.profile
+        return {
+            'shipping_name_bn': profile.full_name_bn, 'shipping_name_en': profile.full_name_en,
+            'shipping_phone': user.phone,
+            'shipping_address_bn': profile.address_bn, 'shipping_address_en': profile.address_en,
+            'shipping_district': profile.district, 'shipping_thana': profile.thana,
+            'shipping_post_code': profile.post_code,
+        }
+
+    def _price_cart(self, items, user, source: str, payment_method: str,
+                     district: str, delivery_zone: str | None) -> dict:
+        """Shared by checkout() and initiate_online_checkout() — everything
+        needed to price a registered customer's cart, identically either
+        way. Returns {'order_fields': {...SalesOrder-ready kwargs...},
+        'cashback_used': Decimal}."""
+        original_subtotal = sum(i.product.original_price * i.quantity for i in items)
+        subtotal          = sum(i.product.effective_price * i.quantity for i in items)
+        product_discount  = original_subtotal - subtotal
+
+        # Welcome discount — a registered customer's very first order only.
+        # "First" means no prior SalesOrder at all, regardless of its
+        # status, so cancel-and-reorder can't be used to re-earn it.
+        first_order_discount_amount = Decimal('0')
+        is_first_order = not SalesOrder.objects.filter(customer=user).exists()
+        if is_first_order:
+            pct = SiteSetting.get().first_order_discount_percent
+            if pct > 0:
+                first_order_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+        subtotal -= first_order_discount_amount
+
+        # Standing app-adoption incentive — applies to every mobile-app
+        # order, not just a first one, and stacks with the discount above.
+        mobile_app_discount_amount = Decimal('0')
+        if source == 'MOBILE_APP':
+            pct = SiteSetting.get().mobile_app_order_discount_percent
+            if pct > 0:
+                mobile_app_discount_amount = min(
+                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
+                    subtotal,
+                )
+        subtotal -= mobile_app_discount_amount
+
+        discount_amount = product_discount + first_order_discount_amount + mobile_app_discount_amount
+        total_weight     = _cart_weight(items)
+        delivery         = _delivery_charge(district or '', delivery_zone, total_weight)
+        free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
+        if free_delivery_min > 0 and subtotal >= free_delivery_min:
+            delivery = Decimal('0')
+        grand_total = subtotal + delivery
+
+        profile       = user.profile
+        cashback_used = min(profile.cashback_balance, grand_total)
+        grand_total  -= cashback_used
+
+        gateway_charge = Decimal('0')
+        if payment_method != 'COD':
+            method = PaymentMethod.objects.filter(code=payment_method).first()
+            if method:
+                gateway_charge = method.charge_for(grand_total)
+        grand_total += gateway_charge
+        if payment_method != 'COD':
+            ceiled = Decimal(math.ceil(grand_total))
+            gateway_charge += ceiled - grand_total
+            grand_total = ceiled
+
+        return {
+            'order_fields': {
+                'subtotal': subtotal,
+                'discount_amount': discount_amount,
+                'first_order_discount_amount': first_order_discount_amount,
+                'mobile_app_discount_amount': mobile_app_discount_amount,
+                'delivery_charge': delivery,
+                'estimated_weight_kg': total_weight,
+                'gateway_charge_amount': gateway_charge,
+                'grand_total': grand_total,
+                'cashback_used': cashback_used,
+            },
+            'cashback_used': cashback_used,
+        }
 
     def _validate_stock(self, product, quantity: Decimal) -> None:
         if product.is_package:
