@@ -329,6 +329,58 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def change_delivery_zone(self, order: SalesOrder, zone: str, user: User) -> SalesOrder:
+        """Let staff correct a wrong inside/outside-Dhaka pick on a not-yet-
+        shipped, unpaid order — re-prices delivery from the order's own
+        estimated weight at the current DeliveryCharge rates (same source
+        CheckoutService used), honouring the free-delivery threshold, then
+        resyncs the journal. Same PENDING/CONFIRMED + unpaid gate as
+        waive_delivery_charge. The zone itself isn't stored on the order
+        (checkout never kept it), so the new charge is the only thing recorded.
+        Online-gateway orders are excluded: their grand_total also carries a
+        percentage gateway fee computed on the old total, which would go stale."""
+        if zone not in ('inside', 'outside'):
+            raise ValidationError({
+                'message_bn': 'ডেলিভারি অঞ্চল সঠিক নয়',
+                'message_en': 'Invalid delivery zone',
+            })
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারের ডেলিভারি অঞ্চল পরিবর্তন করা যায়',
+                'message_en': 'Delivery zone can only be changed on pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারের ডেলিভারি অঞ্চল পরিবর্তন করা যাবে না',
+                'message_en': 'Delivery zone cannot be changed on an already-paid order',
+            })
+        if (order.gateway_charge_amount or Decimal('0')) > 0:
+            raise ValidationError({
+                'message_bn': 'অনলাইন পেমেন্টের অর্ডারের ডেলিভারি অঞ্চল পরিবর্তন করা যাবে না',
+                'message_en': 'Delivery zone cannot be changed on an online-payment order',
+            })
+
+        new_charge = DeliveryCharge.get().charge_for(zone, order.estimated_weight_kg)
+        free_min = SiteSetting.get().free_delivery_min_subtotal or Decimal('0')
+        if free_min > 0 and order.subtotal >= free_min:
+            new_charge = Decimal('0')
+
+        old_charge = order.delivery_charge
+        if new_charge == old_charge:
+            return order
+
+        order.delivery_charge = new_charge
+        order.grand_total = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['delivery_charge', 'grand_total'])
+        self._resync_order_item_journal(order)
+
+        logger.info(
+            f'Delivery zone changed on order {order.order_number} by {user.email}: '
+            f'{zone} (৳{old_charge} -> ৳{new_charge})'
+        )
+        return order
+
+    @transaction.atomic
     def update_item_quantity(self, order: SalesOrder, item: SalesOrderItem, new_quantity: Decimal, user: User) -> SalesOrder:
         """Correct a mistaken quantity on a not-yet-shipped order — adjusts the
         already-deducted stock by the delta, recomputes order totals from the
