@@ -50,7 +50,7 @@ def _nav_registry() -> list:
             item('/admin/courier',    'truck',       'কুরিয়ার',              'Courier', 'courier'),
             item('/admin/sms',        'message-square', 'এসএমএস',           'SMS', 'sms'),
         ]),
-        group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Management', [
+        group('boxes', 'পণ্য ব্যবস্থাপনা', 'Product Mgt', [
             group('package', 'পণ্য', 'Catalog', [
                 item('/admin/products',         'package',     'পণ্য',          'Products', 'products'),
                 item('/admin/packages',         'gift',        'প্যাকেজ',       'Packages', 'packages'),
