@@ -23,7 +23,7 @@ def validate_promo_code(code: str, source: str, *, user) -> PromoCode:
     channel_bn = 'অ্যাপ' if source == 'MOBILE_APP' else 'ওয়েবসাইট'
     channel_en = 'app' if source == 'MOBILE_APP' else 'website'
 
-    if promo.scope != source:
+    if promo.scope != source and promo.scope != 'BOTH':
         promo_channel_bn = 'অ্যাপ' if promo.scope == 'MOBILE_APP' else 'ওয়েবসাইট'
         promo_channel_en = 'app' if promo.scope == 'MOBILE_APP' else 'website'
         raise ValidationError({

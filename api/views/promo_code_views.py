@@ -12,7 +12,7 @@ from api.services.promo_service import validate_promo_code
 from api.utils.response import ApiResponse
 
 DISCOUNT_TYPES = ['PERCENT', 'FLAT']
-SCOPES = ['MOBILE_APP', 'WEBSITE']
+SCOPES = ['MOBILE_APP', 'WEBSITE', 'BOTH']
 
 
 def _serialize(p: PromoCode) -> dict:

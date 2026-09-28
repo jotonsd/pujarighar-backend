@@ -1344,11 +1344,13 @@ class PromoCode(models.Model):
         ('PERCENT', 'শতাংশ'),
         ('FLAT',    'নির্দিষ্ট পরিমাণ'),
     ]
-    # Values match SalesOrder.source exactly (not a separate vocabulary)
-    # so promo_service can compare scope == source directly.
+    # MOBILE_APP/WEBSITE values match SalesOrder.source exactly (not a
+    # separate vocabulary) so promo_service can compare scope == source
+    # directly; BOTH is the one extra value it checks for explicitly.
     SCOPE_CHOICES = [
         ('MOBILE_APP', 'শুধু অ্যাপ'),
         ('WEBSITE',    'শুধু ওয়েবসাইট'),
+        ('BOTH',       'অ্যাপ ও ওয়েবসাইট উভয়ই'),
     ]
     code           = models.CharField(max_length=32, unique=True)
     # Which channel this code can be redeemed from — checked against
