@@ -245,6 +245,11 @@ urlpatterns = [
     path('payment-methods/create/',     views.create_payment_method,  name='payment-method-create'),
     path('payment-methods/<int:pk>/update/', views.update_payment_method, name='payment-method-update'),
 
+    path('promo-codes/',            views.list_promo_codes,   name='promo-codes'),
+    path('promo-codes/create/',     views.create_promo_code,  name='promo-code-create'),
+    path('promo-codes/<int:pk>/update/', views.update_promo_code, name='promo-code-update'),
+    path('promo-codes/preview/',    views.preview_promo_code, name='promo-code-preview'),
+
     # ─── Logs ──────────────────────────────────────────────────────────────────
     path('logs/',              views.list_log_files, name='log-list'),
     path('logs/<str:filename>/', views.get_log_file,  name='log-detail'),

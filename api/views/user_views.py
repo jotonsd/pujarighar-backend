@@ -99,6 +99,7 @@ def _nav_registry() -> list:
             item('/admin/blog',                    'file-text',          'ব্লগ পোস্ট',       'Blog Posts', 'blog'),
             item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails', 'promo_emails'),
             item('/admin/marketing/promo-push',   'bell-ring',          'প্রমোশনাল পুশ',   'Promo Push', 'promo_notifications'),
+            item('/admin/marketing/promo-codes',  'ticket',             'প্রোমো কোড',      'Promo Codes', 'promo_codes'),
             item('/admin/settings/reviews',       'star',               'রিভিউ',           'Reviews', 'reviews'),
         ]),
     ]

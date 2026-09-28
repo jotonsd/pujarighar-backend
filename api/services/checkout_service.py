@@ -9,6 +9,7 @@ from api.models import (
     StockMovement, ProductPackageItem,
     ShippingAddress, Notification, SiteSetting, PaymentMethod, PendingCheckout,
 )
+from api.services.promo_service import validate_promo_code, redeem_promo_code
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notification, broadcast_notifications
 from api.services.push_service import send_push_to_user
@@ -37,7 +38,8 @@ class CheckoutService:
 
     @transaction.atomic
     def checkout(self, user, payment_method: str = 'COD', shipping_address_id: str | None = None,
-                 delivery_zone: str | None = None, source: str = 'WEBSITE', notes_bn: str = '') -> SalesOrder:
+                 delivery_zone: str | None = None, source: str = 'WEBSITE', notes_bn: str = '',
+                 promo_code: str = '') -> SalesOrder:
         """COD only — an online gateway method never reaches this method
         (see cart_views.checkout, which routes those to
         initiate_online_checkout instead). COD is paid on delivery, so
@@ -53,7 +55,7 @@ class CheckoutService:
             self._validate_stock(item.product, item.quantity)
 
         shipping = self._resolve_shipping(user, shipping_address_id)
-        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone)
+        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone, promo_code)
 
         order = SalesOrder.objects.create(
             order_number        = generate_order_number(),
@@ -95,6 +97,7 @@ class CheckoutService:
             order.save(update_fields=['cashback_amount'])
 
         cart.items.all().delete()
+        redeem_promo_code(order.promo_code_used)
         self._notify_admins(order)
         self._notify_customer_created(order, user)
 
@@ -104,7 +107,7 @@ class CheckoutService:
     @transaction.atomic
     def initiate_online_checkout(self, user, payment_method: str, shipping_address_id: str | None = None,
                                   delivery_zone: str | None = None, source: str = 'WEBSITE',
-                                  notes_bn: str = '') -> PendingCheckout:
+                                  notes_bn: str = '', promo_code: str = '') -> PendingCheckout:
         """Prices the cart and snapshots everything needed to build the real
         order later, but does NOT create a SalesOrder, deduct stock, spend
         cashback or touch the cart — SSLCommerzService.confirm_payment does
@@ -121,7 +124,7 @@ class CheckoutService:
             self._validate_stock(item.product, item.quantity)
 
         shipping = self._resolve_shipping(user, shipping_address_id)
-        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone)
+        pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone, promo_code)
         of       = pricing['order_fields']
 
         items_snapshot = [
@@ -157,6 +160,7 @@ class CheckoutService:
             discount_amount             = of['discount_amount'],
             first_order_discount_amount = of['first_order_discount_amount'],
             mobile_app_discount_amount  = of['mobile_app_discount_amount'],
+            promo_code_used             = of['promo_code_used'],
             delivery_charge             = of['delivery_charge'],
             estimated_weight_kg         = of['estimated_weight_kg'],
             gateway_charge_amount       = of['gateway_charge_amount'],
@@ -193,11 +197,14 @@ class CheckoutService:
         }
 
     def _price_cart(self, items, user, source: str, payment_method: str,
-                     district: str, delivery_zone: str | None) -> dict:
+                     district: str, delivery_zone: str | None, promo_code: str = '') -> dict:
         """Shared by checkout() and initiate_online_checkout() — everything
         needed to price a registered customer's cart, identically either
         way. Returns {'order_fields': {...SalesOrder-ready kwargs...},
-        'cashback_used': Decimal}."""
+        'cashback_used': Decimal}. Raises ValidationError if promo_code is
+        given but isn't usable (see promo_service.validate_promo_code) —
+        the caller should let that propagate as a checkout error rather
+        than silently drop the code."""
         original_subtotal = sum(i.product.original_price * i.quantity for i in items)
         subtotal          = sum(i.product.effective_price * i.quantity for i in items)
         product_discount  = original_subtotal - subtotal
@@ -216,16 +223,15 @@ class CheckoutService:
                 )
         subtotal -= first_order_discount_amount
 
-        # Standing app-adoption incentive — applies to every mobile-app
-        # order, not just a first one, and stacks with the discount above.
+        # Promo code — replaces the old always-on, no-code mobile-app
+        # discount (see PromoCode's docstring). Only ever entered/validated
+        # when the customer actually typed one in; no code means no discount.
         mobile_app_discount_amount = Decimal('0')
-        if source == 'MOBILE_APP':
-            pct = SiteSetting.get().mobile_app_order_discount_percent
-            if pct > 0:
-                mobile_app_discount_amount = min(
-                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
-                    subtotal,
-                )
+        promo_code_used = ''
+        if promo_code:
+            promo = validate_promo_code(promo_code, source, user=user)
+            mobile_app_discount_amount = promo.discount_for(subtotal)
+            promo_code_used = promo.code
         subtotal -= mobile_app_discount_amount
 
         discount_amount = product_discount + first_order_discount_amount + mobile_app_discount_amount
@@ -257,6 +263,7 @@ class CheckoutService:
                 'discount_amount': discount_amount,
                 'first_order_discount_amount': first_order_discount_amount,
                 'mobile_app_discount_amount': mobile_app_discount_amount,
+                'promo_code_used': promo_code_used,
                 'delivery_charge': delivery,
                 'estimated_weight_kg': total_weight,
                 'gateway_charge_amount': gateway_charge,

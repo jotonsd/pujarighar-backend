@@ -96,6 +96,7 @@ def checkout(request):
     shipping_address_id = request.data.get('shipping_address_id') or None
     delivery_zone       = request.data.get('delivery_zone') or None
     notes_bn            = (request.data.get('notes_bn') or '').strip()
+    promo_code          = (request.data.get('promo_code') or '').strip()
     # The Flutter app sends this on every request (see mobile-app's
     # ApiClient) — lets admin distinguish app orders from website ones in
     # the order list, same as POS/AI_CHATBOT are already distinguished.
@@ -116,6 +117,7 @@ def checkout(request):
                 delivery_zone=delivery_zone,
                 source=source,
                 notes_bn=notes_bn,
+                promo_code=promo_code,
             )
             mail_service.send_order_created(order)
             return ApiResponse(
@@ -136,6 +138,7 @@ def checkout(request):
             delivery_zone=delivery_zone,
             source=source,
             notes_bn=notes_bn,
+            promo_code=promo_code,
         )
         gateway_url = SSLCommerzService().initiate_payment_for_pending(pending, django_settings.BACKEND_URL)
         return ApiResponse(

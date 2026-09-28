@@ -156,6 +156,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             'shipping_address_bn', 'shipping_address_en',
             'shipping_district', 'shipping_thana', 'shipping_post_code',
             'subtotal', 'discount_amount', 'tax_amount', 'delivery_charge', 'estimated_weight_kg', 'gateway_charge_amount', 'grand_total', 'cashback_amount', 'cashback_used',
+            'promo_code_used',
             'notes_bn', 'notes_en',
             'items', 'delivery', 'courier_consignment', 'exchanges', 'exchanged_from',
             'created_at', 'updated_at',

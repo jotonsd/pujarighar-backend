@@ -80,17 +80,11 @@ class GuestCheckoutService:
         extra_discount = min(extra_discount, subtotal)
         subtotal -= extra_discount
 
-        # Standing app-adoption incentive — mirrors CheckoutService.checkout's
-        # identical block; source='MOBILE_APP' already rules out POS/AI/website.
+        # Promo codes are registered-customer only (see CheckoutService's
+        # own checkout/_price_cart) — a guest checkout, whatever its
+        # source, never gets this discount.
         mobile_app_discount_amount = Decimal('0')
-        if source == 'MOBILE_APP':
-            pct = SiteSetting.get().mobile_app_order_discount_percent
-            if pct > 0:
-                mobile_app_discount_amount = min(
-                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
-                    subtotal,
-                )
-        subtotal -= mobile_app_discount_amount
+        promo_code_used = ''
 
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
@@ -141,6 +135,7 @@ class GuestCheckoutService:
             discount_amount       = discount_amount,
             staff_discount_amount = extra_discount,
             mobile_app_discount_amount = mobile_app_discount_amount,
+            promo_code_used       = promo_code_used,
             delivery_charge       = delivery,
             estimated_weight_kg   = total_weight,
             gateway_charge_amount = gateway_charge,
@@ -204,15 +199,9 @@ class GuestCheckoutService:
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
         subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
 
+        # Promo codes are registered-customer only — see checkout() above.
         mobile_app_discount_amount = Decimal('0')
-        if source == 'MOBILE_APP':
-            pct = SiteSetting.get().mobile_app_order_discount_percent
-            if pct > 0:
-                mobile_app_discount_amount = min(
-                    (subtotal * pct / Decimal('100')).quantize(Decimal('0.01')),
-                    subtotal,
-                )
-        subtotal -= mobile_app_discount_amount
+        promo_code_used = ''
 
         discount_amount   = original_subtotal - subtotal
         apply_deliv       = validated_data.get('apply_delivery', True)
@@ -266,6 +255,7 @@ class GuestCheckoutService:
             subtotal                    = subtotal,
             discount_amount             = discount_amount,
             mobile_app_discount_amount  = mobile_app_discount_amount,
+            promo_code_used             = promo_code_used,
             delivery_charge             = delivery,
             estimated_weight_kg         = total_weight,
             gateway_charge_amount       = gateway_charge,

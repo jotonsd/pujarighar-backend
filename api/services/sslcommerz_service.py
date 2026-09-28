@@ -10,6 +10,7 @@ from api.models import (
     StockMovement, ProductPackageItem, Notification, PaymentMethod, Cart,
 )
 from api.services import mail_service
+from api.services.promo_service import redeem_promo_code
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notification, broadcast_notifications
 from api.services.push_service import send_push_to_user
@@ -283,6 +284,7 @@ class SSLCommerzService:
             discount_amount     = pending.discount_amount,
             first_order_discount_amount = pending.first_order_discount_amount,
             mobile_app_discount_amount  = pending.mobile_app_discount_amount,
+            promo_code_used     = pending.promo_code_used,
             delivery_charge     = pending.delivery_charge,
             estimated_weight_kg = pending.estimated_weight_kg,
             gateway_charge_amount = pending.gateway_charge_amount,
@@ -317,6 +319,7 @@ class SSLCommerzService:
             )
 
         self._deduct_stock(order)
+        redeem_promo_code(order.promo_code_used)
 
         OrderStatusLog.objects.create(
             order=order, from_status='', to_status='CONFIRMED',

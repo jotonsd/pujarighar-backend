@@ -584,10 +584,14 @@ class SalesOrder(BaseModel):
     # (_recalc_order_totals) keeps subtracting it correctly instead of
     # silently losing it.
     first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    # Same idea as first_order_discount_amount above, but for
-    # SiteSetting.mobile_app_order_discount_percent — applies whenever
-    # source='MOBILE_APP' rather than only on a first order.
+    # Discount from a PromoCode redeemed on this order (see
+    # api.services.promo_service) — same field that used to hold the old
+    # always-on mobile_app_order_discount_percent amount before that was
+    # replaced by an explicit, trackable, time-limited code.
     mobile_app_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # The actual code redeemed, if any — kept even though PromoCode rows can
+    # be edited/retired later, so an order's history stays accurate.
+    promo_code_used = models.CharField(max_length=32, blank=True, default='')
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
     # Snapshot of the cart's total weight (sum of product.weight_kg * qty)
@@ -764,6 +768,7 @@ class PendingCheckout(models.Model):
     discount_amount             = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     first_order_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     mobile_app_discount_amount  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    promo_code_used             = models.CharField(max_length=32, blank=True, default='')
     delivery_charge             = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     estimated_weight_kg         = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     gateway_charge_amount       = models.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -1233,13 +1238,6 @@ class SiteSetting(models.Model):
     # Auto-applied on a registered customer's very first order (self-checkout
     # only) — 0 disables it.
     first_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('20.00'))
-    # Auto-applied on every checkout placed through the mobile app (source
-    # derived from the X-Client-Platform header, same signal
-    # User.registered_via and SalesOrder.source already use) — a standing
-    # incentive to use the app, not a one-time thing like the first-order
-    # discount above. Stacks with it and with per-product discounts. 0
-    # disables it.
-    mobile_app_order_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
     # Delivery charge is waived when the order subtotal (after all other
     # discounts) is at or above this amount — applies uniformly to every
     # checkout channel (website, guest, mobile app; see CheckoutService.
@@ -1329,6 +1327,74 @@ class PaymentMethod(models.Model):
         if self.charge_type == 'FLAT':
             return self.charge_value
         return Decimal('0')
+
+
+class PromoCode(models.Model):
+    """Replaces the old always-on, no-code mobile_app_order_discount_percent
+    (SiteSetting) — that gave every app order a standing discount forever,
+    with no way to track who actually used it or put a deadline on it. A
+    promo code fixes both: the customer has to type it in, it's checked
+    against a first-order-on-that-channel-only eligibility rule scoped to
+    `scope` (see api.services.promo_service.validate_promo_code) and an optional date
+    window, and every redemption bumps times_used so it's easy to see how
+    many people actually used it. Kept as its own table (not a single
+    settings field) so more codes can be added/retired over time without a
+    schema change, mirroring PaymentMethod's own reasoning."""
+    DISCOUNT_TYPE_CHOICES = [
+        ('PERCENT', 'শতাংশ'),
+        ('FLAT',    'নির্দিষ্ট পরিমাণ'),
+    ]
+    # Values match SalesOrder.source exactly (not a separate vocabulary)
+    # so promo_service can compare scope == source directly.
+    SCOPE_CHOICES = [
+        ('MOBILE_APP', 'শুধু অ্যাপ'),
+        ('WEBSITE',    'শুধু ওয়েবসাইট'),
+    ]
+    code           = models.CharField(max_length=32, unique=True)
+    # Which channel this code can be redeemed from — checked against
+    # SalesOrder.source (via the request's X-Client-Platform header, same
+    # signal the order itself is tagged with), not User.registered_via, so
+    # eligibility always reflects where THIS order is being placed.
+    scope          = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='MOBILE_APP')
+    discount_type  = models.CharField(max_length=10, choices=DISCOUNT_TYPE_CHOICES, default='PERCENT')
+    # Percent (e.g. 10.00 = 10%) when discount_type='PERCENT', a flat Taka
+    # amount when discount_type='FLAT' — same charge_type/charge_value
+    # split PaymentMethod already uses.
+    discount_value = models.DecimalField(max_digits=8, decimal_places=2)
+    # Both optional — leave blank for "starts immediately" / "no end date".
+    valid_from  = models.DateTimeField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+    is_active   = models.BooleanField(default=True)
+    times_used  = models.PositiveIntegerField(default=0)
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.code
+
+    def save(self, *args, **kwargs):
+        self.code = self.code.strip().upper()
+        super().save(*args, **kwargs)
+
+    def is_valid_now(self) -> bool:
+        if not self.is_active:
+            return False
+        now = timezone.now()
+        if self.valid_from and now < self.valid_from:
+            return False
+        if self.valid_until and now > self.valid_until:
+            return False
+        return True
+
+    def discount_for(self, subtotal: Decimal) -> Decimal:
+        if self.discount_type == 'PERCENT':
+            amount = (subtotal * self.discount_value / Decimal('100')).quantize(Decimal('0.01'))
+        else:
+            amount = self.discount_value
+        return min(amount, subtotal)
 
 
 class SmsLog(models.Model):

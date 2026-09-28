@@ -17,7 +17,7 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
 INT_FIELDS         = ['email_port']
 BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled', 'whatsapp_enabled']
 FILE_FIELDS        = ['logo', 'favicon']
-DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent', 'mobile_app_order_discount_percent', 'free_delivery_min_subtotal']
+DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent', 'free_delivery_min_subtotal']
 
 
 def _serialize(s: SiteSetting, request=None) -> dict:
@@ -40,11 +40,6 @@ def _serialize(s: SiteSetting, request=None) -> dict:
         # Public — cart/checkout pages (including anonymous guest checkout)
         # show "free delivery over ৳X" messaging from this.
         'free_delivery_min_subtotal': str(s.free_delivery_min_subtotal),
-        # Public — the app's checkout screen needs this to preview the
-        # discount checkout will actually apply for source='MOBILE_APP'
-        # (see CheckoutService.checkout); harmless for the website to see
-        # too, since it only ever applies to app orders.
-        'mobile_app_order_discount_percent': str(s.mobile_app_order_discount_percent),
     }
 
     user = getattr(request, 'user', None) if request else None
@@ -117,7 +112,7 @@ def update_site_settings(request):
         if field in request.data:
             try:
                 value = Decimal(str(request.data[field]))
-                if field in ('first_order_discount_percent', 'mobile_app_order_discount_percent') and value > 100:
+                if field == 'first_order_discount_percent' and value > 100:
                     continue
                 if value >= 0:
                     setattr(s, field, value)
