@@ -77,9 +77,11 @@ def create_promo_code(request):
     except ValueError:
         return ApiResponse(message='Invalid date', errors='valid_from/valid_until must be ISO datetimes', status_code=422)
 
+    is_active = str(request.data.get('is_active', True)).lower() in ('true', '1', 'yes')
+
     p = PromoCode.objects.create(
         code=code, scope=scope, discount_type=discount_type, discount_value=discount_value,
-        valid_from=valid_from, valid_until=valid_until,
+        valid_from=valid_from, valid_until=valid_until, is_active=is_active,
     )
     return ApiResponse(message='Promo code created', data=_serialize(p), status_code=status.HTTP_201_CREATED)
 
