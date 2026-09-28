@@ -219,6 +219,21 @@ def assign_delivery(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdminOrDelivery])
+def pick_up_order(request, pk):
+    try:
+        order = _svc.get_order(pk)
+        # Only the assigned delivery person is ownership-checked — admins can act on any order.
+        if request.user.role.code == 'DELIVERY' and (not hasattr(order, 'delivery') or order.delivery.delivery_person != request.user):
+            return ApiResponse(message="Permission denied", errors="Forbidden", status_code=403)
+        return ApiResponse(message="Order marked as picked up", data=SalesOrderSerializer(_svc.pick_up(order, request.user), context={'request': request}).data)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message="Order not found", errors="Not found", status_code=404)
+    except Exception as e:
+        return api_error(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrDelivery])
 def dispatch_order(request, pk):
     try:
         order = _svc.get_order(pk)

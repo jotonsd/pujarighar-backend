@@ -35,7 +35,7 @@ from .payment_views import payment_ipn, payment_success, payment_fail, payment_c
 from .order_views import (
     list_orders, get_order, get_order_tracking, get_order_status_log,
     track_by_order_number,
-    confirm_order, pack_order, assign_delivery, dispatch_order,
+    confirm_order, pack_order, assign_delivery, pick_up_order, dispatch_order,
     deliver_order, partial_deliver_order, return_order, cancel_order, pay_order, pos_create_order,
     mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
     waive_delivery_charge, change_delivery_zone, lookup_recent_order_by_phone, get_sales_report, create_exchange,
