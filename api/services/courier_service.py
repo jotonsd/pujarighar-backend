@@ -164,15 +164,22 @@ class CourierService:
     # ── Webhook ─────────────────────────────────────────────────────────────────
 
     # Steadfast's documented delivery_status values -> what that means for our
-    # own SalesOrder state machine. 'DISPATCH' = ASSIGNED -> ON_THE_WAY,
-    # 'DELIVER' = -> DELIVERED (crediting cashback, posting the sale journal,
-    # marking COD paid), 'RETURN' = DELIVERED -> RETURNED (reversing journal).
-    # Steadfast has no separate "in transit" webhook status (coarser than
-    # Pathao) — pending/hold/in_review/cancelled and the *_approval_pending
-    # variants deliberately map to nothing here: cancellation isn't a
-    # reachable transition once ASSIGNED (see ALLOWED_TRANSITIONS), and
-    # "approval pending" isn't final yet, so those stay visible only in the
-    # tracking timeline until an admin acts.
+    # own SalesOrder state machine. 'PICK' = ASSIGNED -> PICKED, 'DELIVER' =
+    # -> DELIVERED (crediting cashback, posting the sale journal, marking COD
+    # paid), 'RETURN' = DELIVERED -> RETURNED (reversing journal).
+    # Steadfast has no separate "in transit" webhook status the way Pathao
+    # does (order.picked vs order.in-transit as two distinct events) — its
+    # 'pending' status covers everything from "handed to the courier" through
+    # "out for delivery", so it's the only signal available for the
+    # ASSIGNED -> PICKED waypoint; there's no finer-grained ON_THE_WAY
+    # transition to map separately for Steadfast (see _apply_courier_status_
+    # to_order's DELIVER branch, which backfills PICKED -> ON_THE_WAY itself
+    # once a later 'delivered' webhook arrives).
+    # hold/in_review/cancelled and the *_approval_pending variants still
+    # deliberately map to nothing: cancellation isn't a reachable transition
+    # once ASSIGNED (see ALLOWED_TRANSITIONS), and "approval pending" isn't
+    # final yet, so those stay visible only in the tracking timeline until an
+    # admin acts.
     #
     # partial_delivered deliberately maps to nothing too (not DELIVER) —
     # Steadfast only reports a lump collected amount (e.g. "Amount has been
@@ -183,6 +190,7 @@ class CourierService:
     # OrderService.partial_deliver() instead — mirrors how Pathao's own
     # order.partial-delivery event is left unmapped for the same reason.
     _STEADFAST_STATUS_ACTIONS = {
+        'pending': 'PICK',
         'delivered': 'DELIVER',
     }
 
@@ -401,7 +409,20 @@ class CourierService:
         # back to the generic "now **status**" wording only when there's no
         # message to show (a plain delivered/dispatched hit).
         if notification_type == 'delivery_status':
-            self._apply_courier_status_to_order(consignment, self._STEADFAST_STATUS_ACTIONS.get(raw_status))
+            action = self._STEADFAST_STATUS_ACTIONS.get(raw_status)
+            # raw_status alone can't tell PICKED apart from ON_THE_WAY —
+            # Steadfast reports 'pending' for both "processing for delivery"
+            # and an inter-hub handoff ("Consignment sent to CHITTAGONG
+            # WAREHOUSE, Dispatch ID: ..."), so the warehouse transfer has to
+            # be read off tracking_message instead. Overrides the plain PICK
+            # mapping since a hub transfer is strictly further along than
+            # just being picked up. _apply_courier_status_to_order's DISPATCH
+            # branch backfills PICKED first if the order is still ASSIGNED,
+            # so this is safe even if Steadfast skipped a discrete pickup
+            # message entirely.
+            if raw_status == 'pending' and 'sent to' in message.lower():
+                action = 'DISPATCH'
+            self._apply_courier_status_to_order(consignment, action)
         self._notify_admins(consignment, tracking_message=message)
 
     @transaction.atomic
