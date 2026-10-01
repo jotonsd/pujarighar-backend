@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from api.models import PromoCode
 from api.permissions import has_permission
@@ -47,6 +47,7 @@ def list_promo_codes(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def has_active_website_promo(request):
     """Public, unauthenticated check used by the guest checkout page — lets
     it decide whether to show a "login to use a promo code" nudge at all,
