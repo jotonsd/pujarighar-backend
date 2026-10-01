@@ -30,7 +30,7 @@ class LogTailConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self):
         user = self.scope.get('user')
-        if not user or not user.is_authenticated or getattr(user, 'role', None) != 'ADMIN':
+        if not user or not user.is_authenticated or getattr(user.role, 'code', None) != 'ADMIN':
             await self.close(code=4401)
             return
 
@@ -92,7 +92,7 @@ class LogFileListConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self):
         user = self.scope.get('user')
-        if not user or not user.is_authenticated or getattr(user, 'role', None) != 'ADMIN':
+        if not user or not user.is_authenticated or getattr(user.role, 'code', None) != 'ADMIN':
             await self.close(code=4401)
             return
 
