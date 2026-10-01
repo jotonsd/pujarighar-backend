@@ -46,6 +46,19 @@ def list_promo_codes(request):
     return ApiResponse(message='Promo codes retrieved', data=[_serialize(p) for p in codes])
 
 
+@api_view(['GET'])
+def has_active_website_promo(request):
+    """Public, unauthenticated check used by the guest checkout page — lets
+    it decide whether to show a "login to use a promo code" nudge at all,
+    without exposing any actual code (unlike list_promo_codes, which is
+    admin-only)."""
+    exists = any(
+        p.is_valid_now()
+        for p in PromoCode.objects.filter(scope__in=['WEBSITE', 'BOTH'], is_active=True)
+    )
+    return ApiResponse(message='Checked', data={'has_active': exists})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, has_permission('promo_codes', 'edit')])
 def create_promo_code(request):

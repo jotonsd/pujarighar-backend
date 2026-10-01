@@ -250,6 +250,7 @@ urlpatterns = [
     path('promo-codes/create/',     views.create_promo_code,  name='promo-code-create'),
     path('promo-codes/<int:pk>/update/', views.update_promo_code, name='promo-code-update'),
     path('promo-codes/preview/',    views.preview_promo_code, name='promo-code-preview'),
+    path('promo-codes/active-website/', views.has_active_website_promo, name='promo-code-active-website'),
 
     # ─── Logs ──────────────────────────────────────────────────────────────────
     path('logs/',              views.list_log_files, name='log-list'),
