@@ -253,15 +253,26 @@ class Product(BaseModel):
     # the product form, not computed/derived, so they stay exactly as intended
     # until changed. A list since a product can carry more than one badge.
     badges = models.JSONField(default=list, blank=True)
-    # When 'new' was last (re-)added to `badges` — NOT touched by unrelated
-    # saves (price/stock/etc.), only by badges actually transitioning from
-    # not-having 'new' to having it (see save() below). Powers NEW_BADGE_WINDOW
-    # below: the 'new' badge is only honored (shown/ranked) for a limited time
-    # after being set, not forever, so it doesn't lose meaning on old stock the
-    # admin just never got around to un-tagging.
-    new_badge_set_at = models.DateTimeField(null=True, blank=True)
+    # One dedicated timestamp column per time-boxed badge (plain
+    # DateTimeFields, not a JSON blob, so BADGE_WINDOW comparisons are a
+    # normal indexed `__gte` lookup at the DB level — see
+    # ProductService.list_products/_personalize_ordering) — each stamped the
+    # moment its badge transitions from absent to present (see save()
+    # below), NOT touched by unrelated saves (price, stock, etc. with the
+    # badge already present). A badge is only honored (shown/ranked) for
+    # BADGE_WINDOW after being set, not forever, so it doesn't lose meaning
+    # on old stock the admin just never got around to un-tagging. Admins who
+    # want to refresh an expired badge just toggle it off and back on.
+    new_badge_set_at        = models.DateTimeField(null=True, blank=True)
+    trendy_badge_set_at     = models.DateTimeField(null=True, blank=True)
+    flash_sale_badge_set_at = models.DateTimeField(null=True, blank=True)
 
-    NEW_BADGE_WINDOW = timedelta(weeks=2)
+    BADGE_TIMESTAMP_FIELDS = {
+        'new': 'new_badge_set_at',
+        'trendy': 'trendy_badge_set_at',
+        'flash_sale': 'flash_sale_badge_set_at',
+    }
+    BADGE_WINDOW = timedelta(weeks=2)
 
     class Meta:
         ordering = ['-created_at']
@@ -290,40 +301,44 @@ class Product(BaseModel):
                 slug = f'{base}-{n}'
             self.slug = slug
 
-        # 'new' badge timestamp: only (re)stamped the moment 'new' transitions
-        # from absent to present — a save that merely keeps 'new' already
-        # present (editing price, stock, etc. with the badge untouched)
-        # must NOT push the 2-week window out, or it would never expire on a
-        # product the admin keeps editing for unrelated reasons. Admins who
-        # want to refresh an expired 'new' badge just toggle it off and back
-        # on (or re-check it in the badge picker) to retrigger this.
-        has_new = 'new' in (self.badges or [])
-        if has_new:
-            had_new_before = (
-                Product.objects.filter(pk=self.pk).values_list('badges', flat=True).first()
-                if self.pk else None
-            )
-            if not (had_new_before and 'new' in had_new_before):
-                self.new_badge_set_at = timezone.now()
-        else:
-            self.new_badge_set_at = None
+        # Time-boxed badge timestamps: each badge in BADGE_TIMESTAMP_FIELDS
+        # only gets (re)stamped the moment IT transitions from absent to
+        # present — a save that merely keeps a badge already present
+        # (editing price, stock, etc. with badges untouched) must NOT push
+        # its window out, or it would never expire on a product the admin
+        # keeps editing for unrelated reasons. Admins who want to refresh an
+        # expired badge just toggle it off and back on in the badge picker.
+        current = self.badges or []
+        had_before = (
+            Product.objects.filter(pk=self.pk).values_list('badges', flat=True).first()
+            if self.pk else None
+        ) or []
+        now = timezone.now()
+        for badge, field in self.BADGE_TIMESTAMP_FIELDS.items():
+            if badge in current:
+                if badge not in had_before:
+                    setattr(self, field, now)
+            else:
+                setattr(self, field, None)
 
         super().save(*args, **kwargs)
 
-    @property
-    def new_badge_active(self) -> bool:
-        return bool(self.new_badge_set_at) and timezone.now() - self.new_badge_set_at < self.NEW_BADGE_WINDOW
+    def badge_active(self, badge: str) -> bool:
+        field = self.BADGE_TIMESTAMP_FIELDS.get(badge)
+        set_at = getattr(self, field, None) if field else None
+        return bool(set_at) and timezone.now() - set_at < self.BADGE_WINDOW
 
     def effective_badges(self) -> list:
-        """`badges` as customer-facing code should actually honor — 'new'
-        dropped once its 2-week window has elapsed, everything else passed
-        through unchanged. Admin-side (BadgePicker) still reads the raw
-        `badges` field as-is, so the admin's original toggle choice isn't
-        silently rewritten — only the public-facing effect expires."""
-        badges = list(self.badges or [])
-        if 'new' in badges and not self.new_badge_active:
-            badges.remove('new')
-        return badges
+        """`badges` as customer-facing code should actually honor — each
+        time-boxed badge dropped once its 2-week window has elapsed,
+        everything else passed through unchanged. Admin-side (BadgePicker)
+        still reads the raw `badges` field as-is, so the admin's original
+        toggle choice isn't silently rewritten — only the public-facing
+        effect expires."""
+        return [
+            b for b in (self.badges or [])
+            if b not in self.BADGE_TIMESTAMP_FIELDS or self.badge_active(b)
+        ]
 
     @property
     def effective_price(self) -> Decimal:

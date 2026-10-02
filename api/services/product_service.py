@@ -189,13 +189,14 @@ class ProductService:
             wanted = [b.strip() for b in badges.split(',') if b.strip() in PRODUCT_BADGES]
             if wanted:
                 cond = Q()
-                new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
+                badge_cutoff = timezone.now() - Product.BADGE_WINDOW
                 for b in wanted:
-                    # 'new' is time-boxed (see Product.save/effective_badges)
-                    # — otherwise ?badges=new would return products whose own
-                    # serialized `badges` no longer lists 'new' at all.
-                    if b == 'new':
-                        cond |= Q(badges__contains=[b], new_badge_set_at__gte=new_cutoff)
+                    # Time-boxed badges (see Product.save/effective_badges)
+                    # — otherwise e.g. ?badges=new would return products
+                    # whose own serialized `badges` no longer lists it at all.
+                    ts_field = Product.BADGE_TIMESTAMP_FIELDS.get(b)
+                    if ts_field:
+                        cond |= Q(**{'badges__contains': [b], f'{ts_field}__gte': badge_cutoff})
                     else:
                         cond |= Q(badges__contains=[b])
                 qs = qs.filter(cond)
@@ -215,10 +216,10 @@ class ProductService:
             # "New Released" is the New badge, not just recency — only
             # products the admin has actually tagged 'new' show up here,
             # ordered by creation date among themselves. The badge itself
-            # expires NEW_BADGE_WINDOW after being set (see Product.save/
+            # expires BADGE_WINDOW after being set (see Product.save/
             # effective_badges) so a product nobody's touched in months
             # doesn't stay "new" forever.
-            new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
+            new_cutoff = timezone.now() - Product.BADGE_WINDOW
             qs = qs.filter(badges__contains=['new'], new_badge_set_at__gte=new_cutoff).order_by('-created_at')
         elif ordering in ('price_asc', 'price_desc'):
             # _effective_price is already annotated above (_with_effective_price)
@@ -270,15 +271,15 @@ class ProductService:
                 qs = qs.annotate(_affinity=affinity)
                 order_by.append('-_affinity')
 
-        # 'new' only counts toward top priority within its NEW_BADGE_WINDOW
-        # (see Product.save/effective_badges) — otherwise a product tagged
-        # 'new' once and never revisited would outrank genuinely fresh or
-        # popular items forever.
-        new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
+        # Each time-boxed badge only counts toward priority within its
+        # BADGE_WINDOW (see Product.save/effective_badges) — otherwise a
+        # product tagged once and never revisited would outrank genuinely
+        # fresh or popular items forever.
+        badge_cutoff = timezone.now() - Product.BADGE_WINDOW
         badge_priority = Case(
-            When(badges__contains=['new'], new_badge_set_at__gte=new_cutoff, then=Value(3)),
-            When(badges__contains=['flash_sale'], then=Value(2)),
-            When(badges__contains=['trendy'], then=Value(1)),
+            When(badges__contains=['new'], new_badge_set_at__gte=badge_cutoff, then=Value(3)),
+            When(badges__contains=['flash_sale'], flash_sale_badge_set_at__gte=badge_cutoff, then=Value(2)),
+            When(badges__contains=['trendy'], trendy_badge_set_at__gte=badge_cutoff, then=Value(1)),
             default=Value(0),
             output_field=IntegerField(),
         )
