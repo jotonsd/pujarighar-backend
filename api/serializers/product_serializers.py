@@ -108,6 +108,17 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f'Unknown badge(s): {", ".join(invalid)}')
         return value
 
+    def to_representation(self, instance):
+        # 'new' is dropped from the OUTPUT once its 2-week window has
+        # elapsed (see Product.effective_badges/new_badge_active) — the
+        # stored field itself is untouched here, so a later save that
+        # doesn't re-include 'new' in the submitted badges (because the
+        # admin form now shows it unchecked) is what actually clears it,
+        # not this read path.
+        data = super().to_representation(instance)
+        data['badges'] = instance.effective_badges()
+        return data
+
     class Meta:
         model  = Product
         fields = [

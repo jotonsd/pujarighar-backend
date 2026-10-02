@@ -189,8 +189,15 @@ class ProductService:
             wanted = [b.strip() for b in badges.split(',') if b.strip() in PRODUCT_BADGES]
             if wanted:
                 cond = Q()
+                new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
                 for b in wanted:
-                    cond |= Q(badges__contains=[b])
+                    # 'new' is time-boxed (see Product.save/effective_badges)
+                    # — otherwise ?badges=new would return products whose own
+                    # serialized `badges` no longer lists 'new' at all.
+                    if b == 'new':
+                        cond |= Q(badges__contains=[b], new_badge_set_at__gte=new_cutoff)
+                    else:
+                        cond |= Q(badges__contains=[b])
                 qs = qs.filter(cond)
         if payment_method in ('CASH', 'CREDIT'):
             # "Cash stock" / "credit stock" — how the product's stock on hand
@@ -207,8 +214,12 @@ class ProductService:
         if ordering == 'newest':
             # "New Released" is the New badge, not just recency — only
             # products the admin has actually tagged 'new' show up here,
-            # ordered by creation date among themselves.
-            qs = qs.filter(badges__contains=['new']).order_by('-created_at')
+            # ordered by creation date among themselves. The badge itself
+            # expires NEW_BADGE_WINDOW after being set (see Product.save/
+            # effective_badges) so a product nobody's touched in months
+            # doesn't stay "new" forever.
+            new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
+            qs = qs.filter(badges__contains=['new'], new_badge_set_at__gte=new_cutoff).order_by('-created_at')
         elif ordering in ('price_asc', 'price_desc'):
             # _effective_price is already annotated above (_with_effective_price)
             qs = qs.order_by('_effective_price' if ordering == 'price_asc' else '-_effective_price')
@@ -259,8 +270,13 @@ class ProductService:
                 qs = qs.annotate(_affinity=affinity)
                 order_by.append('-_affinity')
 
+        # 'new' only counts toward top priority within its NEW_BADGE_WINDOW
+        # (see Product.save/effective_badges) — otherwise a product tagged
+        # 'new' once and never revisited would outrank genuinely fresh or
+        # popular items forever.
+        new_cutoff = timezone.now() - Product.NEW_BADGE_WINDOW
         badge_priority = Case(
-            When(badges__contains=['new'], then=Value(3)),
+            When(badges__contains=['new'], new_badge_set_at__gte=new_cutoff, then=Value(3)),
             When(badges__contains=['flash_sale'], then=Value(2)),
             When(badges__contains=['trendy'], then=Value(1)),
             default=Value(0),

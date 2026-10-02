@@ -1,5 +1,6 @@
 import secrets
 import string
+from datetime import timedelta
 from decimal import Decimal, ROUND_CEILING
 from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
@@ -252,6 +253,15 @@ class Product(BaseModel):
     # the product form, not computed/derived, so they stay exactly as intended
     # until changed. A list since a product can carry more than one badge.
     badges = models.JSONField(default=list, blank=True)
+    # When 'new' was last (re-)added to `badges` — NOT touched by unrelated
+    # saves (price/stock/etc.), only by badges actually transitioning from
+    # not-having 'new' to having it (see save() below). Powers NEW_BADGE_WINDOW
+    # below: the 'new' badge is only honored (shown/ranked) for a limited time
+    # after being set, not forever, so it doesn't lose meaning on old stock the
+    # admin just never got around to un-tagging.
+    new_badge_set_at = models.DateTimeField(null=True, blank=True)
+
+    NEW_BADGE_WINDOW = timedelta(weeks=2)
 
     class Meta:
         ordering = ['-created_at']
@@ -279,7 +289,41 @@ class Product(BaseModel):
                 n += 1
                 slug = f'{base}-{n}'
             self.slug = slug
+
+        # 'new' badge timestamp: only (re)stamped the moment 'new' transitions
+        # from absent to present — a save that merely keeps 'new' already
+        # present (editing price, stock, etc. with the badge untouched)
+        # must NOT push the 2-week window out, or it would never expire on a
+        # product the admin keeps editing for unrelated reasons. Admins who
+        # want to refresh an expired 'new' badge just toggle it off and back
+        # on (or re-check it in the badge picker) to retrigger this.
+        has_new = 'new' in (self.badges or [])
+        if has_new:
+            had_new_before = (
+                Product.objects.filter(pk=self.pk).values_list('badges', flat=True).first()
+                if self.pk else None
+            )
+            if not (had_new_before and 'new' in had_new_before):
+                self.new_badge_set_at = timezone.now()
+        else:
+            self.new_badge_set_at = None
+
         super().save(*args, **kwargs)
+
+    @property
+    def new_badge_active(self) -> bool:
+        return bool(self.new_badge_set_at) and timezone.now() - self.new_badge_set_at < self.NEW_BADGE_WINDOW
+
+    def effective_badges(self) -> list:
+        """`badges` as customer-facing code should actually honor — 'new'
+        dropped once its 2-week window has elapsed, everything else passed
+        through unchanged. Admin-side (BadgePicker) still reads the raw
+        `badges` field as-is, so the admin's original toggle choice isn't
+        silently rewritten — only the public-facing effect expires."""
+        badges = list(self.badges or [])
+        if 'new' in badges and not self.new_badge_active:
+            badges.remove('new')
+        return badges
 
     @property
     def effective_price(self) -> Decimal:
