@@ -9,20 +9,48 @@ class Migration(migrations.Migration):
         ('api', '0109_alter_promocode_scope'),
     ]
 
+    # Uses raw idempotent SQL (IF NOT EXISTS) instead of plain AddField —
+    # this exact field set was briefly shipped under a different migration
+    # name earlier (a single `new_badge_set_at` column, since renamed/
+    # restructured locally into three dedicated columns before this file's
+    # number was reused), so some environments already have `new_badge_set_at`
+    # while others have none of the three. AddField would hard-fail with
+    # "column already exists" wherever that's true, aborting before the
+    # other two columns could be added. SeparateDatabaseAndState keeps
+    # Django's model state in sync (so makemigrations/ORM behave normally)
+    # while the actual DB change is safe to (re-)run anywhere.
     operations = [
-        migrations.AddField(
-            model_name='product',
-            name='flash_sale_badge_set_at',
-            field=models.DateTimeField(blank=True, null=True),
-        ),
-        migrations.AddField(
-            model_name='product',
-            name='new_badge_set_at',
-            field=models.DateTimeField(blank=True, null=True),
-        ),
-        migrations.AddField(
-            model_name='product',
-            name='trendy_badge_set_at',
-            field=models.DateTimeField(blank=True, null=True),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='product',
+                    name='flash_sale_badge_set_at',
+                    field=models.DateTimeField(blank=True, null=True),
+                ),
+                migrations.AddField(
+                    model_name='product',
+                    name='new_badge_set_at',
+                    field=models.DateTimeField(blank=True, null=True),
+                ),
+                migrations.AddField(
+                    model_name='product',
+                    name='trendy_badge_set_at',
+                    field=models.DateTimeField(blank=True, null=True),
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=(
+                        'ALTER TABLE api_product ADD COLUMN IF NOT EXISTS new_badge_set_at timestamp with time zone NULL; '
+                        'ALTER TABLE api_product ADD COLUMN IF NOT EXISTS trendy_badge_set_at timestamp with time zone NULL; '
+                        'ALTER TABLE api_product ADD COLUMN IF NOT EXISTS flash_sale_badge_set_at timestamp with time zone NULL;'
+                    ),
+                    reverse_sql=(
+                        'ALTER TABLE api_product DROP COLUMN IF EXISTS new_badge_set_at; '
+                        'ALTER TABLE api_product DROP COLUMN IF EXISTS trendy_badge_set_at; '
+                        'ALTER TABLE api_product DROP COLUMN IF EXISTS flash_sale_badge_set_at;'
+                    ),
+                ),
+            ],
         ),
     ]
