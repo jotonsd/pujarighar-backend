@@ -96,6 +96,12 @@ class User(AbstractUser):
     # values; multiple NULLs are allowed by both Postgres and MySQL.
     email              = models.EmailField(unique=True, null=True, blank=True)
     phone              = models.CharField(max_length=15, unique=True, null=True, blank=True)
+    # Set only for accounts created via Facebook Login for Business (see
+    # auth_views.facebook_login) — that product can't grant the `email`
+    # permission at all (it's scoped to business-asset access, not personal
+    # profile data), so those accounts have no email to key get_or_create on
+    # and need this instead to recognize a returning user on their next login.
+    facebook_id        = models.CharField(max_length=50, unique=True, null=True, blank=True)
     role               = models.ForeignKey(Role, on_delete=models.PROTECT, related_name='users')
     preferred_language = models.CharField(
         max_length=5,
@@ -129,7 +135,7 @@ class User(AbstractUser):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.email
+        return self.email or self.phone or f'user-{self.id}'
 
 
 class Profile(models.Model):

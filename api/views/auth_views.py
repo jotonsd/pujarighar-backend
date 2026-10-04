@@ -150,11 +150,16 @@ def logout(request):
 token_refresh = TokenRefreshView.as_view()
 
 
-def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: str, is_mobile_app: bool = False):
-    """Shared get-or-create + sign-in logic for social login providers. Returns
-    the User, or None if the provider didn't give us an email to key on."""
+def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: str, is_mobile_app: bool = False, facebook_id: str = ''):
+    """Shared get-or-create + sign-in logic for social login providers.
+    Normally keyed on email. Facebook Login for Business can't grant the
+    `email` permission at all (see facebook_login) — when `facebook_id` is
+    given and there's no email, the account is keyed on that instead, so a
+    returning user is still recognized on their next login. Returns the
+    User, or None if neither an email nor a facebook_id was available to
+    key on at all."""
     email = (email or '').lower()
-    if not email:
+    if not email and not facebook_id:
         return None
 
     # role has no DB-level default — every self-registered account is a
@@ -163,12 +168,14 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
         code='CUSTOMER',
         defaults={'name_bn': 'গ্রাহক', 'name_en': 'Customer', 'is_system': True},
     )
+    lookup = {'email': email} if email else {'facebook_id': facebook_id}
     user, created = User.objects.get_or_create(
-        email=email,
+        **lookup,
         defaults={
             'is_active': True,
             'role': customer_role,
             'registered_via': 'MOBILE_APP' if is_mobile_app else 'WEBSITE',
+            **({'facebook_id': facebook_id} if email and facebook_id else {}),
         },
     )
 
@@ -181,14 +188,15 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
             profile.avatar = picture
         profile.save()
         _link_guest_orders(user)
-        mail_service.send_welcome(user)
-        logger.info(f"New user created via {provider_label} OAuth: {email}")
+        if email:
+            mail_service.send_welcome(user)
+        logger.info(f"New user created via {provider_label} OAuth: {email or facebook_id}")
     else:
         profile = user.profile
         if picture and not profile.avatar:
             profile.avatar = picture
             profile.save(update_fields=['avatar'])
-        logger.info(f"Existing user signed in via {provider_label} OAuth: {email}")
+        logger.info(f"Existing user signed in via {provider_label} OAuth: {email or facebook_id}")
 
     return user
 
@@ -268,18 +276,23 @@ def facebook_login(request):
         )
 
     picture = (data.get('picture') or {}).get('data', {}).get('url', '')
+    # Facebook Login for Business (the product this app uses — see
+    # frontend/src/lib/facebookSdk.ts) can't grant the `email` permission at
+    # all, so `email` here is expected to always be empty; `id` (Facebook's
+    # own user id) is what _oauth_login_or_create keys the account on instead.
     user = _oauth_login_or_create(
         data.get('email', ''), data.get('name', ''), picture, 'Facebook',
         is_mobile_app=request.headers.get('X-Client-Platform') == 'mobile_app',
+        facebook_id=data.get('id', ''),
     )
     if not user:
-        # Facebook only returns an email if the account has one verified and the
-        # user granted the `email` permission — neither is guaranteed.
+        # Facebook didn't return even an id — the access token itself must be
+        # invalid/expired, since `id` is always present for a valid token.
         return ApiResponse(
-            message="Facebook account has no email",
+            message="Facebook login failed",
             errors={
-                'message_bn': 'আপনার ফেসবুক অ্যাকাউন্টে কোনো যাচাইকৃত ইমেইল নেই। অনুগ্রহ করে অন্য পদ্ধতিতে লগইন করুন।',
-                'message_en': "Your Facebook account doesn't have a verified email. Please use another login method.",
+                'message_bn': 'ফেসবুক থেকে প্রয়োজনীয় তথ্য পাওয়া যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।',
+                'message_en': "Couldn't get the required info from Facebook. Please try again.",
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
