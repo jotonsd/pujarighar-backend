@@ -15,7 +15,8 @@ TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
                       'whatsapp_phone_number_id', 'whatsapp_business_account_id',
                       'whatsapp_access_token', 'whatsapp_app_secret', 'whatsapp_verify_token']
 INT_FIELDS         = ['email_port']
-BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled', 'whatsapp_enabled']
+BOOL_FIELDS        = ['email_use_tls', 'ai_ordering_enabled', 'whatsapp_enabled',
+                      'google_login_enabled', 'facebook_login_enabled']
 FILE_FIELDS        = ['logo', 'favicon']
 DECIMAL_FIELDS     = ['referral_bonus_amount', 'first_order_discount_percent', 'free_delivery_min_subtotal']
 
@@ -40,6 +41,10 @@ def _serialize(s: SiteSetting, request=None) -> dict:
         # Public — cart/checkout pages (including anonymous guest checkout)
         # show "free delivery over ৳X" messaging from this.
         'free_delivery_min_subtotal': str(s.free_delivery_min_subtotal),
+        # Public — the login/register pages (anonymous visitors) read these
+        # to decide whether to render the Google/Facebook buttons at all.
+        'google_login_enabled':   s.google_login_enabled,
+        'facebook_login_enabled': s.facebook_login_enabled,
     }
 
     user = getattr(request, 'user', None) if request else None

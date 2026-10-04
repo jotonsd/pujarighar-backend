@@ -1334,6 +1334,11 @@ class SiteSetting(models.Model):
     whatsapp_app_secret = models.CharField(max_length=255, blank=True, default='')
     whatsapp_verify_token = models.CharField(max_length=255, blank=True, default='')
     whatsapp_enabled = models.BooleanField(default=False)
+    # Lets the admin kill-switch either OAuth login/register button sitewide
+    # (website + frontend) without touching the Facebook/Google app config —
+    # e.g. while a provider's app review is pending or misbehaving.
+    google_login_enabled = models.BooleanField(default=True)
+    facebook_login_enabled = models.BooleanField(default=True)
 
     class Meta:
         verbose_name = 'Site Setting'

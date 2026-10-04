@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from api.models import Role, SalesOrder, User
+from api.models import Role, SalesOrder, SiteSetting, User
 from api.serializers.auth_serializers import (
     RegisterSerializer, LoginSerializer, ForgotPasswordSerializer, ResetPasswordSerializer,
 )
@@ -204,6 +204,16 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_login(request):
+    if not SiteSetting.get().google_login_enabled:
+        return ApiResponse(
+            message="Google login is disabled",
+            errors={
+                'message_bn': 'Google দিয়ে লগইন বর্তমানে বন্ধ আছে।',
+                'message_en': 'Google login is currently disabled.',
+            },
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     access_token = request.data.get('access_token', '')
     if not access_token:
         return ApiResponse(
@@ -250,6 +260,16 @@ def google_login(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def facebook_login(request):
+    if not SiteSetting.get().facebook_login_enabled:
+        return ApiResponse(
+            message="Facebook login is disabled",
+            errors={
+                'message_bn': 'Facebook দিয়ে লগইন বর্তমানে বন্ধ আছে।',
+                'message_en': 'Facebook login is currently disabled.',
+            },
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     access_token = request.data.get('access_token', '')
     if not access_token:
         return ApiResponse(
