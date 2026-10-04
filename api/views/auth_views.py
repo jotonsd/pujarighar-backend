@@ -175,6 +175,7 @@ def _oauth_login_or_create(email: str, name: str, picture: str, provider_label: 
             'is_active': True,
             'role': customer_role,
             'registered_via': 'MOBILE_APP' if is_mobile_app else 'WEBSITE',
+            'signup_provider': provider_label.upper(),
             **({'facebook_id': facebook_id} if email and facebook_id else {}),
         },
     )

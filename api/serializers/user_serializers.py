@@ -33,8 +33,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
-        fields = ['id', 'email', 'phone', 'role', 'preferred_language', 'is_active', 'date_joined', 'referral_code', 'registered_via', 'profile']
-        read_only_fields = ['id', 'date_joined', 'referral_code', 'registered_via']
+        fields = ['id', 'email', 'phone', 'role', 'preferred_language', 'is_active', 'date_joined', 'referral_code', 'registered_via', 'signup_provider', 'profile']
+        read_only_fields = ['id', 'date_joined', 'referral_code', 'registered_via', 'signup_provider']
 
 
 class AdminCreateUserSerializer(serializers.ModelSerializer):

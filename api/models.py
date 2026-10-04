@@ -124,6 +124,15 @@ class User(AbstractUser):
         choices=[('WEBSITE', 'Website'), ('MOBILE_APP', 'Mobile App')],
         default='WEBSITE',
     )
+    # Stamped once at signup (_oauth_login_or_create / RegisterSerializer.create)
+    # and never touched again — unlike facebook_id, which can get added to an
+    # existing account later if they link Facebook after signing up another
+    # way, this is purely "how the account was originally created."
+    signup_provider = models.CharField(
+        max_length=10,
+        choices=[('MANUAL', 'Manual'), ('GOOGLE', 'Google'), ('FACEBOOK', 'Facebook')],
+        default='MANUAL',
+    )
 
     USERNAME_FIELD  = 'email'
     REQUIRED_FIELDS = ['phone']
