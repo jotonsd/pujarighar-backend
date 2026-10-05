@@ -427,6 +427,10 @@ class OrderService:
 
     @transaction.atomic
     def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User, color: str = '') -> SalesOrder:
+        # Admin's manual "add item" picker is a single free-text field (staff
+        # correcting/setting a color on an existing order, not a translated
+        # customer-facing selection) — stored into both snapshot fields so it
+        # still displays consistently wherever color_bn/color_en are read.
         """Add a product to a not-yet-shipped order — same gate as
         update_item_quantity/delete_item. If the product's already on the
         order, bumps that line's quantity instead of creating a duplicate
@@ -448,7 +452,7 @@ class OrderService:
                 'message_en': 'Quantity must be greater than zero',
             })
 
-        existing = order.items.filter(product=product, color=color).first()
+        existing = order.items.filter(product=product, color_bn=color, color_en=color).first()
         if existing:
             return self.update_item_quantity(order, existing, existing.quantity + quantity, user)
 
@@ -461,7 +465,8 @@ class OrderService:
             unit_price=product.effective_price,
             quantity=quantity,
             line_total=product.effective_price * quantity,
-            color=color,
+            color_bn=color,
+            color_en=color,
         )
 
         self._recalc_order_totals(order)

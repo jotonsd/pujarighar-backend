@@ -13,7 +13,7 @@ class CartService:
         cart, _ = Cart.objects.get_or_create(user=user)
         return cart
 
-    def add_item(self, user, product: Product, quantity: Decimal, color: str = '') -> Cart:
+    def add_item(self, user, product: Product, quantity: Decimal, color_bn: str = '', color_en: str = '') -> Cart:
         cart = self.get_or_create_cart(user)
         # Two colors of the same product are two separate CartItem rows (see
         # unique_together), but stock is shared across colors — so the stock
@@ -21,9 +21,9 @@ class CartService:
         # lines (every color), not just the one line being touched, or a
         # customer could add N units of each color and blow past
         # stock_on_hand while each individual line looks fine.
-        existing = cart.items.filter(product=product, color=color).first()
+        existing = cart.items.filter(product=product, color_bn=color_bn, color_en=color_en).first()
         other_colors_quantity = sum(
-            (i.quantity for i in cart.items.filter(product=product).exclude(color=color)),
+            (i.quantity for i in cart.items.filter(product=product).exclude(color_bn=color_bn, color_en=color_en)),
             Decimal('0'),
         )
         total_quantity = (existing.quantity if existing else Decimal('0')) + quantity
@@ -32,8 +32,8 @@ class CartService:
             existing.quantity = total_quantity
             existing.save(update_fields=['quantity'])
         else:
-            CartItem.objects.create(cart=cart, product=product, quantity=quantity, color=color)
-        logger.info(f"Cart item added: user={user.email} product={product.sku} color={color!r} qty={quantity}")
+            CartItem.objects.create(cart=cart, product=product, quantity=quantity, color_bn=color_bn, color_en=color_en)
+        logger.info(f"Cart item added: user={user.email} product={product.sku} color={color_bn!r}/{color_en!r} qty={quantity}")
         return cart
 
     def update_item(self, cart: Cart, item_id: str, quantity: Decimal) -> Cart:

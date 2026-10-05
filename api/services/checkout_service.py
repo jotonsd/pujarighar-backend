@@ -84,7 +84,8 @@ class CheckoutService:
                 unit_price           = item.product.effective_price,
                 quantity             = item.quantity,
                 line_total           = item.product.effective_price * item.quantity,
-                color                = item.color,
+                color_bn             = item.color_bn,
+                color_en             = item.color_en,
             )
             self._deduct_stock(item.product, item.quantity, order.id, user)
 
@@ -137,7 +138,8 @@ class CheckoutService:
                 'unit_price':          str(item.product.effective_price),
                 'original_unit_price': str(item.product.original_price),
                 'line_total':          str(item.product.effective_price * item.quantity),
-                'color':               item.color,
+                'color_bn':            item.color_bn,
+                'color_en':            item.color_en,
             }
             for item in items
         ]

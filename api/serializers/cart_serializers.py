@@ -17,7 +17,7 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = CartItem
-        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'color',
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'color_bn', 'color_en',
                   'unit_price', 'original_unit_price', 'quantity', 'line_total', 'stock_on_hand',
                   'is_package', 'package_items', 'product_image', 'weight_kg']
         read_only_fields = ['id']
@@ -108,7 +108,8 @@ class CartSerializer(serializers.ModelSerializer):
 class AddToCartSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
-    color      = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
+    color_bn   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
+    color_en   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
 
     def validate(self, data):
         try:

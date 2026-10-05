@@ -427,11 +427,12 @@ class ProductImage(BaseModel):
     alt_bn  = models.CharField(max_length=200, blank=True)
     alt_en  = models.CharField(max_length=200, blank=True)
     order   = models.PositiveIntegerField(default=0)
-    # Optional free-text tag (e.g. "Red", "লাল") — lets the storefront group
+    # Optional bilingual tag (e.g. "Red"/"লাল") — lets the storefront group
     # this product's images into color swatches. Display-only: color doesn't
     # affect stock or price, which stay shared across the whole Product (see
     # Product.stock_on_hand / effective_price) — just which photos show.
-    color_label = models.CharField(max_length=40, blank=True, default='')
+    color_bn = models.CharField(max_length=40, blank=True, default='')
+    color_en = models.CharField(max_length=40, blank=True, default='')
 
     class Meta:
         ordering = ['order']
@@ -560,14 +561,15 @@ class CartItem(BaseModel):
     cart     = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
     product  = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.DecimalField(max_digits=10, decimal_places=3)
-    # Free-text snapshot of the ProductImage.color_label the customer picked
-    # — not a FK, doesn't affect stock/price (both stay shared across colors
-    # on Product), just tells fulfillment which color to pack.
-    color = models.CharField(max_length=40, blank=True, default='')
+    # Bilingual snapshot of the ProductImage.color_bn/color_en the customer
+    # picked — not a FK, doesn't affect stock/price (both stay shared across
+    # colors on Product), just tells fulfillment which color to pack.
+    color_bn = models.CharField(max_length=40, blank=True, default='')
+    color_en = models.CharField(max_length=40, blank=True, default='')
 
     class Meta:
         # Two colors of the same product are two separate cart lines.
-        unique_together = [['cart', 'product', 'color']]
+        unique_together = [['cart', 'product', 'color_bn', 'color_en']]
         ordering        = ['created_at']
 
     def __str__(self):
@@ -738,8 +740,9 @@ class SalesOrderItem(models.Model):
     quantity            = models.DecimalField(max_digits=10, decimal_places=3)
     line_total          = models.DecimalField(max_digits=12, decimal_places=2)
     # Snapshot of the color picked at add-to-cart/checkout time — see
-    # CartItem.color for the full rationale.
-    color               = models.CharField(max_length=40, blank=True, default='')
+    # CartItem.color_bn/color_en for the full rationale.
+    color_bn             = models.CharField(max_length=40, blank=True, default='')
+    color_en             = models.CharField(max_length=40, blank=True, default='')
 
 
 class Exchange(BaseModel):

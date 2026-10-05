@@ -11,7 +11,7 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = SalesOrderItem
-        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_image', 'color',
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_image', 'color_bn', 'color_en',
                   'original_unit_price', 'unit_price', 'quantity', 'line_total',
                   'is_package', 'package_items']
 
@@ -379,6 +379,9 @@ class PartialDeliverSerializer(serializers.Serializer):
 class AddOrderItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    # Single free-text field — staff correcting/setting a color on an
+    # existing order, not a translated customer-facing selection (see
+    # OrderService.add_item, which stores this into both color_bn/color_en).
     color      = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
 
     def validate_product_id(self, value):

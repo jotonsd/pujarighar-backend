@@ -316,7 +316,8 @@ class SSLCommerzService:
                 unit_price           = Decimal(snap['unit_price']),
                 quantity             = Decimal(snap['quantity']),
                 line_total           = Decimal(snap['line_total']),
-                color                = snap.get('color', ''),
+                color_bn             = snap.get('color_bn', ''),
+                color_en             = snap.get('color_en', ''),
             )
 
         self._deduct_stock(order)

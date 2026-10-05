@@ -201,10 +201,12 @@ def add_product_image(request, pk):
         )
 
     files = files[:slots]
-    # Index-aligned with `images` — one color label per uploaded file (the
-    # multipart form repeats the `colors` key once per file, in the same
-    # order). Missing/short lists just leave those images untagged.
-    colors = request.data.getlist('colors') if hasattr(request.data, 'getlist') else []
+    # Index-aligned with `images` — one color label pair per uploaded file
+    # (the multipart form repeats the `colors_bn`/`colors_en` keys once per
+    # file, in the same order). Missing/short lists just leave those images
+    # untagged.
+    colors_bn = request.data.getlist('colors_bn') if hasattr(request.data, 'getlist') else []
+    colors_en = request.data.getlist('colors_en') if hasattr(request.data, 'getlist') else []
     created = []
     for i, file in enumerate(files):
         img = ProductImage.objects.create(
@@ -213,7 +215,8 @@ def add_product_image(request, pk):
             alt_bn=request.data.get('alt_bn', ''),
             alt_en=request.data.get('alt_en', ''),
             order=current_count + i,
-            color_label=colors[i] if i < len(colors) else '',
+            color_bn=colors_bn[i] if i < len(colors_bn) else '',
+            color_en=colors_en[i] if i < len(colors_en) else '',
         )
         created.append(img)
 
@@ -235,9 +238,15 @@ def delete_product_image(request, pk, image_id):
     if request.method == 'PATCH':
         # Re-tag an already-uploaded image's color without re-uploading it —
         # used by the edit-product page.
-        if 'color_label' in request.data:
-            img.color_label = request.data.get('color_label', '')
-            img.save(update_fields=['color_label'])
+        updated = []
+        if 'color_bn' in request.data:
+            img.color_bn = request.data.get('color_bn', '')
+            updated.append('color_bn')
+        if 'color_en' in request.data:
+            img.color_en = request.data.get('color_en', '')
+            updated.append('color_en')
+        if updated:
+            img.save(update_fields=updated)
         return ApiResponse(message="Image updated", data=ProductImageSerializer(img, context=_ctx(request)).data)
 
     img.image.delete(save=False)
