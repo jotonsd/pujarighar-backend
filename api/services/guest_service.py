@@ -152,6 +152,7 @@ class GuestCheckoutService:
                 unit_price           = item['product'].effective_price,
                 quantity             = item['quantity'],
                 line_total           = item['product'].effective_price * item['quantity'],
+                color                = item.get('color', ''),
             )
             # Same deferral as CheckoutService.checkout — COD (and POS,
             # which has already collected payment in person regardless of
@@ -231,6 +232,7 @@ class GuestCheckoutService:
                 'unit_price':          str(item['product'].effective_price),
                 'original_unit_price': str(item['product'].original_price),
                 'line_total':          str(item['product'].effective_price * item['quantity']),
+                'color':               item.get('color', ''),
             }
             for item in items
         ]

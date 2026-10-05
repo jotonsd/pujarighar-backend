@@ -201,6 +201,10 @@ def add_product_image(request, pk):
         )
 
     files = files[:slots]
+    # Index-aligned with `images` — one color label per uploaded file (the
+    # multipart form repeats the `colors` key once per file, in the same
+    # order). Missing/short lists just leave those images untagged.
+    colors = request.data.getlist('colors') if hasattr(request.data, 'getlist') else []
     created = []
     for i, file in enumerate(files):
         img = ProductImage.objects.create(
@@ -209,6 +213,7 @@ def add_product_image(request, pk):
             alt_bn=request.data.get('alt_bn', ''),
             alt_en=request.data.get('alt_en', ''),
             order=current_count + i,
+            color_label=colors[i] if i < len(colors) else '',
         )
         created.append(img)
 
@@ -219,16 +224,25 @@ def add_product_image(request, pk):
     )
 
 
-@api_view(['DELETE'])
+@api_view(['DELETE', 'PATCH'])
 @permission_classes([IsAuthenticated, has_permission('products', 'edit')])
 def delete_product_image(request, pk, image_id):
     try:
         img = ProductImage.objects.get(pk=image_id, product_id=pk)
-        img.image.delete(save=False)
-        img.delete()
-        return ApiResponse(message="Image deleted")
     except ProductImage.DoesNotExist:
         return ApiResponse(message="Image not found", errors="Not found", status_code=404)
+
+    if request.method == 'PATCH':
+        # Re-tag an already-uploaded image's color without re-uploading it —
+        # used by the edit-product page.
+        if 'color_label' in request.data:
+            img.color_label = request.data.get('color_label', '')
+            img.save(update_fields=['color_label'])
+        return ApiResponse(message="Image updated", data=ProductImageSerializer(img, context=_ctx(request)).data)
+
+    img.image.delete(save=False)
+    img.delete()
+    return ApiResponse(message="Image deleted")
 
 
 @api_view(['GET'])

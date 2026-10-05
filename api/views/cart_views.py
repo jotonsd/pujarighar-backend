@@ -38,6 +38,7 @@ def add_to_cart(request):
             request.user,
             serializer.validated_data['product'],
             serializer.validated_data['quantity'],
+            serializer.validated_data.get('color', ''),
         )
         return ApiResponse(message="Item added to cart", data=CartSerializer(cart, context={'request': request}).data, status_code=201)
     except DRFValidationError as e:

@@ -13,27 +13,36 @@ class CartService:
         cart, _ = Cart.objects.get_or_create(user=user)
         return cart
 
-    def add_item(self, user, product: Product, quantity: Decimal) -> Cart:
+    def add_item(self, user, product: Product, quantity: Decimal, color: str = '') -> Cart:
         cart = self.get_or_create_cart(user)
-        # _validate_stock must see the RESULTING total for this line, not
-        # just the delta being added this call — checking only `quantity`
-        # (always 1 from the product card's "+" button) let it pass every
-        # single tap regardless of how much was already in the cart,
-        # letting the line grow past stock_on_hand indefinitely.
-        existing = cart.items.filter(product=product).first()
+        # Two colors of the same product are two separate CartItem rows (see
+        # unique_together), but stock is shared across colors — so the stock
+        # check must see the RESULTING total across ALL of this product's
+        # lines (every color), not just the one line being touched, or a
+        # customer could add N units of each color and blow past
+        # stock_on_hand while each individual line looks fine.
+        existing = cart.items.filter(product=product, color=color).first()
+        other_colors_quantity = sum(
+            (i.quantity for i in cart.items.filter(product=product).exclude(color=color)),
+            Decimal('0'),
+        )
         total_quantity = (existing.quantity if existing else Decimal('0')) + quantity
-        self._validate_stock(product, total_quantity)
+        self._validate_stock(product, total_quantity + other_colors_quantity)
         if existing:
             existing.quantity = total_quantity
             existing.save(update_fields=['quantity'])
         else:
-            CartItem.objects.create(cart=cart, product=product, quantity=quantity)
-        logger.info(f"Cart item added: user={user.email} product={product.sku} qty={quantity}")
+            CartItem.objects.create(cart=cart, product=product, quantity=quantity, color=color)
+        logger.info(f"Cart item added: user={user.email} product={product.sku} color={color!r} qty={quantity}")
         return cart
 
     def update_item(self, cart: Cart, item_id: str, quantity: Decimal) -> Cart:
         item = cart.items.get(pk=item_id)
-        self._validate_stock(item.product, quantity)
+        other_colors_quantity = sum(
+            (i.quantity for i in cart.items.filter(product=item.product).exclude(pk=item.pk)),
+            Decimal('0'),
+        )
+        self._validate_stock(item.product, quantity + other_colors_quantity)
         item.quantity = quantity
         item.save(update_fields=['quantity'])
         return cart

@@ -426,7 +426,7 @@ class OrderService:
         return order
 
     @transaction.atomic
-    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User) -> SalesOrder:
+    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User, color: str = '') -> SalesOrder:
         """Add a product to a not-yet-shipped order — same gate as
         update_item_quantity/delete_item. If the product's already on the
         order, bumps that line's quantity instead of creating a duplicate
@@ -448,7 +448,7 @@ class OrderService:
                 'message_en': 'Quantity must be greater than zero',
             })
 
-        existing = order.items.filter(product=product).first()
+        existing = order.items.filter(product=product, color=color).first()
         if existing:
             return self.update_item_quantity(order, existing, existing.quantity + quantity, user)
 
@@ -461,6 +461,7 @@ class OrderService:
             unit_price=product.effective_price,
             quantity=quantity,
             line_total=product.effective_price * quantity,
+            color=color,
         )
 
         self._recalc_order_totals(order)

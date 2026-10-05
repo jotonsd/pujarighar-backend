@@ -6,6 +6,7 @@ from api.models import Product
 class GuestCartItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    color      = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
 
     def validate(self, data):
         try:

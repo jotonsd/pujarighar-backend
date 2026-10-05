@@ -515,7 +515,7 @@ def add_order_item(request, pk):
 
     try:
         product = Product.objects.get(pk=d['product_id'])
-        updated = _svc.add_item(order, product, d['quantity'], request.user)
+        updated = _svc.add_item(order, product, d['quantity'], request.user, d.get('color', ''))
         return ApiResponse(message='Item added', data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f'Add order item error: {e}', exc_info=True)
