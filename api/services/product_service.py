@@ -508,16 +508,39 @@ class StockService:
 
         product = movement.product
         old_quantity = movement.quantity
+        old_variant = movement.variant
 
         new_quantity = data.get('quantity', movement.quantity)
         if movement.movement_type == 'SUPPLIER_RETURN':
             new_quantity = -abs(new_quantity)
 
+        new_variant = old_variant
+        if 'variant_id' in data:
+            if data['variant_id']:
+                new_variant = ProductVariant.objects.filter(pk=data['variant_id'], product=product).first()
+                if not new_variant:
+                    raise ValidationError({
+                        'message_bn': 'ভ্যারিয়েন্ট পাওয়া যায়নি',
+                        'message_en': 'Variant not found',
+                    })
+            else:
+                new_variant = None
+
         # Edit-safe stock check — movement.clean()'s own check assumes a
         # not-yet-saved row (stock_on_hand doesn't include it yet), but here
         # the OLD quantity is already counted in stock_on_hand, so we swap it
-        # for the new one rather than just adding the new one on top.
-        projected = product.stock_on_hand - old_quantity + new_quantity
+        # for the new one rather than just adding the new one on top. Scoped
+        # to whichever variant (or the product itself) this movement
+        # actually targets — reassigning to a different variant checks the
+        # NEW variant's stock, not the product's combined total.
+        if new_variant and new_variant.id == (old_variant.id if old_variant else None):
+            projected = new_variant.stock_on_hand - old_quantity + new_quantity
+        elif new_variant:
+            projected = new_variant.stock_on_hand + new_quantity
+        elif old_variant:
+            projected = product.stock_on_hand - old_quantity + new_quantity
+        else:
+            projected = product.stock_on_hand - old_quantity + new_quantity
         if projected < 0:
             raise ValidationError({
                 'message_bn': 'পর্যাপ্ত স্টক নেই',
@@ -525,6 +548,7 @@ class StockService:
             })
 
         movement.quantity = new_quantity
+        movement.variant = new_variant
         if 'unit_cost' in data:
             movement.unit_cost = data['unit_cost']
         if 'payment_method' in data:
@@ -545,18 +569,23 @@ class StockService:
 
         self._sync_movement_journal(movement)
 
-        # Only the most recent PURCHASE for this product drives its current
-        # cost/price — an older one being corrected shouldn't overwrite a
-        # price a newer purchase already superseded.
+        # Only the most recent PURCHASE for this variant (or product, when
+        # variant-less) drives its current cost/price — an older one being
+        # corrected shouldn't overwrite a price a newer purchase already
+        # superseded.
         if movement.movement_type == 'PURCHASE':
-            latest = product.stock_movements.filter(movement_type='PURCHASE').order_by('-created_at').first()
+            latest_qs = product.stock_movements.filter(movement_type='PURCHASE', variant=new_variant)
+            latest = latest_qs.order_by('-created_at').first()
             if latest and latest.id == movement.id:
                 product.cost_price = movement.unit_cost
+                product.save(update_fields=['cost_price'])
                 if data.get('unit_price'):
-                    product.unit_price = data['unit_price']
-                    product.save(update_fields=['cost_price', 'unit_price'])
-                else:
-                    product.save(update_fields=['cost_price'])
+                    if new_variant:
+                        new_variant.price_override = data['unit_price']
+                        new_variant.save(update_fields=['price_override'])
+                    else:
+                        product.unit_price = data['unit_price']
+                        product.save(update_fields=['unit_price'])
 
         logger.info(f"Stock movement corrected: {movement.id} ({product.sku} {movement.movement_type})")
         return movement
