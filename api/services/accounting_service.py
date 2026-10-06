@@ -503,6 +503,7 @@ class AccountingService:
             # new
             'this_month_revenue':    str(this_month_rev),
             'last_month_revenue':    str(last_month_rev),
+            'this_month_expense':    str(this_month_exp),
             'this_month_profit':     str(this_month_profit),
             'revenue_change_pct':    rev_change_pct,
             'supplier_outstanding':  str(supplier_outstanding),
