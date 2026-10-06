@@ -1,3 +1,4 @@
+import itertools
 import logging
 from collections import defaultdict
 from datetime import timedelta
@@ -8,7 +9,11 @@ from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, 
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-from api.models import Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView, StockMovement, Supplier, PRODUCT_BADGES
+from api.models import (
+    Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView,
+    StockMovement, Supplier, PRODUCT_BADGES,
+    VariantAttributeType, VariantAttributeValue, ProductVariant, ProductVariantValue,
+)
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.utils.journal_number import next_entry_number
 
@@ -141,7 +146,7 @@ class ProductService:
         )
 
     def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, payment_method=None, personalize_user=None, personalize_guest_id=''):
-        qs = Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items')
+        qs = Product.objects.select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items', 'variants__attribute_values__attribute_value__attribute_type')
         qs = self._with_ratings(qs)
         qs = self._with_stock(qs)
         qs = self._with_effective_price(qs)
@@ -333,7 +338,7 @@ class ProductService:
         if not result_ids:
             return Product.objects.none()
 
-        qs = Product.objects.filter(id__in=result_ids).select_related('category', 'brand').prefetch_related('images', 'package_items')
+        qs = Product.objects.filter(id__in=result_ids).select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items', 'variants__attribute_values__attribute_value__attribute_type')
         qs = self._with_ratings(qs)
 
         # Preserve the category-then-popularity order computed above.
@@ -356,7 +361,7 @@ class ProductService:
         if not result_ids:
             return Product.objects.none()
 
-        qs = Product.objects.filter(id__in=result_ids).select_related('category', 'brand').prefetch_related('images', 'package_items')
+        qs = Product.objects.filter(id__in=result_ids).select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items', 'variants__attribute_values__attribute_value__attribute_type')
         qs = self._with_ratings(qs)
         preserve = Case(
             *[When(id=pid, then=Value(i)) for i, pid in enumerate(result_ids)],
@@ -387,12 +392,12 @@ class ProductService:
 
     def get_product(self, pk: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
+            Product.objects.select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items__component__images', 'variants__attribute_values__attribute_value__attribute_type')
         ).get(pk=pk)
 
     def get_product_by_slug(self, slug: str) -> Product:
         return self._with_ratings(
-            Product.objects.select_related('category', 'brand').prefetch_related('images', 'package_items__component__images')
+            Product.objects.select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items__component__images', 'variants__attribute_values__attribute_value__attribute_type')
         ).get(slug=slug, is_active=True)
 
     def create_product(self, validated_data: dict) -> Product:
@@ -427,7 +432,8 @@ class StockService:
                      supplier_id: str = None,
                      supplier_name: str = '',
                      payment_method: str = 'CASH',
-                     date=None) -> StockMovement:
+                     date=None,
+                     variant=None) -> StockMovement:
         supplier = None
         if supplier_id:
             try:
@@ -448,7 +454,7 @@ class StockService:
             created_at = timezone.localtime(created_at).replace(year=date.year, month=date.month, day=date.day)
 
         movement = StockMovement(
-            product=product, movement_type=movement_type,
+            product=product, variant=variant, movement_type=movement_type,
             quantity=quantity, unit_cost=unit_cost,
             supplier=supplier,
             supplier_name=supplier_name if not supplier else (supplier.name_bn or supplier.name_en),
@@ -460,17 +466,26 @@ class StockService:
         movement.save()
 
         if movement_type == 'PURCHASE' and unit_cost > 0:
+            # Buying price always updates the product's own cost_price
+            # (there's only one cost basis, variants don't each carry their
+            # own). The *selling* price, though, goes onto the variant's
+            # price_override when one is set — same "stock+price together,
+            # one action" pattern as the non-variant path, just targeting
+            # the variant's override instead of product.unit_price.
             product.cost_price = unit_cost
+            product.save(update_fields=['cost_price'])
             if unit_price is not None and unit_price > 0:
-                product.unit_price = unit_price
-                product.save(update_fields=['cost_price', 'unit_price'])
-            else:
-                product.save(update_fields=['cost_price'])
+                if variant:
+                    variant.price_override = unit_price
+                    variant.save(update_fields=['price_override'])
+                else:
+                    product.unit_price = unit_price
+                    product.save(update_fields=['unit_price'])
             self._create_purchase_journal(product, quantity, unit_cost, movement, user, payment_method)
         elif movement_type == 'SUPPLIER_RETURN' and unit_cost > 0:
             self._create_supplier_return_journal(product, abs(quantity), unit_cost, movement, user, payment_method)
 
-        logger.info(f"Stock adjusted: {product.sku} {movement_type} {quantity}")
+        logger.info(f"Stock adjusted: {product.sku} variant={variant.id if variant else None} {movement_type} {quantity}")
         return movement
 
     @transaction.atomic
@@ -712,3 +727,116 @@ class StockService:
 
     def delete_package_item(self, item: ProductPackageItem) -> None:
         item.delete()
+
+
+class VariantService:
+    """Admin management of the reusable attribute-type/value library and
+    per-product variants — see VariantAttributeType's docstring in
+    models.py for the design (adding a new type like "Weight" later is a
+    data row here, not a schema/code change)."""
+
+    def list_attribute_types(self, include_inactive: bool = False):
+        qs = VariantAttributeType.objects.all()
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def create_attribute_type(self, name_bn: str, name_en: str, code: str, has_bilingual_values: bool) -> VariantAttributeType:
+        return VariantAttributeType.objects.create(
+            name_bn=name_bn, name_en=name_en, code=code, has_bilingual_values=has_bilingual_values,
+        )
+
+    def update_attribute_type(self, attribute_type: VariantAttributeType, data: dict) -> VariantAttributeType:
+        fields = []
+        for field in ('name_bn', 'name_en', 'has_bilingual_values', 'is_active'):
+            if field in data:
+                setattr(attribute_type, field, data[field])
+                fields.append(field)
+        if fields:
+            attribute_type.save(update_fields=fields)
+        return attribute_type
+
+    def delete_attribute_type(self, attribute_type: VariantAttributeType) -> None:
+        # PROTECT on VariantAttributeValue.attribute_type raises
+        # ProtectedError if any value still references this type — the
+        # view catches that and turns it into a friendly message, same
+        # shape as every other "can't delete, still in use" case.
+        attribute_type.delete()
+
+    def list_attribute_values(self, attribute_type_id: str = None, include_inactive: bool = False):
+        qs = VariantAttributeValue.objects.select_related('attribute_type')
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        if attribute_type_id:
+            qs = qs.filter(attribute_type_id=attribute_type_id)
+        return qs
+
+    def update_attribute_value(self, value: VariantAttributeValue, data: dict) -> VariantAttributeValue:
+        fields = []
+        for field in ('value_bn', 'value_en', 'is_active'):
+            if field in data:
+                setattr(value, field, data[field])
+                fields.append(field)
+        if fields:
+            value.save(update_fields=fields)
+        return value
+
+    def delete_attribute_value(self, value: VariantAttributeValue) -> None:
+        value.delete()
+
+    def create_attribute_value(self, attribute_type: VariantAttributeType, value_bn: str, value_en: str) -> VariantAttributeValue:
+        # get_or_create so re-typing an existing value (e.g. "Red" already
+        # used on another product) reuses it instead of erroring on the
+        # unique_together — this is the "auto load and select from them"
+        # library behavior the admin UI relies on.
+        value, _ = VariantAttributeValue.objects.get_or_create(
+            attribute_type=attribute_type, value_en=value_en,
+            defaults={'value_bn': value_bn},
+        )
+        return value
+
+    @transaction.atomic
+    def generate_variants(self, product: Product, value_ids: list) -> list:
+        """Builds the cartesian product across the DISTINCT attribute types
+        represented in value_ids (e.g. 2 Color values x 3 Size values -> up
+        to 6 variants), skipping any combination that already exists on
+        this product. Values from the same type are treated as alternatives
+        (pick one per type per variant), not stacked."""
+        values = list(
+            VariantAttributeValue.objects.filter(id__in=value_ids).select_related('attribute_type')
+        )
+        if not values:
+            return []
+        by_type = {}
+        for v in values:
+            by_type.setdefault(v.attribute_type_id, []).append(v)
+
+        existing_sets = []
+        for variant in product.variants.prefetch_related('attribute_values'):
+            existing_sets.append(frozenset(av.attribute_value_id for av in variant.attribute_values.all()))
+
+        created = []
+        for combo in itertools.product(*by_type.values()):
+            combo_set = frozenset(v.id for v in combo)
+            if combo_set in existing_sets:
+                continue
+            variant = ProductVariant.objects.create(product=product)
+            ProductVariantValue.objects.bulk_create([
+                ProductVariantValue(variant=variant, attribute_value=v) for v in combo
+            ])
+            existing_sets.append(combo_set)
+            created.append(variant)
+        return created
+
+    def update_variant(self, variant: ProductVariant, data: dict) -> ProductVariant:
+        fields = []
+        for field in ('sku_suffix', 'price_override', 'is_active'):
+            if field in data:
+                setattr(variant, field, data[field])
+                fields.append(field)
+        if fields:
+            variant.save(update_fields=fields)
+        return variant
+
+    def delete_variant(self, variant: ProductVariant) -> None:
+        variant.delete()

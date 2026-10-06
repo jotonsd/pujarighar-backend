@@ -177,6 +177,21 @@ def delete_product(_request, pk):
 
 MAX_IMAGES = 5
 
+def _maybe_set_visual_attribute_type(product, images):
+    """First time any photo on this product is tagged with a value, that
+    value's attribute type becomes the product's visual_attribute_type
+    (almost always Color) — fully automatic, no separate "which type do
+    your photos vary by" admin control needed, per the design decision in
+    the variant plan. Never overwrites an already-set type."""
+    if product.visual_attribute_type_id:
+        return
+    tagged = next((img for img in images if img.visual_value_id), None)
+    if not tagged:
+        return
+    product.visual_attribute_type_id = tagged.visual_value.attribute_type_id
+    product.save(update_fields=['visual_attribute_type_id'])
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, has_permission('products', 'edit')])
 def add_product_image(request, pk):
@@ -201,24 +216,25 @@ def add_product_image(request, pk):
         )
 
     files = files[:slots]
-    # Index-aligned with `images` — one color label pair per uploaded file
-    # (the multipart form repeats the `colors_bn`/`colors_en` keys once per
-    # file, in the same order). Missing/short lists just leave those images
-    # untagged.
-    colors_bn = request.data.getlist('colors_bn') if hasattr(request.data, 'getlist') else []
-    colors_en = request.data.getlist('colors_en') if hasattr(request.data, 'getlist') else []
+    # Index-aligned with `images` — one visual_value id per uploaded file
+    # (the multipart form repeats the `visual_value_ids` key once per file,
+    # in the same order). Missing/short lists, or a blank entry, just leave
+    # that image untagged (visual_value=None).
+    visual_value_ids = request.data.getlist('visual_value_ids') if hasattr(request.data, 'getlist') else []
     created = []
     for i, file in enumerate(files):
+        value_id = visual_value_ids[i] if i < len(visual_value_ids) else ''
         img = ProductImage.objects.create(
             product=product,
             image=file,
             alt_bn=request.data.get('alt_bn', ''),
             alt_en=request.data.get('alt_en', ''),
             order=current_count + i,
-            color_bn=colors_bn[i] if i < len(colors_bn) else '',
-            color_en=colors_en[i] if i < len(colors_en) else '',
+            visual_value_id=value_id or None,
         )
         created.append(img)
+
+    _maybe_set_visual_attribute_type(product, created)
 
     return ApiResponse(
         message=f"{len(created)} image(s) uploaded",
@@ -236,17 +252,12 @@ def delete_product_image(request, pk, image_id):
         return ApiResponse(message="Image not found", errors="Not found", status_code=404)
 
     if request.method == 'PATCH':
-        # Re-tag an already-uploaded image's color without re-uploading it —
-        # used by the edit-product page.
-        updated = []
-        if 'color_bn' in request.data:
-            img.color_bn = request.data.get('color_bn', '')
-            updated.append('color_bn')
-        if 'color_en' in request.data:
-            img.color_en = request.data.get('color_en', '')
-            updated.append('color_en')
-        if updated:
-            img.save(update_fields=updated)
+        # Re-tag an already-uploaded image's visual value without
+        # re-uploading it — used by the edit-product page.
+        if 'visual_value_id' in request.data:
+            img.visual_value_id = request.data.get('visual_value_id') or None
+            img.save(update_fields=['visual_value_id'])
+            _maybe_set_visual_attribute_type(img.product, [img])
         return ApiResponse(message="Image updated", data=ProductImageSerializer(img, context=_ctx(request)).data)
 
     img.image.delete(save=False)

@@ -68,6 +68,16 @@ urlpatterns = [
     path('products/<uuid:pk>/package-items/add/', views.add_package_item, name='package-item-add'),
     path('products/<uuid:pk>/package-items/<uuid:item_id>/delete/', views.delete_package_item, name='package-item-delete'),
 
+    # ─── Variants / attribute library ───────────────────────────────────────────
+    path('attribute-types/',                   views.list_attribute_types,    name='attribute-type-list'),
+    path('attribute-types/create/',            views.create_attribute_type,   name='attribute-type-create'),
+    path('attribute-types/<uuid:pk>/',         views.attribute_type_detail,   name='attribute-type-detail'),
+    path('attribute-values/',                  views.list_attribute_values,   name='attribute-value-list'),
+    path('attribute-values/create/',           views.create_attribute_value,  name='attribute-value-create'),
+    path('attribute-values/<uuid:pk>/',        views.attribute_value_detail,  name='attribute-value-detail'),
+    path('products/<uuid:pk>/variants/generate/', views.generate_product_variants, name='product-variants-generate'),
+    path('products/<uuid:pk>/variants/<uuid:variant_id>/', views.variant_detail, name='product-variant-detail'),
+
     # ─── Shipping Addresses ───────────────────────────────────────────────────
     path('shipping-addresses/',                        views.list_shipping_addresses,      name='shipping-address-list'),
     path('shipping-addresses/create/',                 views.create_shipping_address,      name='shipping-address-create'),

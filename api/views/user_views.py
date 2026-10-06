@@ -56,6 +56,7 @@ def _nav_registry() -> list:
                 item('/admin/packages',         'gift',        'প্যাকেজ',       'Packages', 'packages'),
                 item('/admin/categories',       'tag',         'কেটাগরি',       'Categories', 'categories'),
                 item('/admin/settings/brands',  'badge-check', 'ব্র্যান্ড',     'Brands', 'brands'),
+                item('/admin/settings/attribute-types', 'palette', 'ভ্যারিয়েন্ট ধরন', 'Attribute Types', 'products'),
                 item('/admin/discounts',        'percent',     'ডিসকাউন্ট',     'Discounts', 'discounts'),
             ]),
             group('warehouse', 'গুদাম', 'Inventory', [

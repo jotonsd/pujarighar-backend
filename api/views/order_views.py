@@ -4,7 +4,7 @@ from django.conf import settings as django_settings
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from api.models import SalesOrder, OrderStatusLog, Product, PaymentMethod
+from api.models import SalesOrder, OrderStatusLog, Product, PaymentMethod, ProductVariant
 from api.serializers.guest_serializers import POSCheckoutSerializer
 from api.services.guest_service import GuestCheckoutService
 from api.services.sslcommerz_service import SSLCommerzService
@@ -392,7 +392,11 @@ def create_exchange(request, pk):
 
     try:
         replacement_items = [
-            {'product': Product.objects.get(pk=ri['product_id']), 'quantity': ri['quantity']}
+            {
+                'product': Product.objects.get(pk=ri['product_id']),
+                'quantity': ri['quantity'],
+                'variant': ProductVariant.objects.get(pk=ri['variant_id']) if ri.get('variant_id') else None,
+            }
             for ri in d['replacement_items']
         ]
         original, new_order = _svc.create_exchange(
@@ -515,7 +519,8 @@ def add_order_item(request, pk):
 
     try:
         product = Product.objects.get(pk=d['product_id'])
-        updated = _svc.add_item(order, product, d['quantity'], request.user, d.get('color', ''))
+        variant = ProductVariant.objects.get(pk=d['variant_id']) if d.get('variant_id') else None
+        updated = _svc.add_item(order, product, d['quantity'], request.user, variant=variant)
         return ApiResponse(message='Item added', data=SalesOrderSerializer(updated, context={'request': request}).data)
     except Exception as e:
         logger.error(f'Add order item error: {e}', exc_info=True)

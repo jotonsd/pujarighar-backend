@@ -2,7 +2,109 @@ from decimal import Decimal
 from rest_framework import serializers
 from django.db.models import Q, Sum
 from django.utils import timezone
-from api.models import PRODUCT_BADGES, Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement, Supplier, SupplierPayment
+from api.models import (
+    PRODUCT_BADGES, Brand, Category, Product, ProductImage, ProductPackageItem, StockMovement,
+    Supplier, SupplierPayment, VariantAttributeType, VariantAttributeValue, ProductVariant,
+)
+
+
+class VariantAttributeTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = VariantAttributeType
+        fields = ['id', 'name_bn', 'name_en', 'code', 'has_bilingual_values', 'is_active']
+
+
+class VariantAttributeValueSerializer(serializers.ModelSerializer):
+    attribute_type_code = serializers.CharField(source='attribute_type.code', read_only=True)
+
+    class Meta:
+        model  = VariantAttributeValue
+        fields = ['id', 'attribute_type', 'attribute_type_code', 'value_bn', 'value_en', 'is_active']
+
+
+class ProductVariantSerializer(serializers.ModelSerializer):
+    effective_price = serializers.SerializerMethodField()
+    stock_on_hand   = serializers.SerializerMethodField()
+    label_bn        = serializers.SerializerMethodField()
+    label_en        = serializers.SerializerMethodField()
+    attribute_values = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = ProductVariant
+        fields = ['id', 'product', 'sku_suffix', 'price_override', 'effective_price',
+                  'stock_on_hand', 'is_active', 'label_bn', 'label_en', 'attribute_values']
+
+    def get_effective_price(self, obj):
+        return str(obj.effective_price)
+
+    def get_stock_on_hand(self, obj):
+        return str(obj.stock_on_hand)
+
+    def get_label_bn(self, obj):
+        return obj.label(True)
+
+    def get_label_en(self, obj):
+        return obj.label(False)
+
+    def get_attribute_values(self, obj):
+        return [
+            {
+                'attribute_type_code': av.attribute_value.attribute_type.code,
+                'attribute_type_name_bn': av.attribute_value.attribute_type.name_bn,
+                'attribute_type_name_en': av.attribute_value.attribute_type.name_en,
+                'value_id': str(av.attribute_value_id),
+                'value_bn': av.attribute_value.value_bn,
+                'value_en': av.attribute_value.value_en,
+            }
+            for av in obj.attribute_values.select_related('attribute_value', 'attribute_value__attribute_type')
+                .order_by('attribute_value__attribute_type__code')
+        ]
+
+
+class AttributeTypeWriteSerializer(serializers.Serializer):
+    name_bn = serializers.CharField(max_length=40)
+    name_en = serializers.CharField(max_length=40)
+    code    = serializers.SlugField(max_length=50)
+    has_bilingual_values = serializers.BooleanField(default=False)
+
+    def validate_code(self, value):
+        if VariantAttributeType.objects.filter(code=value).exists():
+            raise serializers.ValidationError({'message_bn': 'এই কোড ইতিমধ্যে ব্যবহৃত', 'message_en': 'This code is already in use'})
+        return value
+
+
+class AttributeValueWriteSerializer(serializers.Serializer):
+    attribute_type_id = serializers.UUIDField()
+    value_bn = serializers.CharField(max_length=40, required=False, allow_blank=True, default='')
+    value_en = serializers.CharField(max_length=40)
+
+    def validate_attribute_type_id(self, value):
+        if not VariantAttributeType.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError({'message_bn': 'ধরন পাওয়া যায়নি', 'message_en': 'Attribute type not found'})
+        return value
+
+
+class AttributeTypeUpdateSerializer(serializers.Serializer):
+    name_bn = serializers.CharField(max_length=40, required=False)
+    name_en = serializers.CharField(max_length=40, required=False)
+    has_bilingual_values = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+
+class AttributeValueUpdateSerializer(serializers.Serializer):
+    value_bn = serializers.CharField(max_length=40, required=False, allow_blank=True)
+    value_en = serializers.CharField(max_length=40, required=False)
+    is_active = serializers.BooleanField(required=False)
+
+
+class GenerateVariantsSerializer(serializers.Serializer):
+    value_ids = serializers.ListField(child=serializers.UUIDField(), min_length=1)
+
+
+class VariantUpdateSerializer(serializers.Serializer):
+    sku_suffix     = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    price_override = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    is_active      = serializers.BooleanField(required=False)
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -22,9 +124,12 @@ class BrandSerializer(serializers.ModelSerializer):
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
+    visual_value_bn = serializers.CharField(source='visual_value.value_bn', read_only=True, default='')
+    visual_value_en = serializers.CharField(source='visual_value.value_en', read_only=True, default='')
+
     class Meta:
         model  = ProductImage
-        fields = ['id', 'image', 'alt_bn', 'alt_en', 'order', 'color_bn', 'color_en']
+        fields = ['id', 'image', 'alt_bn', 'alt_en', 'order', 'visual_value', 'visual_value_bn', 'visual_value_en']
 
 
 class PackageItemReadSerializer(serializers.ModelSerializer):
@@ -66,6 +171,9 @@ class ProductSerializer(serializers.ModelSerializer):
     stock_on_hand        = serializers.DecimalField(max_digits=12, decimal_places=3, read_only=True)
     images               = ProductImageSerializer(many=True, read_only=True)
     package_items        = PackageItemReadSerializer(many=True, read_only=True)
+    variants             = ProductVariantSerializer(many=True, read_only=True)
+    variant_attribute_types = serializers.SerializerMethodField()
+    visual_attribute_type_code = serializers.CharField(source='visual_attribute_type.code', read_only=True, default=None)
     category_name_bn     = serializers.CharField(source='category.name_bn', read_only=True)
     category_name_en     = serializers.CharField(source='category.name_en', read_only=True)
     brand_name_bn        = serializers.CharField(source='brand.name_bn', read_only=True, default=None)
@@ -102,6 +210,21 @@ class ProductSerializer(serializers.ModelSerializer):
         d = self._active_discount(obj)
         return str(d.discount_value) if d else None
 
+    def get_variant_attribute_types(self, obj):
+        # Distinct attribute types this product's variants actually use
+        # (e.g. ['color', 'size']) — drives which generic pill-rows the
+        # storefront renders, without re-deriving it from the nested
+        # variants list every time.
+        codes = []
+        seen = set()
+        for variant in obj.variants.all():
+            for av in variant.attribute_values.all():
+                code = av.attribute_value.attribute_type.code
+                if code not in seen:
+                    seen.add(code)
+                    codes.append(code)
+        return codes
+
     def validate_badges(self, value):
         invalid = set(value) - set(PRODUCT_BADGES)
         if invalid:
@@ -130,7 +253,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'active_discount_type', 'active_discount_value',
             'unit_bn', 'unit_en', 'weight_kg',
             'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
-            'stock_on_hand', 'images', 'package_items',
+            'stock_on_hand', 'images', 'package_items', 'variants', 'variant_attribute_types', 'visual_attribute_type_code',
             'average_rating', 'review_count',
             'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
             'focus_keyword', 'canonical_url',
@@ -207,6 +330,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
 class StockAdjustSerializer(serializers.Serializer):
     movement_type  = serializers.ChoiceField(choices=['PURCHASE', 'ADJUSTMENT', 'SUPPLIER_RETURN'])
     quantity       = serializers.DecimalField(max_digits=12, decimal_places=3)
+    variant_id     = serializers.UUIDField(required=False, allow_null=True, default=None)
     unit_cost      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'))
     unit_price     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, default=None)
     supplier_id    = serializers.UUIDField(required=False, allow_null=True, default=None)

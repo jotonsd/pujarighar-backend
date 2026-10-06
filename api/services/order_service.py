@@ -44,7 +44,9 @@ class OrderService:
                 'courier_consignment', 'courier_consignment__provider',
             )
             .prefetch_related(
-                'items__product__images',
+                'items__product__images__visual_value',
+                'items__product__visual_attribute_type',
+                'items__variant__attribute_values__attribute_value',
                 'items__product__package_items__component',
                 'courier_consignment__events',
             )
@@ -139,7 +141,10 @@ class OrderService:
         )
 
     def get_order(self, pk: str) -> SalesOrder:
-        return SalesOrder.objects.prefetch_related('items__product__images', 'status_logs', 'delivery').get(pk=pk)
+        return SalesOrder.objects.prefetch_related(
+            'items__product__images__visual_value', 'items__product__visual_attribute_type',
+            'items__variant__attribute_values__attribute_value', 'status_logs', 'delivery',
+        ).get(pk=pk)
 
     def confirm(self, order: SalesOrder, user: User) -> SalesOrder:
         return self._transition(order, 'CONFIRMED', user)
@@ -413,7 +418,7 @@ class OrderService:
         if delta == 0:
             return order
 
-        self._adjust_order_item_stock(item.product, delta, order.id, user)
+        self._adjust_order_item_stock(item.product, delta, order.id, user, variant=item.variant)
 
         item.quantity   = new_quantity
         item.line_total = item.unit_price * new_quantity
@@ -426,16 +431,12 @@ class OrderService:
         return order
 
     @transaction.atomic
-    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User, color: str = '') -> SalesOrder:
-        # Admin's manual "add item" picker is a single free-text field (staff
-        # correcting/setting a color on an existing order, not a translated
-        # customer-facing selection) — stored into both snapshot fields so it
-        # still displays consistently wherever color_bn/color_en are read.
+    def add_item(self, order: SalesOrder, product, quantity: Decimal, user: User, variant=None) -> SalesOrder:
         """Add a product to a not-yet-shipped order — same gate as
-        update_item_quantity/delete_item. If the product's already on the
-        order, bumps that line's quantity instead of creating a duplicate
-        row (mirrors how re-adding an item already in the cart behaves at
-        checkout)."""
+        update_item_quantity/delete_item. If the product (+ variant)'s
+        already on the order, bumps that line's quantity instead of
+        creating a duplicate row (mirrors how re-adding an item already in
+        the cart behaves at checkout)."""
         if order.status not in ('PENDING', 'CONFIRMED'):
             raise ValidationError({
                 'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারে পণ্য যোগ করা যায়',
@@ -452,21 +453,23 @@ class OrderService:
                 'message_en': 'Quantity must be greater than zero',
             })
 
-        existing = order.items.filter(product=product, color_bn=color, color_en=color).first()
+        existing = order.items.filter(product=product, variant=variant).first()
         if existing:
             return self.update_item_quantity(order, existing, existing.quantity + quantity, user)
 
-        self._adjust_order_item_stock(product, quantity, order.id, user)
+        self._adjust_order_item_stock(product, quantity, order.id, user, variant=variant)
 
+        unit_price = variant.effective_price if variant else product.effective_price
         SalesOrderItem.objects.create(
             order=order, product=product,
             product_name_bn=product.name_bn, product_name_en=product.name_en,
             original_unit_price=product.original_price,
-            unit_price=product.effective_price,
+            unit_price=unit_price,
             quantity=quantity,
-            line_total=product.effective_price * quantity,
-            color_bn=color,
-            color_en=color,
+            line_total=unit_price * quantity,
+            variant=variant,
+            variant_label_bn=variant.label(True) if variant else '',
+            variant_label_en=variant.label(False) if variant else '',
         )
 
         self._recalc_order_totals(order)
@@ -496,7 +499,7 @@ class OrderService:
                 'message_en': 'An order must keep at least one item — cancel the whole order instead to remove everything',
             })
 
-        self._adjust_order_item_stock(item.product, -item.quantity, order.id, user)
+        self._adjust_order_item_stock(item.product, -item.quantity, order.id, user, variant=item.variant)
         product_name = item.product_name_en
         item.delete()
 
@@ -514,7 +517,7 @@ class OrderService:
             order.save(update_fields=['payment_status'])
         for item in order.items.select_related('product'):
             StockMovement.objects.create(
-                product=item.product, movement_type='RETURN',
+                product=item.product, variant=item.variant, movement_type='RETURN',
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
         self._create_return_journal(order, user)
@@ -589,7 +592,7 @@ class OrderService:
         returned_cogs = Decimal('0')
         for item, qty in resolved:
             StockMovement.objects.create(
-                product=item.product, movement_type='RETURN',
+                product=item.product, variant=item.variant, movement_type='RETURN',
                 quantity=qty, reference_id=order.id, created_by=user,
             )
             returned_value += item.unit_price * qty
@@ -625,7 +628,7 @@ class OrderService:
         # Reverse stock
         for item in order.items.select_related('product'):
             StockMovement.objects.create(
-                product=item.product, movement_type='RETURN',
+                product=item.product, variant=item.variant, movement_type='RETURN',
                 quantity=item.quantity, reference_id=order.id, created_by=user,
             )
         # Only reverse accounting if a journal was already posted for this
@@ -681,27 +684,28 @@ class OrderService:
         except Account.DoesNotExist:
             return None
 
-    def _adjust_order_item_stock(self, product, delta: Decimal, order_id, user: User) -> None:
+    def _adjust_order_item_stock(self, product, delta: Decimal, order_id, user: User, variant=None) -> None:
         """delta > 0 (quantity increased) needs MORE stock deducted; delta < 0
         (quantity decreased) restores stock. Packages have no stock movement
         of their own — deduct/restore each component instead, same as the
         original checkout-time deduction."""
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
-                self._create_order_stock_movement(pi.component, -(pi.quantity * delta), order_id, user)
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
+                self._create_order_stock_movement(pi.component, -(pi.quantity * delta), order_id, user, variant=pi.component_variant)
         else:
-            self._create_order_stock_movement(product, -delta, order_id, user)
+            self._create_order_stock_movement(product, -delta, order_id, user, variant=variant)
 
-    def _create_order_stock_movement(self, product, qty_change: Decimal, order_id, user: User) -> None:
+    def _create_order_stock_movement(self, product, qty_change: Decimal, order_id, user: User, variant=None) -> None:
         if qty_change == 0:
             return
-        if qty_change < 0 and product.stock_on_hand + qty_change < 0:
+        target = variant if variant else product
+        if qty_change < 0 and target.stock_on_hand + qty_change < 0:
             raise ValidationError({
                 'message_bn': f'{product.name_bn} এর পর্যাপ্ত স্টক নেই',
                 'message_en': f'Insufficient stock for {product.name_en}',
             })
         StockMovement.objects.create(
-            product=product, movement_type='SALE', quantity=qty_change,
+            product=product, variant=variant, movement_type='SALE', quantity=qty_change,
             reference_id=order_id, created_by=user,
         )
 
@@ -1047,11 +1051,13 @@ class OrderService:
             key = str(entry['item_id'])
             returned_qty_by_id[key] = returned_qty_by_id.get(key, Decimal('0')) + Decimal(str(entry['quantity']))
 
-        replacement_qty_by_product: dict = {}   # product.id -> (product, total_qty)
+        replacement_qty_by_key: dict = {}   # (product.id, variant.id or None) -> (product, variant, total_qty)
         for entry in replacement_items:
             product = entry['product']
-            _, prev_qty = replacement_qty_by_product.get(product.id, (product, Decimal('0')))
-            replacement_qty_by_product[product.id] = (product, prev_qty + Decimal(str(entry['quantity'])))
+            variant = entry.get('variant')
+            key = (product.id, variant.id if variant else None)
+            _, _, prev_qty = replacement_qty_by_key.get(key, (product, variant, Decimal('0')))
+            replacement_qty_by_key[key] = (product, variant, prev_qty + Decimal(str(entry['quantity'])))
 
         items_by_id = {str(i.id): i for i in original_order.items.select_related('product')}
         resolved_returns = []
@@ -1070,8 +1076,8 @@ class OrderService:
                 })
             resolved_returns.append((item, qty))
 
-        resolved_replacements = list(replacement_qty_by_product.values())
-        for product, qty in resolved_replacements:
+        resolved_replacements = list(replacement_qty_by_key.values())
+        for product, variant, qty in resolved_replacements:
             if qty <= 0:
                 raise ValidationError({
                     'message_bn': 'পরিমাণ শূন্যের বেশি হতে হবে',
@@ -1083,7 +1089,7 @@ class OrderService:
         returned_value = Decimal('0')
         returned_cogs  = Decimal('0')
         for item, qty in resolved_returns:
-            self._return_order_item_stock(item.product, qty, original_order.id, user)
+            self._return_order_item_stock(item.product, qty, original_order.id, user, variant=item.variant)
             returned_value += item.unit_price * qty
             returned_cogs  += item.product.cost_price * qty
 
@@ -1111,9 +1117,9 @@ class OrderService:
             # before the cashback_used clamp below reads it as a real number.
             profile.refresh_from_db(fields=['cashback_balance'])
 
-        original_subtotal = sum((p.original_price * q for p, q in resolved_replacements), Decimal('0'))
-        subtotal          = sum((p.effective_price * q for p, q in resolved_replacements), Decimal('0'))
-        total_weight      = sum(((p.weight_kg or Decimal('0')) * q for p, q in resolved_replacements), Decimal('0'))
+        original_subtotal = sum((p.original_price * q for p, v, q in resolved_replacements), Decimal('0'))
+        subtotal          = sum(((v.effective_price if v else p.effective_price) * q for p, v, q in resolved_replacements), Decimal('0'))
+        total_weight      = sum(((p.weight_kg or Decimal('0')) * q for p, v, q in resolved_replacements), Decimal('0'))
 
         zone = 'inside' if (original_order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
         delivery = Decimal('0') if delivery_charge_waived else DeliveryCharge.get().charge_for(zone, total_weight)
@@ -1142,14 +1148,18 @@ class OrderService:
             grand_total=subtotal + delivery, cashback_used=Decimal('0'),
         )
 
-        for product, qty in resolved_replacements:
+        for product, variant, qty in resolved_replacements:
+            unit_price = variant.effective_price if variant else product.effective_price
             SalesOrderItem.objects.create(
                 order=new_order, product=product,
                 product_name_bn=product.name_bn, product_name_en=product.name_en,
-                original_unit_price=product.original_price, unit_price=product.effective_price,
-                quantity=qty, line_total=product.effective_price * qty,
+                original_unit_price=product.original_price, unit_price=unit_price,
+                quantity=qty, line_total=unit_price * qty,
+                variant=variant,
+                variant_label_bn=variant.label(True) if variant else '',
+                variant_label_en=variant.label(False) if variant else '',
             )
-            self._adjust_order_item_stock(product, qty, new_order.id, user)
+            self._adjust_order_item_stock(product, qty, new_order.id, user, variant=variant)
 
         OrderStatusLog.objects.create(order=new_order, from_status='', to_status='PENDING', changed_by=user)
 
@@ -1187,7 +1197,7 @@ class OrderService:
         )
         return original_order, new_order
 
-    def _return_order_item_stock(self, product, qty: Decimal, order_id, user: User) -> None:
+    def _return_order_item_stock(self, product, qty: Decimal, order_id, user: User, variant=None) -> None:
         """RETURN-side counterpart to _adjust_order_item_stock — fans a
         returned package out to its components. return_order()/
         partial_deliver() instead create a single RETURN movement against
@@ -1196,14 +1206,14 @@ class OrderService:
         components' movements — this new path deliberately doesn't repeat
         that gap."""
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                 StockMovement.objects.create(
-                    product=pi.component, movement_type='RETURN',
+                    product=pi.component, variant=pi.component_variant, movement_type='RETURN',
                     quantity=pi.quantity * qty, reference_id=order_id, created_by=user,
                 )
         else:
             StockMovement.objects.create(
-                product=product, movement_type='RETURN',
+                product=product, variant=variant, movement_type='RETURN',
                 quantity=qty, reference_id=order_id, created_by=user,
             )
 

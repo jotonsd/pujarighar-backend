@@ -13,36 +13,48 @@ class CartService:
         cart, _ = Cart.objects.get_or_create(user=user)
         return cart
 
-    def add_item(self, user, product: Product, quantity: Decimal, color_bn: str = '', color_en: str = '') -> Cart:
+    def add_item(self, user, product: Product, quantity: Decimal, color_bn: str = '', color_en: str = '', variant=None) -> Cart:
         cart = self.get_or_create_cart(user)
-        # Two colors of the same product are two separate CartItem rows (see
-        # unique_together), but stock is shared across colors — so the stock
-        # check must see the RESULTING total across ALL of this product's
-        # lines (every color), not just the one line being touched, or a
-        # customer could add N units of each color and blow past
-        # stock_on_hand while each individual line looks fine.
-        existing = cart.items.filter(product=product, color_bn=color_bn, color_en=color_en).first()
-        other_colors_quantity = sum(
-            (i.quantity for i in cart.items.filter(product=product).exclude(color_bn=color_bn, color_en=color_en)),
-            Decimal('0'),
-        )
+        # The storefront resolves and passes `variant` directly once a
+        # product has variants; color_bn/color_en is the older bridge for
+        # callers (AI chatbot) still sending a plain color string.
+        if variant is None:
+            variant = product.resolve_color_variant(color_bn, color_en)
+        # A variant now carries its own real stock — no more pooling across
+        # colors. A non-variant product (variant is None) still pools across
+        # its (now historical) cart lines of different colors, same as before.
+        existing = cart.items.filter(product=product, variant=variant).first()
         total_quantity = (existing.quantity if existing else Decimal('0')) + quantity
-        self._validate_stock(product, total_quantity + other_colors_quantity)
+        if variant is None:
+            other_quantity = sum(
+                (i.quantity for i in cart.items.filter(product=product, variant__isnull=True).exclude(pk=existing.pk if existing else None)),
+                Decimal('0'),
+            )
+            self._validate_stock(product, total_quantity + other_quantity, variant=None)
+        else:
+            self._validate_stock(product, total_quantity, variant=variant)
         if existing:
             existing.quantity = total_quantity
             existing.save(update_fields=['quantity'])
         else:
-            CartItem.objects.create(cart=cart, product=product, quantity=quantity, color_bn=color_bn, color_en=color_en)
-        logger.info(f"Cart item added: user={user.email} product={product.sku} color={color_bn!r}/{color_en!r} qty={quantity}")
+            CartItem.objects.create(
+                cart=cart, product=product, quantity=quantity, variant=variant,
+                variant_label_bn=variant.label(True) if variant else '',
+                variant_label_en=variant.label(False) if variant else '',
+            )
+        logger.info(f"Cart item added: user={user.email} product={product.sku} variant={variant.id if variant else None} qty={quantity}")
         return cart
 
     def update_item(self, cart: Cart, item_id: str, quantity: Decimal) -> Cart:
         item = cart.items.get(pk=item_id)
-        other_colors_quantity = sum(
-            (i.quantity for i in cart.items.filter(product=item.product).exclude(pk=item.pk)),
-            Decimal('0'),
-        )
-        self._validate_stock(item.product, quantity + other_colors_quantity)
+        if item.variant_id:
+            self._validate_stock(item.product, quantity, variant=item.variant)
+        else:
+            other_quantity = sum(
+                (i.quantity for i in cart.items.filter(product=item.product, variant__isnull=True).exclude(pk=item.pk)),
+                Decimal('0'),
+            )
+            self._validate_stock(item.product, quantity + other_quantity, variant=None)
         item.quantity = quantity
         item.save(update_fields=['quantity'])
         return cart
@@ -105,17 +117,19 @@ class CartService:
             'total_value': str(total_value),
         }
 
-    def _validate_stock(self, product: Product, quantity: Decimal) -> None:
+    def _validate_stock(self, product: Product, quantity: Decimal, variant=None) -> None:
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                 needed = pi.quantity * quantity
-                if pi.component.stock_on_hand < needed:
+                target = pi.component_variant if pi.component_variant else pi.component
+                if target.stock_on_hand < needed:
                     raise ValidationError({
                         'message_bn': f'{pi.component.name_bn}: পর্যাপ্ত স্টক নেই',
                         'message_en': f'{pi.component.name_en}: Insufficient stock',
                     })
         else:
-            if product.stock_on_hand < quantity:
+            target = variant if variant else product
+            if target.stock_on_hand < quantity:
                 raise ValidationError({
                     'message_bn': 'পর্যাপ্ত স্টক নেই',
                     'message_en': 'Insufficient stock',

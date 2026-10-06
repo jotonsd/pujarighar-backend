@@ -52,7 +52,7 @@ class CheckoutService:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
         for item in items:
-            self._validate_stock(item.product, item.quantity)
+            self._validate_stock(item.product, item.quantity, variant=item.variant)
 
         shipping = self._resolve_shipping(user, shipping_address_id)
         pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone, promo_code)
@@ -75,19 +75,21 @@ class CheckoutService:
             profile.save(update_fields=['cashback_balance'])
 
         for item in items:
+            unit_price = item.variant.effective_price if item.variant_id else item.product.effective_price
             SalesOrderItem.objects.create(
                 order                = order,
                 product              = item.product,
                 product_name_bn      = item.product.name_bn,
                 product_name_en      = item.product.name_en,
                 original_unit_price  = item.product.original_price,
-                unit_price           = item.product.effective_price,
+                unit_price           = unit_price,
                 quantity             = item.quantity,
-                line_total           = item.product.effective_price * item.quantity,
-                color_bn             = item.color_bn,
-                color_en             = item.color_en,
+                line_total           = unit_price * item.quantity,
+                variant              = item.variant,
+                variant_label_bn     = item.variant_label_bn,
+                variant_label_en     = item.variant_label_en,
             )
-            self._deduct_stock(item.product, item.quantity, order.id, user)
+            self._deduct_stock(item.product, item.quantity, order.id, user, variant=item.variant)
 
         OrderStatusLog.objects.create(
             order=order, from_status='', to_status='PENDING', changed_by=user,
@@ -123,7 +125,7 @@ class CheckoutService:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
         for item in items:
-            self._validate_stock(item.product, item.quantity)
+            self._validate_stock(item.product, item.quantity, variant=item.variant)
 
         shipping = self._resolve_shipping(user, shipping_address_id)
         pricing  = self._price_cart(items, user, source, payment_method, shipping['shipping_district'], delivery_zone, promo_code)
@@ -135,11 +137,12 @@ class CheckoutService:
                 'product_name_bn':     item.product.name_bn,
                 'product_name_en':     item.product.name_en,
                 'quantity':            str(item.quantity),
-                'unit_price':          str(item.product.effective_price),
+                'unit_price':          str(item.variant.effective_price if item.variant_id else item.product.effective_price),
                 'original_unit_price': str(item.product.original_price),
-                'line_total':          str(item.product.effective_price * item.quantity),
-                'color_bn':            item.color_bn,
-                'color_en':            item.color_en,
+                'line_total':          str((item.variant.effective_price if item.variant_id else item.product.effective_price) * item.quantity),
+                'variant_id':          str(item.variant_id) if item.variant_id else None,
+                'variant_label_bn':    item.variant_label_bn,
+                'variant_label_en':    item.variant_label_en,
             }
             for item in items
         ]
@@ -210,7 +213,7 @@ class CheckoutService:
         the caller should let that propagate as a checkout error rather
         than silently drop the code."""
         original_subtotal = sum(i.product.original_price * i.quantity for i in items)
-        subtotal          = sum(i.product.effective_price * i.quantity for i in items)
+        subtotal          = sum((i.variant.effective_price if i.variant_id else i.product.effective_price) * i.quantity for i in items)
         product_discount  = original_subtotal - subtotal
 
         # Welcome discount — a registered customer's very first order only.
@@ -277,32 +280,34 @@ class CheckoutService:
             'cashback_used': cashback_used,
         }
 
-    def _validate_stock(self, product, quantity: Decimal) -> None:
+    def _validate_stock(self, product, quantity: Decimal, variant=None) -> None:
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                 needed = pi.quantity * quantity
-                if pi.component.stock_on_hand < needed:
+                target = pi.component_variant if pi.component_variant else pi.component
+                if target.stock_on_hand < needed:
                     raise ValidationError({
                         'message_bn': f'{pi.component.name_bn}: পর্যাপ্ত স্টক নেই',
                         'message_en': f'{pi.component.name_en}: Insufficient stock',
                     })
         else:
-            if product.stock_on_hand < quantity:
+            target = variant if variant else product
+            if target.stock_on_hand < quantity:
                 raise ValidationError({
                     'message_bn': f'{product.name_bn}: পর্যাপ্ত স্টক নেই',
                     'message_en': f'{product.name_en}: Insufficient stock',
                 })
 
-    def _deduct_stock(self, product, quantity: Decimal, order_id, user) -> None:
+    def _deduct_stock(self, product, quantity: Decimal, order_id, user, variant=None) -> None:
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                 StockMovement.objects.create(
-                    product=pi.component, movement_type='SALE',
+                    product=pi.component, variant=pi.component_variant, movement_type='SALE',
                     quantity=-(pi.quantity * quantity), reference_id=order_id, created_by=user,
                 )
         else:
             StockMovement.objects.create(
-                product=product, movement_type='SALE',
+                product=product, variant=variant, movement_type='SALE',
                 quantity=-quantity, reference_id=order_id, created_by=user,
             )
 

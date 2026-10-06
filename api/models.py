@@ -19,6 +19,20 @@ def _gen_referral_code():
             return code
 
 
+def apply_discount(base_price: Decimal, discount) -> Decimal:
+    """Applies an active `Discount` row (or None) to a base price — shared
+    by Product.effective_price and ProductVariant.effective_price so a
+    variant's price_override still gets the product's active discount
+    applied on top, the same way the product's own unit_price does."""
+    if discount is None:
+        return base_price
+    if discount.discount_type == 'PERCENTAGE':
+        return (base_price * (1 - discount.discount_value / 100)).quantize(Decimal('0.01'))
+    if discount.discount_type == 'FLAT':
+        return max(Decimal('0'), base_price - discount.discount_value)
+    return base_price
+
+
 # ─── Base ─────────────────────────────────────────────────────────────────────
 
 class BaseModel(models.Model):
@@ -248,6 +262,15 @@ class Product(BaseModel):
     # if no product on the site has a weight set at all.
     weight_kg        = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
     is_package       = models.BooleanField(default=False)
+    # Which attribute type (if any) this product's photos are grouped by —
+    # almost always Color, but a product with no color at all (e.g. a
+    # weight-only packaging-size product) can point this at a different
+    # type instead. Null = no color-swatch-style gallery grouping, images
+    # just show in `order`. See ProductImage.visual_value.
+    visual_attribute_type = models.ForeignKey(
+        'VariantAttributeType', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
     discount_type    = models.CharField(
         max_length=12,
         choices=[('NONE', 'None'), ('PERCENTAGE', 'Percentage'), ('FLAT', 'Flat')],
@@ -355,6 +378,17 @@ class Product(BaseModel):
             if b not in self.BADGE_TIMESTAMP_FIELDS or self.badge_active(b)
         ]
 
+    def _active_discount(self):
+        today = timezone.now().date()
+        return (
+            self.discounts
+            .filter(is_active=True)
+            .filter(models.Q(start_date__isnull=True) | models.Q(start_date__lte=today))
+            .filter(models.Q(end_date__isnull=True) | models.Q(end_date__gte=today))
+            .order_by('-created_at')
+            .first()
+        )
+
     @property
     def effective_price(self) -> Decimal:
         # ProductService.list_products annotates `_effective_price` via a
@@ -363,27 +397,7 @@ class Product(BaseModel):
         annotated = getattr(self, '_effective_price', None)
         if annotated is not None:
             return annotated
-        today = timezone.now().date()
-        active = (
-            self.discounts
-            .filter(
-                is_active=True,
-            )
-            .filter(
-                models.Q(start_date__isnull=True) | models.Q(start_date__lte=today)
-            )
-            .filter(
-                models.Q(end_date__isnull=True) | models.Q(end_date__gte=today)
-            )
-            .order_by('-created_at')
-            .first()
-        )
-        if active:
-            if active.discount_type == 'PERCENTAGE':
-                return (self.unit_price * (1 - active.discount_value / 100)).quantize(Decimal('0.01'))
-            if active.discount_type == 'FLAT':
-                return max(Decimal('0'), self.unit_price - active.discount_value)
-        return self.unit_price
+        return apply_discount(self.unit_price, self._active_discount())
 
     @property
     def original_price(self) -> Decimal:
@@ -400,7 +414,11 @@ class Product(BaseModel):
     @property
     def stock_on_hand(self) -> Decimal:
         if self.is_package:
-            # Package stock = max whole packages assembable from component stock
+            # Package stock = max whole packages assembable from component
+            # stock. Packages cannot have their own variants (see
+            # ProductVariant) — this recursion only ever reads a
+            # component's stock_on_hand, which is itself variant-aware
+            # below when that component has variants.
             items = self.package_items.select_related('component').all()
             if not items.exists():
                 return Decimal('0')
@@ -412,7 +430,108 @@ class Product(BaseModel):
 
         # ProductService.list_products annotates `_stock_on_hand` via a
         # correlated subquery so a list page doesn't run this aggregate once
-        # per row — use it when present instead of re-querying.
+        # per row — use it when present instead of re-querying. Every
+        # StockMovement still FKs to its parent Product even when it also
+        # has a `variant` set, so this single aggregate already sums across
+        # all of a variant-bearing product's variants too — no separate
+        # per-variant branch needed (and no extra query defeating the
+        # annotation fast path for variant-bearing products).
+        annotated = getattr(self, '_stock_on_hand', None)
+        if annotated is not None:
+            return annotated
+        from django.db.models import Sum
+        result = self.stock_movements.aggregate(total=Sum('quantity'))
+        return result['total'] or Decimal('0')
+
+    def resolve_color_variant(self, color_bn: str = '', color_en: str = ''):
+        """Transitional bridge: today's cart/checkout API still takes a
+        plain color_bn/color_en string (the pre-variant UI hasn't been
+        rewritten yet — that's phase 3). Looks up the ProductVariant whose
+        sole/Color attribute value matches, so new variant-aware stock
+        still gets hit under the old string-based contract. Returns None
+        for a non-variant product or an unmatched/blank color."""
+        if not color_bn and not color_en:
+            return None
+        qs = self.variants.filter(attribute_values__attribute_value__attribute_type__code='color')
+        if color_bn:
+            qs = qs.filter(attribute_values__attribute_value__value_bn=color_bn)
+        if color_en:
+            qs = qs.filter(attribute_values__attribute_value__value_en=color_en)
+        return qs.first()
+
+
+class VariantAttributeType(BaseModel):
+    """A kind of product variation — Color, Size, Weight, etc. Admin-
+    manageable: adding a new type (e.g. "Weight") later is a data row, not
+    a schema change. Seeded with Color and Size; see migration."""
+    name_bn = models.CharField(max_length=40)
+    name_en = models.CharField(max_length=40)
+    code    = models.SlugField(unique=True)  # 'color', 'size' — stable key, not translated
+    # Only Color is bilingual today — size/weight-style values ("M", "250g")
+    # read the same in both languages. Per-type, not hardcoded per name, so
+    # a future type can opt in if it genuinely needs translated values.
+    has_bilingual_values = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name_en']
+
+    def __str__(self):
+        return self.name_en
+
+
+class VariantAttributeValue(BaseModel):
+    """The reusable library: Color→Red, Color→Blue, Size→M, Weight→250g.
+    Typed once, selectable on every product afterward — new values are
+    created inline the first time an admin types one that doesn't exist."""
+    attribute_type = models.ForeignKey(VariantAttributeType, on_delete=models.PROTECT, related_name='values')
+    value_bn = models.CharField(max_length=40, blank=True, default='')  # only used when attribute_type.has_bilingual_values
+    value_en = models.CharField(max_length=40)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = [['attribute_type', 'value_en']]
+        ordering = ['value_en']
+
+    def __str__(self):
+        return self.value_en
+
+    def label(self, is_bn: bool) -> str:
+        return (self.value_bn or self.value_en) if is_bn else (self.value_en or self.value_bn)
+
+
+class ProductVariant(BaseModel):
+    """One specific sellable combination of attribute values for a product
+    (e.g. "Red, M") — its own stock ledger and optional price override.
+    Which attribute types it varies by is NOT fixed columns here; it's
+    whatever ProductVariantValue rows exist for it, so a product can vary
+    by Color+Size, or Weight alone, or any combination, with no schema
+    change between those cases."""
+    product        = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='variants')
+    sku_suffix     = models.CharField(max_length=20, blank=True, default='')
+    price_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_active      = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def label(self, is_bn: bool) -> str:
+        """Composes a display string from this variant's attribute values,
+        in a stable order — what gets snapshotted onto cart/order lines."""
+        values = (
+            self.attribute_values
+            .select_related('attribute_value', 'attribute_value__attribute_type')
+            .order_by('attribute_value__attribute_type__code')
+        )
+        return ', '.join(av.attribute_value.label(is_bn) for av in values)
+
+    @property
+    def effective_price(self) -> Decimal:
+        base = self.price_override if self.price_override is not None else self.product.unit_price
+        return apply_discount(base, self.product._active_discount())
+
+    @property
+    def stock_on_hand(self) -> Decimal:
         annotated = getattr(self, '_stock_on_hand', None)
         if annotated is not None:
             return annotated
@@ -421,18 +540,31 @@ class Product(BaseModel):
         return result['total'] or Decimal('0')
 
 
+class ProductVariantValue(models.Model):
+    """Join row: this variant's value for one attribute type. A variant
+    with Color+Size has two of these; a weight-only variant has one."""
+    id              = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    variant         = models.ForeignKey(ProductVariant, on_delete=models.CASCADE, related_name='attribute_values')
+    attribute_value = models.ForeignKey(VariantAttributeValue, on_delete=models.PROTECT)
+
+    class Meta:
+        unique_together = [['variant', 'attribute_value']]
+
+
 class ProductImage(BaseModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
     image   = models.ImageField(upload_to='products/')
     alt_bn  = models.CharField(max_length=200, blank=True)
     alt_en  = models.CharField(max_length=200, blank=True)
     order   = models.PositiveIntegerField(default=0)
-    # Optional bilingual tag (e.g. "Red"/"লাল") — lets the storefront group
-    # this product's images into color swatches. Display-only: color doesn't
-    # affect stock or price, which stay shared across the whole Product (see
-    # Product.stock_on_hand / effective_price) — just which photos show.
-    color_bn = models.CharField(max_length=40, blank=True, default='')
-    color_en = models.CharField(max_length=40, blank=True, default='')
+    # Which value of the product's visual_attribute_type this photo shows
+    # (e.g. "Red") — lets the storefront group images into color swatches.
+    # Display-only: doesn't affect stock/price. Null = untagged photo, just
+    # shows in `order` like before this field existed.
+    visual_value = models.ForeignKey(
+        VariantAttributeValue, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
 
     class Meta:
         ordering = ['order']
@@ -452,15 +584,25 @@ class ProductPackageItem(models.Model):
     package   = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='package_items')
     component = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='used_in_packages')
     quantity  = models.DecimalField(max_digits=10, decimal_places=3)
+    # Pins this package item to one specific variant of the component (e.g.
+    # "the Red/M version"), not just "N units of the component product"
+    # ignoring which color/size. Null = today's behavior, deducts from the
+    # component's combined stock across all its variants.
+    component_variant = models.ForeignKey(
+        ProductVariant, null=True, blank=True,
+        on_delete=models.PROTECT, related_name='+',
+    )
 
     class Meta:
-        unique_together = [['package', 'component']]
+        unique_together = [['package', 'component', 'component_variant']]
 
     def clean(self):
         if not self.package.is_package:
             raise ValidationError('package must have is_package=True')
         if self.component.is_package:
             raise ValidationError('Nested packages are not allowed')
+        if self.component_variant and self.component_variant.product_id != self.component_id:
+            raise ValidationError('component_variant must belong to component')
 
 
 class StockMovement(models.Model):
@@ -478,6 +620,14 @@ class StockMovement(models.Model):
 
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     product        = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='stock_movements')
+    # Set only for variant-bearing products — this movement is against one
+    # specific combination (e.g. Red/M), not the product's combined total.
+    # Null = today's product-level behavior, untouched for every
+    # non-variant product.
+    variant        = models.ForeignKey(
+        'ProductVariant', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='stock_movements',
+    )
     movement_type  = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
     quantity       = models.DecimalField(max_digits=12, decimal_places=3)
     unit_cost      = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -497,8 +647,11 @@ class StockMovement(models.Model):
         ordering = ['-created_at']
 
     def clean(self):
+        if self.variant and self.variant.product_id != self.product_id:
+            raise ValidationError('variant must belong to product')
         if self.quantity < 0:
-            if self.product.stock_on_hand + self.quantity < 0:
+            target = self.variant if self.variant else self.product
+            if target.stock_on_hand + self.quantity < 0:
                 raise ValidationError({
                     'message_bn': 'পর্যাপ্ত স্টক নেই',
                     'message_en': 'Insufficient stock',
@@ -561,16 +714,25 @@ class CartItem(BaseModel):
     cart     = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
     product  = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.DecimalField(max_digits=10, decimal_places=3)
-    # Bilingual snapshot of the ProductImage.color_bn/color_en the customer
-    # picked — not a FK, doesn't affect stock/price (both stay shared across
-    # colors on Product), just tells fulfillment which color to pack.
-    color_bn = models.CharField(max_length=40, blank=True, default='')
-    color_en = models.CharField(max_length=40, blank=True, default='')
+    # The specific variant picked (e.g. Red/M), when the product has any.
+    # SET_NULL rather than CASCADE/PROTECT: a variant being deleted later
+    # shouldn't destroy or block deleting someone's in-progress cart line —
+    # the label snapshot below still shows what was picked.
+    variant = models.ForeignKey(
+        'ProductVariant', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
+    # Snapshot of ProductVariant.label() at add-time — not re-derived from
+    # the variant later, so it can't change under the customer mid-cart.
+    variant_label_bn = models.CharField(max_length=200, blank=True, default='')
+    variant_label_en = models.CharField(max_length=200, blank=True, default='')
 
     class Meta:
-        # Two colors of the same product are two separate cart lines.
-        unique_together = [['cart', 'product', 'color_bn', 'color_en']]
-        ordering        = ['created_at']
+        # NOT a DB unique_together: NULL variants would all be treated as
+        # distinct by Postgres, allowing duplicate no-variant lines. Line
+        # dedup (same product+variant = same line) is done in
+        # cart_service.py at the application level instead.
+        ordering = ['created_at']
 
     def __str__(self):
         return f'{self.product.name_bn} × {self.quantity}'
@@ -739,10 +901,17 @@ class SalesOrderItem(models.Model):
     unit_price          = models.DecimalField(max_digits=12, decimal_places=2)
     quantity            = models.DecimalField(max_digits=10, decimal_places=3)
     line_total          = models.DecimalField(max_digits=12, decimal_places=2)
-    # Snapshot of the color picked at add-to-cart/checkout time — see
-    # CartItem.color_bn/color_en for the full rationale.
-    color_bn             = models.CharField(max_length=40, blank=True, default='')
-    color_en             = models.CharField(max_length=40, blank=True, default='')
+    # The specific variant ordered, snapshotted at checkout time — see
+    # CartItem.variant for the full rationale. SET_NULL so a variant being
+    # deleted later can't block deleting/editing it, or vanish the order
+    # line; variant_label_bn/en below is what actually renders on
+    # invoices/order history regardless.
+    variant = models.ForeignKey(
+        'ProductVariant', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
+    variant_label_bn = models.CharField(max_length=200, blank=True, default='')
+    variant_label_en = models.CharField(max_length=200, blank=True, default='')
 
 
 class Exchange(BaseModel):

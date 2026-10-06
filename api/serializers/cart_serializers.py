@@ -17,7 +17,7 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = CartItem
-        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'color_bn', 'color_en',
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'variant', 'variant_label_bn', 'variant_label_en',
                   'unit_price', 'original_unit_price', 'quantity', 'line_total', 'stock_on_hand',
                   'is_package', 'package_items', 'product_image', 'weight_kg']
         read_only_fields = ['id']
@@ -36,16 +36,17 @@ class CartItemSerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(img.image.url) if request else img.image.url
 
     def get_stock_on_hand(self, obj):
-        return str(obj.product.stock_on_hand)
+        return str(obj.variant.stock_on_hand if obj.variant_id else obj.product.stock_on_hand)
 
     def get_unit_price(self, obj):
-        return str(obj.product.effective_price)
+        return str(obj.variant.effective_price if obj.variant_id else obj.product.effective_price)
 
     def get_original_unit_price(self, obj):
         return str(obj.product.original_price)
 
     def get_line_total(self, obj):
-        return str(obj.product.effective_price * obj.quantity)
+        unit_price = obj.variant.effective_price if obj.variant_id else obj.product.effective_price
+        return str(unit_price * obj.quantity)
 
     def get_package_items(self, obj):
         if not obj.product.is_package:
@@ -108,6 +109,11 @@ class CartSerializer(serializers.ModelSerializer):
 class AddToCartSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    variant_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    # Transitional bridge for callers still sending a plain color string
+    # instead of variant_id (e.g. the AI chatbot) — see
+    # Product.resolve_color_variant. The storefront now sends variant_id
+    # directly once a product has any variants.
     color_bn   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
     color_en   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
 
@@ -120,6 +126,16 @@ class AddToCartSerializer(serializers.Serializer):
                 'message_en': 'Product not found',
             })
         data['product'] = product
+        if data.get('variant_id'):
+            variant = product.variants.filter(id=data['variant_id']).first()
+            if not variant:
+                raise serializers.ValidationError({
+                    'message_bn': 'ভ্যারিয়েন্ট পাওয়া যায়নি',
+                    'message_en': 'Variant not found',
+                })
+            data['variant'] = variant
+        else:
+            data['variant'] = product.resolve_color_variant(data.get('color_bn', ''), data.get('color_en', ''))
         return data
 
 

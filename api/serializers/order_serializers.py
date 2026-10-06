@@ -11,12 +11,29 @@ class SalesOrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = SalesOrderItem
-        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_image', 'color_bn', 'color_en',
+        fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_image', 'variant', 'variant_label_bn', 'variant_label_en',
                   'original_unit_price', 'unit_price', 'quantity', 'line_total',
                   'is_package', 'package_items']
 
     def get_product_image(self, obj):
-        img = obj.product.images.first()
+        img = None
+        if obj.variant_id and obj.product.visual_attribute_type_id:
+            # Find this order line's variant's value for whichever attribute
+            # type the product's photos are organized by (almost always
+            # Color) — plain .all() so this reads from the
+            # prefetch_related('items__variant__attribute_values__attribute_value')
+            # cache instead of re-querying per item.
+            value_id = next(
+                (
+                    av.attribute_value_id for av in obj.variant.attribute_values.all()
+                    if av.attribute_value.attribute_type_id == obj.product.visual_attribute_type_id
+                ),
+                None,
+            )
+            if value_id:
+                img = next((i for i in obj.product.images.all() if i.visual_value_id == value_id), None)
+        if not img:
+            img = obj.product.images.all()[0] if obj.product.images.all() else None
         if not img:
             return None
         request = self.context.get('request')
@@ -379,10 +396,7 @@ class PartialDeliverSerializer(serializers.Serializer):
 class AddOrderItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
-    # Single free-text field — staff correcting/setting a color on an
-    # existing order, not a translated customer-facing selection (see
-    # OrderService.add_item, which stores this into both color_bn/color_en).
-    color      = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
+    variant_id = serializers.UUIDField(required=False, allow_null=True, default=None)
 
     def validate_product_id(self, value):
         if not Product.objects.filter(id=value, is_active=True).exists():
@@ -401,6 +415,7 @@ class ExchangeReturnItemSerializer(serializers.Serializer):
 class ExchangeReplacementItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    variant_id = serializers.UUIDField(required=False, allow_null=True, default=None)
 
     def validate_product_id(self, value):
         if not Product.objects.filter(id=value, is_active=True).exists():

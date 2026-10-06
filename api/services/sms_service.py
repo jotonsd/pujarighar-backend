@@ -6,6 +6,7 @@ import time
 import requests
 
 from api.models import SiteSetting, SmsLog
+from api.utils.phone import to_english_digits
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +37,6 @@ _RESPONSE_MEANINGS = {
 }
 
 
-_BENGALI_DIGITS = str.maketrans('০১২৩৪৫৬৭৮৯', '0123456789')
-
-
 def sms_segment_count(message: str) -> int:
     """Billed SMS units for `message` — GSM-7 (plain ASCII) gets 160 chars
     for 1 segment then 153/part once multi-part; anything with a non-ASCII
@@ -62,7 +60,7 @@ def _normalize_bd_phone(phone: str) -> str | None:
     first — Python's \\D doesn't strip them since re treats Unicode decimal
     digits as \\d by default, so they'd otherwise sail through unnoticed and
     fail normalization below."""
-    phone = (phone or '').translate(_BENGALI_DIGITS)
+    phone = to_english_digits(phone)
     digits = re.sub(r'\D', '', phone)
     if digits.startswith('880') and len(digits) == 13:
         return digits

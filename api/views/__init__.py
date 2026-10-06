@@ -20,6 +20,11 @@ from .stock_views import (
     get_stock, adjust_stock, update_stock_movement, get_purchase_report, get_supplier_return_report,
     list_package_items, add_package_item, delete_package_item,
 )
+from .variant_views import (
+    list_attribute_types, create_attribute_type, attribute_type_detail,
+    list_attribute_values, create_attribute_value, attribute_value_detail,
+    generate_product_variants, variant_detail,
+)
 from .cart_views import (
     get_cart, add_to_cart, update_cart_item,
     clear_cart, checkout, get_cart_report,

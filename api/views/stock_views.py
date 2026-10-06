@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
-from api.models import Product, ProductPackageItem, StockMovement
+from api.models import Product, ProductPackageItem, ProductVariant, StockMovement
 from api.serializers.product_serializers import (
     StockMovementSerializer, StockAdjustSerializer, StockMovementUpdateSerializer,
     PackageItemReadSerializer, PackageItemWriteSerializer,
@@ -42,7 +42,13 @@ def adjust_stock(request, pk):
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
-        d        = serializer.validated_data
+        d = serializer.validated_data
+        variant = None
+        if d.get('variant_id'):
+            try:
+                variant = ProductVariant.objects.get(pk=d['variant_id'], product=product)
+            except ProductVariant.DoesNotExist:
+                return ApiResponse(message="Variant not found", errors="Not found", status_code=404)
         movement = _svc.adjust_stock(
             product, d['movement_type'], d['quantity'],
             d.get('note_bn', ''), d.get('note_en', ''), request.user,
@@ -52,6 +58,7 @@ def adjust_stock(request, pk):
             supplier_name=d.get('supplier_name', ''),
             payment_method=d.get('payment_method', 'CASH'),
             date=d.get('date'),
+            variant=variant,
         )
         return ApiResponse(
             message="Stock adjusted",

@@ -5,6 +5,7 @@ import requests
 
 from api.models import CourierConsignment, CourierProvider, SalesOrder
 from api.utils.crypto import decrypt_token
+from api.utils.phone import to_english_digits
 from .base import BaseCourierService
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class SteadfastCourierService(BaseCourierService):
         payload = {
             'invoice': order.order_number,
             'recipient_name': name,
-            'recipient_phone': order.shipping_phone,
+            'recipient_phone': to_english_digits(order.shipping_phone),
             'recipient_address': address,
             'cod_amount': str(cod_amount),
             'note': note or order.notes_en or order.notes_bn or '',

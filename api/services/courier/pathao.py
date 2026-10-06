@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from api.models import CourierConsignment, CourierProvider, SalesOrder
 from api.utils.crypto import decrypt_token, encrypt_token
+from api.utils.phone import to_english_digits
 from .base import BaseCourierService
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class PathaoCourierService(BaseCourierService):
             'store_id': int(self.provider.store_id),
             'merchant_order_id': order.order_number,
             'recipient_name': name,
-            'recipient_phone': order.shipping_phone,
+            'recipient_phone': to_english_digits(order.shipping_phone),
             'recipient_address': address,
             'delivery_type': 48,   # Normal Delivery
             'item_type': 2,        # Parcel

@@ -316,8 +316,9 @@ class SSLCommerzService:
                 unit_price           = Decimal(snap['unit_price']),
                 quantity             = Decimal(snap['quantity']),
                 line_total           = Decimal(snap['line_total']),
-                color_bn             = snap.get('color_bn', ''),
-                color_en             = snap.get('color_en', ''),
+                variant_id           = snap.get('variant_id') or None,
+                variant_label_bn     = snap.get('variant_label_bn', ''),
+                variant_label_en     = snap.get('variant_label_en', ''),
             )
 
         self._deduct_stock(order)
@@ -430,18 +431,18 @@ class SSLCommerzService:
         exactly, just triggered at payment confirmation instead of
         checkout time for an online order that's only just been created."""
         user = order.customer or User.objects.filter(role__code='ADMIN').first()
-        for item in order.items.select_related('product'):
+        for item in order.items.select_related('product', 'variant'):
             product = item.product
             if product.is_package:
-                for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+                for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                     StockMovement.objects.create(
-                        product=pi.component, movement_type='SALE',
+                        product=pi.component, variant=pi.component_variant, movement_type='SALE',
                         quantity=-(pi.quantity * item.quantity), reference_id=order.id,
                         created_by=user,
                     )
             else:
                 StockMovement.objects.create(
-                    product=product, movement_type='SALE',
+                    product=product, variant=item.variant, movement_type='SALE',
                     quantity=-item.quantity, reference_id=order.id,
                     created_by=user,
                 )

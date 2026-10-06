@@ -61,12 +61,12 @@ class GuestCheckoutService:
 
         # Validate stock for all items
         for item in items:
-            self._validate_stock(item['product'], item['quantity'])
+            self._validate_stock(item['product'], item['quantity'], variant=item.get('variant'))
 
         order_number = generate_order_number()
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
-        subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
+        subtotal          = sum((i['variant'].effective_price if i.get('variant') else i['product'].effective_price) * i['quantity'] for i in items)
 
         # Optional staff-applied order discount (POS only) — layered on top of
         # any product-level discount, clamped so revenue can't go negative.
@@ -143,17 +143,20 @@ class GuestCheckoutService:
         )
 
         for item in items:
+            variant = item.get('variant')
+            unit_price = variant.effective_price if variant else item['product'].effective_price
             SalesOrderItem.objects.create(
                 order                = order,
                 product              = item['product'],
                 product_name_bn      = item['product'].name_bn,
                 product_name_en      = item['product'].name_en,
                 original_unit_price  = item['product'].original_price,
-                unit_price           = item['product'].effective_price,
+                unit_price           = unit_price,
                 quantity             = item['quantity'],
-                line_total           = item['product'].effective_price * item['quantity'],
-                color_bn             = item.get('color_bn', ''),
-                color_en             = item.get('color_en', ''),
+                line_total           = unit_price * item['quantity'],
+                variant              = variant,
+                variant_label_bn     = variant.label(True) if variant else '',
+                variant_label_en     = variant.label(False) if variant else '',
             )
             # Same deferral as CheckoutService.checkout — COD (and POS,
             # which has already collected payment in person regardless of
@@ -161,7 +164,7 @@ class GuestCheckoutService:
             # checkout defers to SSLCommerzService.confirm_payment so an
             # abandoned/failed payment never holds real inventory hostage.
             if payment_method == 'COD' or is_pos:
-                self._deduct_stock(item['product'], item['quantity'], order.id)
+                self._deduct_stock(item['product'], item['quantity'], order.id, variant=variant)
 
         system_user = self._get_system_user()
         OrderStatusLog.objects.create(
@@ -196,10 +199,10 @@ class GuestCheckoutService:
         source = 'MOBILE_APP' if is_mobile_app else 'WEBSITE'
 
         for item in items:
-            self._validate_stock(item['product'], item['quantity'])
+            self._validate_stock(item['product'], item['quantity'], variant=item.get('variant'))
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)
-        subtotal          = sum(i['product'].effective_price * i['quantity'] for i in items)
+        subtotal          = sum((i['variant'].effective_price if i.get('variant') else i['product'].effective_price) * i['quantity'] for i in items)
 
         # Promo codes are registered-customer only — see checkout() above.
         mobile_app_discount_amount = Decimal('0')
@@ -230,11 +233,12 @@ class GuestCheckoutService:
                 'product_name_bn':     item['product'].name_bn,
                 'product_name_en':     item['product'].name_en,
                 'quantity':            str(item['quantity']),
-                'unit_price':          str(item['product'].effective_price),
+                'unit_price':          str(item['variant'].effective_price if item.get('variant') else item['product'].effective_price),
                 'original_unit_price': str(item['product'].original_price),
-                'line_total':          str(item['product'].effective_price * item['quantity']),
-                'color_bn':            item.get('color_bn', ''),
-                'color_en':            item.get('color_en', ''),
+                'line_total':          str((item['variant'].effective_price if item.get('variant') else item['product'].effective_price) * item['quantity']),
+                'variant_id':          str(item['variant'].id) if item.get('variant') else None,
+                'variant_label_bn':    item['variant'].label(True) if item.get('variant') else '',
+                'variant_label_en':    item['variant'].label(False) if item.get('variant') else '',
             }
             for item in items
         ]
@@ -273,33 +277,35 @@ class GuestCheckoutService:
     def _get_system_user(self):
         return User.objects.filter(role__code='ADMIN').first()
 
-    def _validate_stock(self, product, quantity: Decimal) -> None:
+    def _validate_stock(self, product, quantity: Decimal, variant=None) -> None:
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
-                if pi.component.stock_on_hand < pi.quantity * quantity:
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
+                target = pi.component_variant if pi.component_variant else pi.component
+                if target.stock_on_hand < pi.quantity * quantity:
                     raise ValidationError({
                         'message_bn': f'{pi.component.name_bn}: পর্যাপ্ত স্টক নেই',
                         'message_en': f'{pi.component.name_en}: Insufficient stock',
                     })
         else:
-            if product.stock_on_hand < quantity:
+            target = variant if variant else product
+            if target.stock_on_hand < quantity:
                 raise ValidationError({
                     'message_bn': 'পর্যাপ্ত স্টক নেই',
                     'message_en': 'Insufficient stock',
                 })
 
-    def _deduct_stock(self, product, quantity: Decimal, order_id) -> None:
+    def _deduct_stock(self, product, quantity: Decimal, order_id, variant=None) -> None:
         user = self._get_system_user()
         if product.is_package:
-            for pi in ProductPackageItem.objects.filter(package=product).select_related('component'):
+            for pi in ProductPackageItem.objects.filter(package=product).select_related('component', 'component_variant'):
                 StockMovement.objects.create(
-                    product=pi.component, movement_type='SALE',
+                    product=pi.component, variant=pi.component_variant, movement_type='SALE',
                     quantity=-(pi.quantity * quantity),
                     reference_id=order_id, created_by=user,
                 )
         else:
             StockMovement.objects.create(
-                product=product, movement_type='SALE',
+                product=product, variant=variant, movement_type='SALE',
                 quantity=-quantity, reference_id=order_id, created_by=user,
             )
 

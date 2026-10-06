@@ -6,6 +6,10 @@ from api.models import Product
 class GuestCartItemSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     quantity   = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal('0.001'))
+    variant_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    # Transitional bridge for callers (e.g. the AI chatbot, older frontend
+    # builds) still sending a plain color string instead of a variant_id —
+    # see Product.resolve_color_variant.
     color_bn   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
     color_en   = serializers.CharField(required=False, allow_blank=True, default='', max_length=40)
 
@@ -18,6 +22,16 @@ class GuestCartItemSerializer(serializers.Serializer):
                 'message_en': 'Product not found',
             })
         data['product'] = product
+        if data.get('variant_id'):
+            variant = product.variants.filter(id=data['variant_id']).first()
+            if not variant:
+                raise serializers.ValidationError({
+                    'message_bn': 'ভ্যারিয়েন্ট পাওয়া যায়নি',
+                    'message_en': 'Variant not found',
+                })
+            data['variant'] = variant
+        else:
+            data['variant'] = product.resolve_color_variant(data.get('color_bn', ''), data.get('color_en', ''))
         return data
 
 
