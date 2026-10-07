@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import qrcode
 from django.http import HttpResponse
+from PIL import Image as PILImage, ImageDraw
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -19,6 +20,7 @@ logger    = logging.getLogger(__name__)
 _FONT_DIR = os.path.join(os.path.dirname(__file__), '..', 'fonts')
 _FONT_URL = f"file://{os.path.abspath(os.path.join(_FONT_DIR, 'NotoSansBengali-Regular.ttf'))}"
 _LOGO_URL = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets', 'logo.png'))}"
+_BRAHMAN_LOGO_PATH = os.path.join(os.path.dirname(__file__), '..', 'assets', 'brahman.png')
 
 SHOP_NAME_BN = 'পূজারিঘর'
 SHOP_NAME_EN = 'PujariGhar'
@@ -28,11 +30,41 @@ SHOP_WEB     = 'pujarighar.com'
 SHOP_ADDRESS = 'Dhaka, Bangladesh'
 
 
-def _qr_data_uri(url: str) -> str:
-    qr = qrcode.QRCode(version=1, box_size=4, border=1)
+def _qr_data_uri(url: str, center_logo: bool = False) -> str:
+    qr = qrcode.QRCode(
+        version=1,
+        box_size=4,
+        border=1,
+        # A center logo covers part of the code, so this needs the highest
+        # error-correction level (tolerates ~30% obstruction) to stay
+        # scannable — same reasoning as the web QR cards' errorCorrectionLevel "H".
+        error_correction=qrcode.constants.ERROR_CORRECT_H if center_logo else qrcode.constants.ERROR_CORRECT_M,
+    )
     qr.add_data(url)
     qr.make(fit=True)
-    img = qr.make_image(fill_color='black', back_color='white')
+    img = qr.make_image(fill_color='black', back_color='white').convert('RGB')
+
+    if center_logo and os.path.exists(_BRAHMAN_LOGO_PATH):
+        logo = PILImage.open(_BRAHMAN_LOGO_PATH).convert('RGBA')
+        # ~22% of the QR's width, matching the proportion used on the web's
+        # QR promo cards — big enough to read, small enough to stay scannable.
+        target = int(img.width * 0.22)
+        logo.thumbnail((target, target), PILImage.LANCZOS)
+
+        # Round white backdrop behind the logo (matches the circular badge
+        # used on the web's QR cards) — a plain square left visible
+        # corners poking into the QR's modules.
+        pad = int(target * 0.18)
+        backdrop_size = target + pad * 2
+        backdrop = PILImage.new('RGBA', (backdrop_size, backdrop_size), (255, 255, 255, 255))
+        backdrop.paste(logo, (pad, pad), logo)
+        circle_mask = PILImage.new('L', (backdrop_size, backdrop_size), 0)
+        ImageDraw.Draw(circle_mask).ellipse((0, 0, backdrop_size, backdrop_size), fill=255)
+        backdrop.putalpha(circle_mask)
+
+        pos = ((img.width - backdrop_size) // 2, (img.height - backdrop_size) // 2)
+        img.paste(backdrop, pos, backdrop)
+
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
@@ -205,7 +237,10 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
     if note_text.strip():
         notes_html = f'<div class="note-block"><b>{t("নোট:","Note:")}</b> {note_text}</div>'
 
-    qr_uri = _qr_data_uri('https://pujarighar.com')
+    qr_uri = _qr_data_uri(
+        'https://play.google.com/store/apps/details?id=com.pujarighar.pujarighar_app',
+        center_logo=True,
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="{lang}">
@@ -427,7 +462,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
 <div class="totals-wrap">
   <div class="totals-qr">
     <img src="{qr_uri}" alt="QR">
-    <p>pujarighar.com</p>
+    <p>{t('অ্যাপ ডাউনলোড করুন', 'Download our app')}</p>
   </div>
   <div class="totals-table-wrap">
     <table class="totals-table">
