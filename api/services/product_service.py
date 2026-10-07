@@ -145,7 +145,7 @@ class ProductService:
         qs = self._with_discount_annotations(qs)
         # A product's own unit_price is meaningless once pricing has moved
         # onto its variants (price_override per variant, unit_price often
-        # left at 0) — same fallback as Product._base_price(): the
+        # left at 0) — same fallback as Product._fallback_base_price(): the
         # cheapest active variant's override, else unit_price.
         cheapest_variant_price = Subquery(
             ProductVariant.objects.filter(
