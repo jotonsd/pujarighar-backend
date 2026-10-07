@@ -5,13 +5,13 @@ from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 from django.db import transaction
-from django.db.models import Avg, Case, Count, DecimalField, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Sum, Value, When
+from django.db.models import Avg, Case, Count, DecimalField, Exists, ExpressionWrapper, F, FloatField, IntegerField, Q, Subquery, OuterRef, Sum, Value, When
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
     Account, Brand, Category, Discount, JournalEntry, JournalLine, Product, ProductPackageItem, ProductView,
-    StockMovement, Supplier, PRODUCT_BADGES,
+    SalesOrderItem, StockMovement, Supplier, PRODUCT_BADGES,
     VariantAttributeType, VariantAttributeValue, ProductVariant, ProductVariantValue,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive
@@ -111,6 +111,19 @@ class ProductService:
             Value(Decimal('0'), output_field=DecimalField(max_digits=12, decimal_places=3)),
         ))
 
+    def _with_deletability(self, qs):
+        """Admin-list-only annotation (see list_products' include_inactive
+        branch) mirroring the exact same rule the real delete endpoint
+        enforces (product_views.py's _delete_product_or_raise) — lets the
+        Product List page hide its per-row Delete button for anything that
+        would actually be refused, instead of letting the admin click it
+        and find out. Cheap EXISTS subqueries, short-circuit on first match."""
+        return qs.annotate(_can_delete=~(
+            Exists(SalesOrderItem.objects.filter(product=OuterRef('pk')))
+            | Exists(StockMovement.objects.filter(product=OuterRef('pk'), payment_method='CASH'))
+            | Exists(ProductPackageItem.objects.filter(component=OuterRef('pk')))
+        ))
+
     def _with_discount_annotations(self, qs):
         """The single active Discount per product (if any) — shared base for
         both _with_effective_price and the discount_asc/desc ordering below,
@@ -150,6 +163,11 @@ class ProductService:
         qs = self._with_ratings(qs)
         qs = self._with_stock(qs)
         qs = self._with_effective_price(qs)
+        if include_inactive:
+            # Only the admin Product List passes include_inactive=True —
+            # the storefront never needs per-row deletability, so this
+            # extra set of EXISTS subqueries stays off the public hot path.
+            qs = self._with_deletability(qs)
         if is_active is not None:
             qs = qs.filter(is_active=str(is_active).lower() == 'true')
         elif not include_inactive:

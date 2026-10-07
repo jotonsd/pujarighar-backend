@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
@@ -187,15 +188,19 @@ def update_product(request, pk):
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
-# A product can only be hard-deleted when nothing PROTECTs it — ordered
-# (SalesOrderItem), ever stocked (StockMovement, even before a single sale),
-# or used as a component inside a package (ProductPackageItem). Everything
-# else referencing a product (images, variants, cart items, discounts,
-# reviews, view logs) is CASCADE and disappears silently, same as it always
-# would on a real delete.
+# A product can only be hard-deleted if it was never actually SOLD
+# (SalesOrderItem, real PROTECT), isn't used as a component inside a
+# package (ProductPackageItem, real PROTECT), and has no CASH-paid stock
+# movement — real money was already spent on that stock, so it shouldn't
+# just vanish. CREDIT-only stock history (never paid for in cash) is
+# cascade-deleted along with the product, on the assumption that un-sold,
+# unpaid stock is safe to discard. Note: StockMovement.product is itself a
+# DB-level PROTECT, so credit movements must be cleared explicitly before
+# the product can be removed; that's the only reason
+# _delete_product_or_raise exists instead of a bare product.delete().
 _DELETE_BLOCK_REASONS = {
     'SalesOrderItem':     ('এটি অর্ডার করা হয়েছে', 'It has been ordered'),
-    'StockMovement':      ('এর স্টক এন্ট্রি আছে', 'It has stock movement history'),
+    'StockMovement':      ('এর নগদ ক্রয় এন্ট্রি আছে', 'It has a cash purchase entry'),
     'ProductPackageItem': ('এটি একটি প্যাকেজের উপাদান', 'It is used as a component inside a package'),
 }
 
@@ -204,6 +209,20 @@ def _delete_reason(exc: ProtectedError) -> tuple:
     blocking = next(iter(exc.protected_objects), None)
     model_name = type(blocking).__name__ if blocking else ''
     return _DELETE_BLOCK_REASONS.get(model_name, ('মুছে ফেলা যাচ্ছে না', 'Cannot be deleted'))
+
+
+def _delete_product_or_raise(product: Product) -> None:
+    """Raises ProtectedError (caught by callers) if the product has been
+    sold, is used inside a package, or has any cash-paid stock purchase —
+    otherwise removes it along with its (credit-only) stock ledger,
+    atomically."""
+    cash_movements = list(product.stock_movements.filter(payment_method='CASH'))
+    if cash_movements:
+        raise ProtectedError('Product has cash-paid stock movements', cash_movements)
+
+    with transaction.atomic():
+        product.stock_movements.all().delete()
+        product.delete()
 
 
 @api_view(['DELETE'])
@@ -215,7 +234,7 @@ def delete_product(_request, pk):
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
 
     try:
-        product.delete()
+        _delete_product_or_raise(product)
         return ApiResponse(message="Product deleted")
     except ProtectedError as e:
         reason_bn, reason_en = _delete_reason(e)
@@ -249,7 +268,7 @@ def bulk_delete_products(request):
     for product in Product.objects.filter(id__in=ids):
         name = product.name_en or product.name_bn
         try:
-            product.delete()
+            _delete_product_or_raise(product)
             deleted += 1
         except ProtectedError as e:
             reason_bn, reason_en = _delete_reason(e)

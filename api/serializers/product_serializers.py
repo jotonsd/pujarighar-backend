@@ -184,6 +184,13 @@ class ProductSerializer(serializers.ModelSerializer):
     active_discount_value = serializers.SerializerMethodField()
     average_rating        = serializers.FloatField(read_only=True, default=None)
     review_count          = serializers.IntegerField(read_only=True, default=0)
+    can_delete            = serializers.SerializerMethodField()
+
+    def get_can_delete(self, obj):
+        # Only annotated for the admin Product List (ProductService.
+        # list_products' include_inactive branch) — None everywhere else,
+        # since the storefront/detail fetch never needs this.
+        return getattr(obj, '_can_delete', None)
 
     def _active_discount(self, obj):
         today = timezone.now().date()
@@ -254,7 +261,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'unit_bn', 'unit_en', 'weight_kg',
             'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
             'stock_on_hand', 'images', 'package_items', 'variants', 'variant_attribute_types', 'visual_attribute_type_code',
-            'average_rating', 'review_count',
+            'average_rating', 'review_count', 'can_delete',
             'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
             'focus_keyword', 'canonical_url',
             'created_at', 'updated_at',
