@@ -388,8 +388,6 @@ class CourierService:
         consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
         consignment.save()
 
-        self._post_delivery_expense_if_needed(consignment, self._get_system_user())
-
         CourierTrackingEvent.objects.create(
             consignment=consignment,
             status=consignment.status,
@@ -423,6 +421,15 @@ class CourierService:
             if raw_status == 'pending' and 'sent to' in message.lower():
                 action = 'DISPATCH'
             self._apply_courier_status_to_order(consignment, action)
+            # The courier's reported delivery_charge is only the REAL,
+            # final cost once the parcel is actually delivered — an
+            # intermediate status update (e.g. "in review", a hub transfer)
+            # can carry a delivery_charge field too, and posting the
+            # expense off that would book it before the order is DELIVERED.
+            # Gated to the same action as the self-delivery expense (only
+            # ever posted from OrderService.deliver()).
+            if action == 'DELIVER':
+                self._post_delivery_expense_if_needed(consignment, self._get_system_user())
         self._notify_admins(consignment, tracking_message=message)
 
     @transaction.atomic
@@ -451,8 +458,6 @@ class CourierService:
         consignment.raw_response = {**consignment.raw_response, 'last_webhook': payload}
         consignment.save()
 
-        self._post_delivery_expense_if_needed(consignment, self._get_system_user())
-
         extra_note = self._pathao_extra_note(payload)
         message = payload.get('reason', '') or extra_note
         CourierTrackingEvent.objects.create(
@@ -463,7 +468,17 @@ class CourierService:
         )
         logger.info(f'Pathao webhook applied to consignment {consignment.id} ({event})')
 
-        self._apply_courier_status_to_order(consignment, self._PATHAO_EVENT_ACTIONS.get(event))
+        action = self._PATHAO_EVENT_ACTIONS.get(event)
+        self._apply_courier_status_to_order(consignment, action)
+        # Pathao includes a delivery_fee on intermediate events too (e.g.
+        # order.assigned-for-delivery, fired when a rider is assigned —
+        # well before the parcel is actually delivered), not just on
+        # order.delivered. Posting the expense off any webhook that merely
+        # carries the field would book it before the order is DELIVERED —
+        # gated to the same action as the self-delivery expense (only ever
+        # posted from OrderService.deliver()).
+        if action == 'DELIVER':
+            self._post_delivery_expense_if_needed(consignment, self._get_system_user())
         # Every webhook hit notifies admins, no exceptions — including
         # order.created, even though that moment is also visible immediately
         # in the UI response to "Send to Courier" (this is Pathao's own

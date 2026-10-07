@@ -263,15 +263,21 @@ class AccountingService:
         year_start = local_day_start(date(current_year, 1, 1))
         year_end   = local_day_end_exclusive(date(current_year, 12, 31))
 
-        # Monthly revenue from account 4000 credits (current year) — includes all paid
-        # orders. Bucketed by local month in Python (see api/utils/dates.py).
+        # Monthly revenue from every REVENUE-type account (current year) — not
+        # just Sales Revenue (4000): Delivery Income (4200) and Other Income
+        # (4300) are real income too, and Sales Discount/Returns (4050/4100)
+        # are contra-revenue accounts that correctly net OUT of the total via
+        # the debit side below. Bucketed by local month in Python (see
+        # api/utils/dates.py). Net of debit, same reasoning as _rev() below —
+        # credit-only would overstate revenue whenever a return/cancellation
+        # lands in the same window as the sale it's reversing.
         revenue_map: dict = defaultdict(lambda: Decimal('0'))
-        for created_at, credit in JournalLine.objects.filter(
-            account__code='4000',
+        for created_at, debit, credit in JournalLine.objects.filter(
+            account__account_type='REVENUE',
             journal_entry__created_at__gte=year_start,
             journal_entry__created_at__lt=year_end,
-        ).values_list('journal_entry__created_at', 'credit'):
-            revenue_map[local_period_bucket(created_at, 'month')] += credit
+        ).values_list('journal_entry__created_at', 'debit', 'credit'):
+            revenue_map[local_period_bucket(created_at, 'month')] += credit - debit
 
         # Monthly expense from journal lines (current year)
         expense_map: dict = defaultdict(lambda: Decimal('0'))
@@ -309,12 +315,19 @@ class AccountingService:
             last_month_end   = month_start - timedelta(days=1)
 
         def _rev(date_from, date_to):
-            # Use account 4000 (Revenue) journal lines, net of any reversal
-            # (a RETURN/CANCEL debits 4000 to reverse revenue) — credit-only
-            # would overstate revenue whenever a return/cancellation lands in
-            # the same window as the sale it's reversing.
+            # Every REVENUE-type account, not just Sales Revenue (4000) —
+            # Delivery Income (4200, what a courier/self-delivery charge
+            # nets after _post_delivery_expense_if_needed's own expense
+            # line) and Other Income (4300) are real income too, and
+            # omitting them understated revenue while _exp() below already
+            # counts the FULL expense side (including delivery expense),
+            # making "this month profit" asymmetric. Net of any reversal (a
+            # RETURN/CANCEL debits a revenue account to reverse it) —
+            # credit-only would overstate revenue whenever a return/
+            # cancellation lands in the same window as the sale it's
+            # reversing.
             agg = JournalLine.objects.filter(
-                account__code='4000',
+                account__account_type='REVENUE',
                 journal_entry__created_at__gte=local_day_start(date_from),
                 journal_entry__created_at__lt=local_day_end_exclusive(date_to),
             ).aggregate(d=Sum('debit'), c=Sum('credit'))
