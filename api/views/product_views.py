@@ -197,7 +197,7 @@ def delete_product(_request, pk):
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
 
 
-MAX_IMAGES = 5
+MAX_IMAGES = 6
 
 def _maybe_set_visual_attribute_type(product, images):
     """First time any photo on this product is tagged with a value, that
