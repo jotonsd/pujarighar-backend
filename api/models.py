@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_CEILING
 from uuid import uuid4
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.contrib.postgres.indexes import GinIndex
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -323,6 +324,19 @@ class Product(BaseModel):
             # indexes automatically — only `is_active` (a plain boolean,
             # filtered on almost every list_products call) needs one here.
             models.Index(fields=['is_active']),
+            # Badge timestamp fields — filtered with `__gte` on every
+            # homepage New/Trendy/Flash Sale rail (see
+            # ProductService.list_products/BADGE_WINDOW).
+            models.Index(fields=['new_badge_set_at']),
+            models.Index(fields=['trendy_badge_set_at']),
+            models.Index(fields=['flash_sale_badge_set_at']),
+            # `badges__contains=[...]` on the same rails.
+            GinIndex(fields=['badges']),
+            # Product search is `icontains`, which a plain btree index can't
+            # accelerate — needs pg_trgm (enabled via migration) + GIN.
+            GinIndex(fields=['name_bn'], name='product_name_bn_trgm', opclasses=['gin_trgm_ops']),
+            GinIndex(fields=['name_en'], name='product_name_en_trgm', opclasses=['gin_trgm_ops']),
+            GinIndex(fields=['sku'], name='product_sku_trgm', opclasses=['gin_trgm_ops']),
         ]
 
     def __str__(self):
@@ -645,6 +659,11 @@ class StockMovement(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        # Backs the "cash/credit stock" correlated subquery on
+        # list_products (one per product row) and the admin
+        # purchase/supplier-return reports' movement_type + date-range
+        # filters.
+        indexes = [models.Index(fields=['product', 'movement_type', '-created_at'])]
 
     def clean(self):
         if self.variant and self.variant.product_id != self.product_id:
@@ -882,6 +901,13 @@ class SalesOrder(BaseModel):
             models.Index(fields=['status']),
             models.Index(fields=['payment_status']),
             models.Index(fields=['shipping_phone']),
+            models.Index(fields=['source']),
+            # order_number/shipping_phone/shipping_name_bn are all searched
+            # with icontains — a plain btree index (like shipping_phone's
+            # above) can't accelerate that, needs pg_trgm + GIN.
+            GinIndex(fields=['order_number'], name='order_number_trgm', opclasses=['gin_trgm_ops']),
+            GinIndex(fields=['shipping_phone'], name='shipping_phone_trgm', opclasses=['gin_trgm_ops']),
+            GinIndex(fields=['shipping_name_bn'], name='shipping_name_trgm', opclasses=['gin_trgm_ops']),
         ]
 
     def __str__(self):
@@ -1463,6 +1489,9 @@ class Review(BaseModel):
     class Meta:
         ordering = ['-created_at']
         unique_together = [('product', 'order', 'user')]
+        # Backs the rating/review-count subquery run on every product-list
+        # page load (ProductService._with_ratings).
+        indexes = [models.Index(fields=['product', 'is_approved'])]
 
     def __str__(self):
         return f'{self.user.email} → {self.product.name_en} ({self.rating}★)'
