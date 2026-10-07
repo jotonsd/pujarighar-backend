@@ -2,6 +2,7 @@ import os
 from collections import deque
 
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
@@ -60,3 +61,13 @@ def get_log_file(request, filename):
         'name': filename,
         'lines': [line.rstrip('\n') for line in tail],
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def clear_cache(request):
+    # Wipes every get_or_set key this caching pass added (popular_by_category,
+    # list_products:*, similar_products:*, list_banners, list_hero_slides) —
+    # whichever backend is active (Redis or the DatabaseCache fallback).
+    cache.clear()
+    return ApiResponse(message='Cache cleared')

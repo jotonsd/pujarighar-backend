@@ -1,6 +1,7 @@
 import logging
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.core.cache import cache
 
 from api.models import HeroSlide
 from api.serializers.hero_slide_serializers import HeroSlideSerializer
@@ -14,8 +15,13 @@ logger = logging.getLogger(__name__)
 @permission_classes([AllowAny])
 def list_hero_slides(request):
     try:
-        qs = HeroSlide.objects.filter(is_active=True)
-        return ApiResponse(message="Slides retrieved", data=HeroSlideSerializer(qs, many=True, context={'request': request}).data)
+        def _compute():
+            qs = HeroSlide.objects.filter(is_active=True)
+            return HeroSlideSerializer(qs, many=True, context={'request': request}).data
+        # Matches the frontend's own 300s revalidate window for this same
+        # data (HeroSlider.tsx) — consistent staleness budget end-to-end.
+        data = cache.get_or_set('list_hero_slides', _compute, 300)
+        return ApiResponse(message="Slides retrieved", data=data)
     except Exception as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=500)
 

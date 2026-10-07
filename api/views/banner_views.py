@@ -1,6 +1,7 @@
 import logging
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.core.cache import cache
 
 from api.models import Banner
 from api.serializers.banner_serializers import BannerSerializer
@@ -14,8 +15,13 @@ logger = logging.getLogger(__name__)
 @permission_classes([AllowAny])
 def list_banners(request):
     try:
-        qs = Banner.objects.filter(is_active=True)
-        return ApiResponse(message="Banners retrieved", data=BannerSerializer(qs, many=True, context={'request': request}).data)
+        def _compute():
+            qs = Banner.objects.filter(is_active=True)
+            return BannerSerializer(qs, many=True, context={'request': request}).data
+        # Matches the frontend's own 300s revalidate window for this same
+        # data (OfferBanners.tsx) — consistent staleness budget end-to-end.
+        data = cache.get_or_set('list_banners', _compute, 300)
+        return ApiResponse(message="Banners retrieved", data=data)
     except Exception as e:
         return ApiResponse(message=str(e), errors=str(e), status_code=500)
 

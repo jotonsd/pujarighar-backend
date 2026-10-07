@@ -97,6 +97,9 @@ CHANNEL_LAYERS = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Compresses every text response (JSON/HTML/CSS/JS) — Django's documented
+    # placement is right after SecurityMiddleware, near the top.
+    'django.middleware.gzip.GZipMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'api.middleware.MaintenanceModeMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -153,6 +156,18 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL   = '/media/'
 MEDIA_ROOT  = BASE_DIR / 'media'
 
+# Content-hashed filenames (e.g. app.a1b2c3.css) — a file changing content
+# always gets a new name, which is what makes a far-future Cache-Control on
+# /static/ safe to set at the web server level without ever serving stale CSS/JS.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage',
+    },
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
@@ -208,10 +223,13 @@ CRUX_API_KEY                   = config('CRUX_API_KEY', default='')
 
 # ─── Cache ─────────────────────────────────────────────────────────────────────
 # Django's default (no CACHES set) is a per-process LocMemCache — harmless with a
-# single dev server, but silently broken behind multiple Gunicorn workers (each
-# worker gets its own disconnected cache, so a cache "hit" only happens if you land
-# on the same worker twice). Point REDIS_URL at a real Redis instance in production
-# so all workers share one cache; falls back to locmem when unset (local dev).
+# single dev server, but silently broken behind multiple Gunicorn/Passenger workers
+# (each worker gets its own disconnected cache, so a cache "hit" only happens if you
+# land on the same worker twice). Point REDIS_URL at a real Redis instance in
+# production so all workers share one cache. When it's unset, fall back to a
+# DatabaseCache (not locmem) — still correctly shared across every worker process
+# without needing Redis installed on a shared/Passenger host, just a plain table
+# (`python manage.py createcachetable`, run once per environment).
 REDIS_URL = config('REDIS_URL', default='')
 if REDIS_URL:
     CACHES = {
@@ -219,6 +237,13 @@ if REDIS_URL:
             'BACKEND': 'django_redis.cache.RedisCache',
             'LOCATION': REDIS_URL,
             'OPTIONS': {'CLIENT_CLASS': 'django_redis.client.DefaultClient'},
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'django_cache',
         }
     }
 

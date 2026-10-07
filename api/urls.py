@@ -265,6 +265,7 @@ urlpatterns = [
     # ─── Logs ──────────────────────────────────────────────────────────────────
     path('logs/',              views.list_log_files, name='log-list'),
     path('logs/<str:filename>/', views.get_log_file,  name='log-detail'),
+    path('admin/clear-cache/', views.clear_cache,     name='admin-clear-cache'),
 
     # ─── Google Analytics / Search Console Integration ────────────────────────
     path('analytics/google/connect-url/', views.google_connect_url, name='analytics-google-connect-url'),

@@ -3,6 +3,7 @@ from decimal import Decimal
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.core.cache import cache
 from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
 from django.db.models.functions import Coalesce
 
@@ -27,6 +28,20 @@ def _ctx(request):
 def list_products(request):
     try:
         include_inactive = request.query_params.get('include_inactive', '').lower() == 'true'
+        ordering_param = request.query_params.get('ordering')
+        # ProductService.list_products skips its personalization branch
+        # entirely whenever an explicit `ordering` is passed (e.g. the
+        # homepage's "New Arrivals"/"Trendy" rails) — making the response
+        # identical for every visitor, so it's safe to cache by the query
+        # string alone. Never caches the default/no-ordering path, which IS
+        # personalized per user/guest, or the admin's include_inactive view.
+        cache_key = None
+        if ordering_param and not include_inactive:
+            cache_key = 'list_products:' + request.get_full_path()
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return ApiResponse(**cached)
+
         # Personalized default ordering is a storefront-only concern — admin
         # staff browsing the catalog (who also trigger ProductView rows when
         # opening a product's edit page) should still get a stable, predictable
@@ -55,11 +70,14 @@ def list_products(request):
         if search and (user or guest_id):
             SearchLog.objects.create(user=user, guest_id=guest_id, query=search[:200])
 
-        return ApiResponse(
+        response_kwargs = dict(
             message="Products retrieved successfully",
             data=ProductSerializer(page_data, many=True, context=_ctx(request)).data,
             pagination=pagination,
         )
+        if cache_key:
+            cache.set(cache_key, response_kwargs, 180)
+        return ApiResponse(**response_kwargs)
     except Exception as e:
         logger.error(f"List products error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=500)
@@ -105,11 +123,15 @@ def get_similar_products(request, pk):
         limit = int(request.query_params.get('limit', 12))
     except ValueError:
         limit = 12
-    products = _svc.get_similar_products(pk, limit=limit)
-    return ApiResponse(
-        message="Similar products retrieved",
-        data=ProductSerializer(products, many=True, context=_ctx(request)).data,
-    )
+
+    def _compute():
+        products = _svc.get_similar_products(pk, limit=limit)
+        return ProductSerializer(products, many=True, context=_ctx(request)).data
+
+    # Per-product, not per-visitor — identical for every caller asking
+    # about the same product.
+    data = cache.get_or_set(f'similar_products:{pk}:{limit}', _compute, 600)
+    return ApiResponse(message="Similar products retrieved", data=data)
 
 
 @api_view(['GET'])
@@ -269,6 +291,10 @@ def delete_product_image(request, pk, image_id):
 @permission_classes([AllowAny])
 def popular_by_category(request):
     try:
+        cached = cache.get('popular_by_category')
+        if cached is not None:
+            return ApiResponse(message="Popular by category", data=cached)
+
         sold_sq = Subquery(
             SalesOrderItem.objects.filter(
                 product_id=OuterRef('pk'),
@@ -293,6 +319,7 @@ def popular_by_category(request):
                     'category': CategorySerializer(cat).data,
                     'products': ProductSerializer(products, many=True, context={'request': request}).data,
                 })
+        cache.set('popular_by_category', result, 600)
         return ApiResponse(message="Popular by category", data=result)
     except Exception as e:
         logger.error(f"popular_by_category error: {e}", exc_info=True)
