@@ -403,6 +403,23 @@ class Product(BaseModel):
             .first()
         )
 
+    def _base_price(self) -> Decimal:
+        """A product's own unit_price is meaningless once pricing has moved
+        onto its variants (price_override per variant, unit_price often
+        left at 0) — mirrors ProductVariant.effective_price's own fallback
+        (price_override if set, else product.unit_price) so the product-level
+        price shown in admin lists/pickers isn't a flat ৳0 for a
+        variant-priced product. Uses the cheapest active variant's price as
+        the representative "starting from" figure."""
+        if not self.is_package:
+            overridden = [
+                v.price_override for v in self.variants.all()
+                if v.is_active and v.price_override is not None
+            ]
+            if overridden:
+                return min(overridden)
+        return self.unit_price
+
     @property
     def effective_price(self) -> Decimal:
         # ProductService.list_products annotates `_effective_price` via a
@@ -411,11 +428,13 @@ class Product(BaseModel):
         annotated = getattr(self, '_effective_price', None)
         if annotated is not None:
             return annotated
-        return apply_discount(self.unit_price, self._active_discount())
+        return apply_discount(self._base_price(), self._active_discount())
 
     @property
     def original_price(self) -> Decimal:
-        """For packages: sum of component unit_prices. For regular products: unit_price."""
+        """For packages: sum of component unit_prices. For variant-priced
+        products: cheapest active variant's price. For regular products:
+        unit_price."""
         if self.is_package:
             total = sum(
                 (item.component.unit_price * item.quantity
@@ -423,7 +442,7 @@ class Product(BaseModel):
                 Decimal('0'),
             )
             return total if total > 0 else self.unit_price
-        return self.unit_price
+        return self._base_price()
 
     @property
     def stock_on_hand(self) -> Decimal:

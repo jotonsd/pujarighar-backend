@@ -16,7 +16,7 @@ def paginate_queryset(queryset, request: Request, default_page_size: int = 20):
         page = 1
 
     try:
-        page_size = max(1, min(100, int(request.query_params.get("page_size", default_page_size))))
+        page_size = max(1, min(1000, int(request.query_params.get("page_size", default_page_size))))
     except (TypeError, ValueError):
         page_size = default_page_size
 

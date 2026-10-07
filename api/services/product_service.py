@@ -143,17 +143,28 @@ class ProductService:
         property name — Product.effective_price reads this annotation back
         when present instead of re-querying per instance."""
         qs = self._with_discount_annotations(qs)
+        # A product's own unit_price is meaningless once pricing has moved
+        # onto its variants (price_override per variant, unit_price often
+        # left at 0) — same fallback as Product._base_price(): the
+        # cheapest active variant's override, else unit_price.
+        cheapest_variant_price = Subquery(
+            ProductVariant.objects.filter(
+                product=OuterRef('pk'), is_active=True, price_override__isnull=False,
+            ).order_by('price_override').values('price_override')[:1],
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+        qs = qs.annotate(_base_price=Coalesce(cheapest_variant_price, F('unit_price')))
         return qs.annotate(
             _effective_price=Case(
                 When(_disc_type='PERCENTAGE', then=ExpressionWrapper(
-                    F('unit_price') - F('unit_price') * F('_disc_val') / Value(Decimal('100')),
+                    F('_base_price') - F('_base_price') * F('_disc_val') / Value(Decimal('100')),
                     output_field=DecimalField(max_digits=12, decimal_places=2),
                 )),
                 When(_disc_type='FLAT', then=ExpressionWrapper(
-                    Greatest(Value(Decimal('0')), F('unit_price') - F('_disc_val')),
+                    Greatest(Value(Decimal('0')), F('_base_price') - F('_disc_val')),
                     output_field=DecimalField(max_digits=12, decimal_places=2),
                 )),
-                default=F('unit_price'),
+                default=F('_base_price'),
                 output_field=DecimalField(max_digits=12, decimal_places=2),
             )
         )
