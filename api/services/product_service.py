@@ -419,7 +419,9 @@ class ProductService:
 class StockService:
 
     def get_stock_detail(self, product: Product) -> dict:
-        movements = StockMovement.objects.filter(product=product).select_related('created_by')[:20]
+        movements = StockMovement.objects.filter(product=product).select_related(
+            'created_by', 'variant',
+        ).prefetch_related('variant__attribute_values__attribute_value')[:20]
         return {
             'stock_on_hand': str(product.stock_on_hand),
             'movements':     movements,

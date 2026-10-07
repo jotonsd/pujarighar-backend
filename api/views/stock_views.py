@@ -74,7 +74,7 @@ def adjust_stock(request, pk):
 @permission_classes([IsAuthenticated, has_permission('inventory_stock', 'edit')])
 def update_stock_movement(request, pk, movement_id):
     try:
-        movement = StockMovement.objects.select_related('product').get(pk=movement_id, product_id=pk)
+        movement = StockMovement.objects.select_related('product', 'variant').get(pk=movement_id, product_id=pk)
     except StockMovement.DoesNotExist:
         return ApiResponse(message="Movement not found", errors="Not found", status_code=404)
 

@@ -310,11 +310,14 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
 class StockMovementSerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
     supplier_display = serializers.SerializerMethodField()
+    variant_label_bn = serializers.SerializerMethodField()
+    variant_label_en = serializers.SerializerMethodField()
 
     class Meta:
         model  = StockMovement
         fields = [
-            'id', 'product', 'movement_type', 'quantity', 'unit_cost',
+            'id', 'product', 'variant', 'variant_label_bn', 'variant_label_en',
+            'movement_type', 'quantity', 'unit_cost',
             'supplier', 'supplier_name', 'supplier_display', 'payment_method',
             'reference_id', 'note_bn', 'note_en',
             'created_by', 'created_by_email', 'created_at',
@@ -325,6 +328,12 @@ class StockMovementSerializer(serializers.ModelSerializer):
         if obj.supplier:
             return obj.supplier.name_bn or obj.supplier.name_en
         return obj.supplier_name or ''
+
+    def get_variant_label_bn(self, obj):
+        return obj.variant.label(True) if obj.variant_id else ''
+
+    def get_variant_label_en(self, obj):
+        return obj.variant.label(False) if obj.variant_id else ''
 
 
 class StockAdjustSerializer(serializers.Serializer):
@@ -356,8 +365,12 @@ class StockAdjustSerializer(serializers.Serializer):
 class StockMovementUpdateSerializer(serializers.Serializer):
     """Corrects a mistaken PURCHASE/SUPPLIER_RETURN entry — deliberately does
     NOT accept movement_type/product (those never change on an edit, only
-    the numbers that were entered wrong)."""
+    the numbers that were entered wrong). variant_id DOES change on an edit
+    (unlike product) — it's for the real case of picking the wrong color/
+    size when the entry was first made; empty string reassigns to no
+    variant (the product-level ledger)."""
     quantity       = serializers.DecimalField(max_digits=12, decimal_places=3, required=False)
+    variant_id     = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     unit_cost      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     unit_price     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
     supplier_id    = serializers.UUIDField(required=False, allow_null=True)

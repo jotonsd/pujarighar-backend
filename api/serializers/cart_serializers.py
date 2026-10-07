@@ -29,7 +29,23 @@ class CartItemSerializer(serializers.ModelSerializer):
         return str(obj.product.weight_kg or Decimal('0'))
 
     def get_product_image(self, obj):
-        img = obj.product.images.order_by('order').first()
+        img = None
+        if obj.variant_id and obj.product.visual_attribute_type_id:
+            # Find this cart line's variant's value for whichever attribute
+            # type the product's photos are organized by (almost always
+            # Color) — same resolution SalesOrderItemSerializer uses, so a
+            # cart line shows the same photo its eventual order line will.
+            value_id = next(
+                (
+                    av.attribute_value_id for av in obj.variant.attribute_values.all()
+                    if av.attribute_value.attribute_type_id == obj.product.visual_attribute_type_id
+                ),
+                None,
+            )
+            if value_id:
+                img = next((i for i in obj.product.images.all() if i.visual_value_id == value_id), None)
+        if not img:
+            img = obj.product.images.order_by('order').first()
         if not img:
             return None
         request = self.context.get('request')
