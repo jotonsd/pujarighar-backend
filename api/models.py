@@ -1243,7 +1243,10 @@ class HeroSlide(BaseModel):
 
     def save(self, *args, **kwargs):
         if self.image and not getattr(self.image, '_committed', True):
-            resize_image_field(self.image)
+            # Full-width hero banners carry more visual detail than a
+            # product thumbnail — 80KB's quality floor shows on an image
+            # that large, so give it a bigger budget.
+            resize_image_field(self.image, target_bytes=150 * 1024)
         super().save(*args, **kwargs)
 
     def __str__(self):
