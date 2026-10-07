@@ -12,7 +12,12 @@ def _get_user(token: str):
     from api.models import User
     try:
         validated = AccessToken(token)
-        return User.objects.get(id=validated['user_id'])
+        # select_related('role') — consumers check user.role.code (e.g. the
+        # ADMIN-only gate in LogFileListConsumer/LogTailConsumer) inside
+        # `async def connect()`; a lazy FK fetched there would trigger a
+        # synchronous DB query mid-coroutine, which Django's async-safety
+        # guard rejects with SynchronousOnlyOperation.
+        return User.objects.select_related('role').get(id=validated['user_id'])
     except (TokenError, User.DoesNotExist, KeyError):
         return AnonymousUser()
 
