@@ -462,7 +462,7 @@ def _build_html(order: SalesOrder, lang: str, is_admin: bool = False, page_size:
 <div class="totals-wrap">
   <div class="totals-qr">
     <img src="{qr_uri}" alt="QR">
-    <p>{t('অ্যাপ ডাউনলোড করুন', 'Download our app')}</p>
+    <p>{t('অ্যাপ ডাউনলোড', 'Download App')}</p>
   </div>
   <div class="totals-table-wrap">
     <table class="totals-table">
