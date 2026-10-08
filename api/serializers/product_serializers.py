@@ -171,8 +171,28 @@ class ProductSerializer(serializers.ModelSerializer):
     stock_on_hand        = serializers.DecimalField(max_digits=12, decimal_places=3, read_only=True)
     images               = ProductImageSerializer(many=True, read_only=True)
     package_items        = PackageItemReadSerializer(many=True, read_only=True)
-    variants             = ProductVariantSerializer(many=True, read_only=True)
+    variants             = serializers.SerializerMethodField()
     variant_attribute_types = serializers.SerializerMethodField()
+
+    def _visible_variants(self, obj):
+        """Deactivated variants (e.g. a permanently out-of-stock color the
+        admin hid) must never reach a customer — selectable, auto-picked as
+        a default, or even listed as an available pill — otherwise a
+        storefront visitor can land on a product with that dead variant
+        resolved and see "out of stock" despite other variants having real
+        stock. Staff (anyone not a CUSTOMER) still sees everything, since
+        the admin product-edit page's VariantsPanel needs to list and
+        reactivate deactivated variants. Filters the already-prefetched
+        `obj.variants.all()` in Python rather than a fresh `.filter(...)`
+        query, so this doesn't reintroduce an N+1 on product list pages."""
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        is_staff = bool(user and user.is_authenticated and getattr(user, 'role', None) and user.role.code != 'CUSTOMER')
+        variants = list(obj.variants.all())
+        return variants if is_staff else [v for v in variants if v.is_active]
+
+    def get_variants(self, obj):
+        return ProductVariantSerializer(self._visible_variants(obj), many=True, context=self.context).data
     visual_attribute_type_code = serializers.CharField(source='visual_attribute_type.code', read_only=True, default=None)
     category_name_bn     = serializers.CharField(source='category.name_bn', read_only=True)
     category_name_en     = serializers.CharField(source='category.name_en', read_only=True)
@@ -224,7 +244,7 @@ class ProductSerializer(serializers.ModelSerializer):
         # variants list every time.
         codes = []
         seen = set()
-        for variant in obj.variants.all():
+        for variant in self._visible_variants(obj):
             for av in variant.attribute_values.all():
                 code = av.attribute_value.attribute_type.code
                 if code not in seen:
