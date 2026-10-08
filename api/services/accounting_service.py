@@ -357,29 +357,45 @@ class AccountingService:
         # Aligned by day number (1st vs 1st, 2nd vs 2nd, ...) rather than by
         # weekday, so the single-month overview chart shows how far this
         # month has progressed against the same point in the prior one.
-        def _daily_order_counts(date_from, date_to):
-            # Only DELIVERED/EXCHANGED — a real, kept sale — not every order
-            # ever placed regardless of what happened to it since (pending,
-            # cancelled, returned).
+        def _daily_order_stats(date_from, date_to, status_filter):
+            # Returns per-day (count, amount) for orders matching status_filter
+            # — a Q object or kwargs-style filter applied to SalesOrder.
             counts: dict = defaultdict(int)
-            for created_at in SalesOrder.objects.filter(
-                status__in=('DELIVERED', 'EXCHANGED'),
+            amounts: dict = defaultdict(lambda: Decimal('0'))
+            qs = SalesOrder.objects.filter(
                 created_at__gte=local_day_start(date_from),
                 created_at__lt=local_day_end_exclusive(date_to),
-            ).values_list('created_at', flat=True):
-                counts[local_period_bucket(created_at, 'day').day] += 1
-            return counts
+            ).filter(status_filter)
+            for created_at, grand_total in qs.values_list('created_at', 'grand_total'):
+                d = local_period_bucket(created_at, 'day').day
+                counts[d] += 1
+                amounts[d] += grand_total
+            return counts, amounts
 
-        this_month_daily = _daily_order_counts(month_start, today)
-        last_month_daily = _daily_order_counts(last_month_start, last_month_end)
+        # "This month"/"last month" lines: only DELIVERED/EXCHANGED — a real,
+        # kept sale — not every order ever placed regardless of what
+        # happened to it since (pending, cancelled, returned).
+        _delivered_q = Q(status__in=('DELIVERED', 'EXCHANGED'))
+        this_month_daily, this_month_amt = _daily_order_stats(month_start, today, _delivered_q)
+        last_month_daily, last_month_amt = _daily_order_stats(last_month_start, last_month_end, _delivered_q)
+
+        # Extra "processing" line (this month only): still in play — not yet
+        # delivered/exchanged, and not cancelled/returned either.
+        _processing_q = ~Q(status__in=('DELIVERED', 'EXCHANGED', 'CANCELLED', 'RETURNED'))
+        this_month_processing_daily, this_month_processing_amt = _daily_order_stats(month_start, today, _processing_q)
+
         # Show the full previous month for context even though this month's
         # line necessarily stops at today.
         days_in_chart = max(calendar.monthrange(today.year, today.month)[1], last_month_end.day)
         order_comparison_chart = [
             {
-                'day':         d,
-                'this_month':  this_month_daily.get(d, 0),
-                'last_month':  last_month_daily.get(d, 0),
+                'day':                     d,
+                'this_month':              this_month_daily.get(d, 0),
+                'this_month_amount':       str(this_month_amt.get(d, Decimal('0'))),
+                'last_month':              last_month_daily.get(d, 0),
+                'last_month_amount':       str(last_month_amt.get(d, Decimal('0'))),
+                'this_month_processing':        this_month_processing_daily.get(d, 0),
+                'this_month_processing_amount': str(this_month_processing_amt.get(d, Decimal('0'))),
             }
             for d in range(1, days_in_chart + 1)
         ]
