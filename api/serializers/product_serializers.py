@@ -169,10 +169,15 @@ class PackageItemWriteSerializer(serializers.Serializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     stock_on_hand        = serializers.DecimalField(max_digits=12, decimal_places=3, read_only=True)
-    images               = ProductImageSerializer(many=True, read_only=True)
+    images               = serializers.SerializerMethodField()
     package_items        = PackageItemReadSerializer(many=True, read_only=True)
     variants             = serializers.SerializerMethodField()
     variant_attribute_types = serializers.SerializerMethodField()
+
+    def _is_staff(self):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        return bool(user and user.is_authenticated and getattr(user, 'role', None) and user.role.code != 'CUSTOMER')
 
     def _visible_variants(self, obj):
         """Deactivated variants (e.g. a permanently out-of-stock color the
@@ -185,11 +190,29 @@ class ProductSerializer(serializers.ModelSerializer):
         reactivate deactivated variants. Filters the already-prefetched
         `obj.variants.all()` in Python rather than a fresh `.filter(...)`
         query, so this doesn't reintroduce an N+1 on product list pages."""
-        request = self.context.get('request')
-        user = getattr(request, 'user', None) if request else None
-        is_staff = bool(user and user.is_authenticated and getattr(user, 'role', None) and user.role.code != 'CUSTOMER')
         variants = list(obj.variants.all())
-        return variants if is_staff else [v for v in variants if v.is_active]
+        return variants if self._is_staff() else [v for v in variants if v.is_active]
+
+    def get_images(self, obj):
+        # A photo tagged to a color (ProductImage.visual_value) is a
+        # separate record from the ProductVariant combination for that
+        # color — deactivating the variant doesn't touch the photo at all.
+        # Without this, a customer still sees the deactivated color's image
+        # in the gallery/carousel even though that color can no longer be
+        # selected, implying it's available when it isn't. Hide any image
+        # whose tagged value has no remaining ACTIVE variant using it
+        # (non-staff only) — an untagged image (visual_value is None) is
+        # never a variant photo, so it's always shown.
+        images = list(obj.images.all())
+        if self._is_staff():
+            return ProductImageSerializer(images, many=True, context=self.context).data
+        active_value_ids = {
+            av.attribute_value_id
+            for v in self._visible_variants(obj)
+            for av in v.attribute_values.all()
+        }
+        visible = [img for img in images if img.visual_value_id is None or img.visual_value_id in active_value_ids]
+        return ProductImageSerializer(visible, many=True, context=self.context).data
 
     def get_variants(self, obj):
         return ProductVariantSerializer(self._visible_variants(obj), many=True, context=self.context).data
