@@ -336,6 +336,50 @@ class OrderService:
         return order
 
     @transaction.atomic
+    def restore_delivery_charge(self, order: SalesOrder, user: User) -> SalesOrder:
+        """The counterpart to waive_delivery_charge — lets staff put the
+        delivery charge back on an order where it's currently 0, whether
+        that's from an explicit waive or from the order genuinely
+        qualifying for the free-delivery subtotal threshold. Deliberately
+        does NOT re-check that threshold (unlike change_delivery_zone,
+        which does) — the whole point of this action is a manual override
+        of the automatic waiver, not a recomputation that would just zero
+        it out again. Same PENDING/CONFIRMED + unpaid gate as its sibling
+        delivery actions; priced from the order's own estimated weight at
+        current DeliveryCharge rates, same source CheckoutService used."""
+        if order.status not in ('PENDING', 'CONFIRMED'):
+            raise ValidationError({
+                'message_bn': 'শুধুমাত্র পেন্ডিং বা নিশ্চিত অর্ডারে ডেলিভারি চার্জ যোগ করা যায়',
+                'message_en': 'Delivery charge can only be added on pending or confirmed orders',
+            })
+        if order.payment_status == 'PAID':
+            raise ValidationError({
+                'message_bn': 'পরিশোধিত অর্ডারে ডেলিভারি চার্জ যোগ করা যাবে না',
+                'message_en': 'Delivery charge cannot be added on an already-paid order',
+            })
+        if order.delivery_charge > 0:
+            raise ValidationError({
+                'message_bn': 'এই অর্ডারে ইতিমধ্যে ডেলিভারি চার্জ রয়েছে',
+                'message_en': 'This order already has a delivery charge',
+            })
+
+        zone = 'inside' if (order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
+        new_charge = DeliveryCharge.get().charge_for(zone, order.estimated_weight_kg)
+        if new_charge <= 0:
+            raise ValidationError({
+                'message_bn': 'এই ওজন ও অঞ্চলের জন্য ডেলিভারি চার্জের হার শূন্য',
+                'message_en': 'The delivery rate for this weight and zone is zero',
+            })
+
+        order.delivery_charge = new_charge
+        order.grand_total = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
+        order.save(update_fields=['delivery_charge', 'grand_total'])
+        self._resync_order_item_journal(order)
+
+        logger.info(f'Delivery charge restored on order {order.order_number} by {user.email} (৳{new_charge})')
+        return order
+
+    @transaction.atomic
     def change_delivery_zone(self, order: SalesOrder, zone: str, user: User) -> SalesOrder:
         """Let staff correct a wrong inside/outside-Dhaka pick on a not-yet-
         shipped, unpaid order — re-prices delivery from the order's own
