@@ -567,16 +567,23 @@ class CourierService:
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
 
-        # Telegram-only layout — reuses the exact same order-detail block as
-        # the order-lifecycle messages (mail_service._telegram_order_block),
-        # with courier-specific fields (Courier/Tracking Code/Status/Note)
-        # appended after it, rather than a plain sentence.
-        status_text = tracking_message or label_en
-        courier_lines = [f'Courier: {provider_short}']
+        # Telegram-only layout (Bengali) — 🚚 [Provider] অর্ডার X এখন <status>,
+        # then Tracking Code, then who/where to deliver to, then the rider
+        # note (if Pathao sent one) last. Deliberately no Email/Payment
+        # Method/Amount here — those matter for the order-lifecycle
+        # messages, not for a delivery-logistics ping. tracking_message has
+        # no Bengali translation (raw courier text), shown as-is either way.
+        status_text_bn = tracking_message or label_bn
+        name = order.shipping_name_bn or order.shipping_name_en or 'অতিথি'
+        address = order.shipping_address_bn or order.shipping_address_en or ''
+        location = ', '.join(p for p in [order.shipping_thana, order.shipping_district] if p)
+        full_address = ', '.join(p for p in [address, location] if p)
+        lines = [f'🚚 [{provider_short}] অর্ডার {order.order_number} এখন {status_text_bn}']
         if consignment.tracking_code:
-            courier_lines.append(f'Tracking Code: {consignment.tracking_code}')
-        courier_lines.append(f'Status: {status_text}')
+            lines.append(f'ট্র্যাকিং কোড: {consignment.tracking_code}')
+        lines.append(f'নাম: {name}')
+        lines.append(f'ফোন: {order.shipping_phone or "-"}')
+        lines.append(f'ঠিকানা: {full_address}')
         if extra_note:
-            courier_lines.append(f'Note: {extra_note}')
-        block = mail_service._telegram_order_block(order, '📦📦Courier Update📦📦')
-        send_courier_telegram_message(block + '\n' + '\n'.join(courier_lines))
+            lines.append(f'নোট: {extra_note}')
+        send_courier_telegram_message('\n'.join(lines))
