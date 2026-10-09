@@ -1561,6 +1561,12 @@ class SiteSetting(models.Model):
     # Telegram admin notifications
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id   = models.CharField(max_length=64, blank=True, default='')
+    # Courier webhook events (Pathao/Steadfast) are far higher-volume than
+    # the order-lifecycle events above (one order can fire 6-10+ of these),
+    # so they go to a separate group chat rather than drowning out the main
+    # one — same bot, just added to a second group. Blank disables this
+    # channel without affecting telegram_chat_id's own notifications at all.
+    telegram_courier_chat_id = models.CharField(max_length=64, blank=True, default='')
     # SMS customer notifications (BulkSMSBD)
     sms_api_key   = models.CharField(max_length=255, blank=True, default='')
     sms_sender_id = models.CharField(max_length=32, blank=True, default='')

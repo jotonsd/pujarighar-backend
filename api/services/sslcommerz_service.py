@@ -358,13 +358,7 @@ class SSLCommerzService:
         return order
 
     def _send_payment_telegram(self, order: SalesOrder) -> None:
-        _, method_en = self._method_label(order.payment_method)
-        send_telegram_message(
-            f"💳 <b>Payment Received — Order #{order.order_number}</b>\n"
-            f"Customer: {order.shipping_name_bn or order.shipping_name_en}\n"
-            f"Method: {method_en}\n"
-            f"Total: ৳{math.ceil(order.grand_total):,}"
-        )
+        send_telegram_message(mail_service._telegram_order_block(order, "💳💳Payment Received💳💳"))
 
     def _method_label(self, code: str) -> tuple[str, str]:
         """Friendly (bn, en) display name for a payment_method code, e.g.

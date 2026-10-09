@@ -13,6 +13,7 @@ from api.services.courier.registry import get_courier_service
 from api.services.notification_recipients import get_notified_users
 from api.services.notification_ws import broadcast_notifications
 from api.services.order_service import OrderService
+from api.services.telegram_service import send_courier_telegram_message
 from api.utils.journal_number import next_entry_number
 
 logger = logging.getLogger(__name__)
@@ -526,6 +527,7 @@ class CourierService:
         ]
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
+        send_courier_telegram_message(f'🔔🔔Webhook Verified🔔🔔\nCourier: {provider_short}')
 
     def _notify_admins(self, consignment: CourierConsignment, tracking_message: str = '', extra_note: str = '') -> None:
         """tracking_message: for a low-signal update with no actual status
@@ -564,3 +566,17 @@ class CourierService:
         ]
         Notification.objects.bulk_create(notifications)
         broadcast_notifications(notifications)
+
+        # Telegram-only layout — reuses the exact same order-detail block as
+        # the order-lifecycle messages (mail_service._telegram_order_block),
+        # with courier-specific fields (Courier/Tracking Code/Status/Note)
+        # appended after it, rather than a plain sentence.
+        status_text = tracking_message or label_en
+        courier_lines = [f'Courier: {provider_short}']
+        if consignment.tracking_code:
+            courier_lines.append(f'Tracking Code: {consignment.tracking_code}')
+        courier_lines.append(f'Status: {status_text}')
+        if extra_note:
+            courier_lines.append(f'Note: {extra_note}')
+        block = mail_service._telegram_order_block(order, '📦📦Courier Update📦📦')
+        send_courier_telegram_message(block + '\n' + '\n'.join(courier_lines))

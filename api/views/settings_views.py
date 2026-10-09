@@ -10,7 +10,7 @@ PAGE_SIZE_CHOICES  = ['A4', 'A5', 'LETTER', 'THERMAL']
 TEXT_FIELDS        = ['invoice_page_size', 'company_name_bn', 'company_name_en',
                       'contact_phone', 'contact_email', 'address_bn', 'address_en',
                       'email_host', 'email_host_user', 'email_host_password', 'email_default_from',
-                      'telegram_bot_token', 'telegram_chat_id',
+                      'telegram_bot_token', 'telegram_chat_id', 'telegram_courier_chat_id',
                       'gemini_api_key', 'gemini_model',
                       'whatsapp_phone_number_id', 'whatsapp_business_account_id',
                       'whatsapp_access_token', 'whatsapp_app_secret', 'whatsapp_verify_token']
@@ -60,6 +60,7 @@ def _serialize(s: SiteSetting, request=None) -> dict:
             'first_order_discount_percent': str(s.first_order_discount_percent),
             'has_telegram_bot_token':   bool(s.telegram_bot_token),
             'telegram_chat_id':         s.telegram_chat_id,
+            'telegram_courier_chat_id': s.telegram_courier_chat_id,
             'has_gemini_api_key':       bool(s.gemini_api_key),
             'gemini_model':             s.gemini_model,
             'ai_ordering_enabled':      s.ai_ordering_enabled,

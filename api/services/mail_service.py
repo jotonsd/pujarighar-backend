@@ -110,6 +110,30 @@ def _customer_display(order) -> str:
     return f'{label} ({email})' if email else label
 
 
+def _telegram_order_block(order, header: str) -> str:
+    """Shared multi-line Telegram layout for every order-lifecycle event
+    (new/cancelled/delivered/returned/payment) — Telegram only, the email
+    templates keep their own HTML layout untouched. Email line omitted
+    entirely when the order has none (guest/POS orders usually don't)."""
+    name = order.shipping_name_bn or order.shipping_name_en or 'Guest'
+    address = order.shipping_address_bn or order.shipping_address_en or ''
+    location = ', '.join(p for p in [order.shipping_thana, order.shipping_district] if p)
+    full_address = ', '.join(p for p in [address, location] if p)
+    lines = [
+        header,
+        f"Order No: {order.order_number}",
+        f"Name: {name}",
+        f"Phone: {order.shipping_phone or '-'}",
+    ]
+    email = _customer_email(order)
+    if email:
+        lines.append(f"Email: {email}")
+    lines.append(f"Address: {full_address}")
+    lines.append(f"Payment Method: {order.payment_method}")
+    lines.append(f"Amount: ৳{_fmt(order.grand_total)}")
+    return "\n".join(lines)
+
+
 def _fmt(value) -> str:
     try:
         return f'{Decimal(str(value)):,.2f}'
@@ -316,12 +340,7 @@ def send_order_created(order):
             """
         )
         _send_async(f"[PujariGhar] New Order #{order.order_number}", body, admins)
-        send_telegram_message(
-            f"🛒 <b>New Order #{order.order_number}</b>\n"
-            f"Customer: {_customer_display(order)}\n"
-            f"Payment: {order.payment_method} — {order.payment_status}\n"
-            f"Total: ৳{_fmt(order.grand_total)}"
-        )
+        send_telegram_message(_telegram_order_block(order, "🚀🚀New order🚀🚀"))
 
 
 def send_order_confirmed(order):
@@ -398,10 +417,7 @@ def send_order_cancelled(order):
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Cancelled", body, admins)
-        send_telegram_message(
-            f"❌ <b>Order Cancelled #{order.order_number}</b>\n"
-            f"Customer: {_customer_display(order)}"
-        )
+        send_telegram_message(_telegram_order_block(order, "❌❌Order Cancelled❌❌"))
 
 
 def send_order_delivered(order):
@@ -442,10 +458,7 @@ def send_order_delivered(order):
             """
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Delivered", body, admins)
-        send_telegram_message(
-            f"✅ <b>Order Delivered #{order.order_number}</b>\n"
-            f"Customer: {_customer_display(order)}"
-        )
+        send_telegram_message(_telegram_order_block(order, "✅✅Order Delivered✅✅"))
 
 
 def send_order_returned(order):
@@ -464,10 +477,7 @@ def send_order_returned(order):
         )
         _send_async(f"[PujariGhar] Order #{order.order_number} Returned", body, admins)
 
-    send_telegram_message(
-        f"↩️ <b>Order Returned #{order.order_number}</b>\n"
-        f"Customer: {_customer_display(order)}"
-    )
+    send_telegram_message(_telegram_order_block(order, "↩️↩️Order Returned↩️↩️"))
 
 
 # ── Promotional / marketing emails ──────────────────────────────────────────────
