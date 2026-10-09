@@ -885,6 +885,12 @@ class SalesOrder(BaseModel):
     promo_code_used = models.CharField(max_length=32, blank=True, default='')
     tax_amount          = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     delivery_charge     = models.DecimalField(max_digits=8,  decimal_places=2, default=0)
+    # Set by OrderService.waive_delivery_charge/restore_delivery_charge — a
+    # deliberate staff decision that recalculate_delivery_charge (triggered
+    # when assigning to a courier, which re-prices off the actual package
+    # weight) must respect instead of silently overwriting delivery_charge
+    # back to a nonzero rate.
+    delivery_charge_waived = models.BooleanField(default=False)
     # Snapshot of the cart's total weight (sum of product.weight_kg * qty)
     # at checkout time, used to compute delivery_charge above via
     # DeliveryCharge.charge_for() — kept for the record so a delivery-charge
