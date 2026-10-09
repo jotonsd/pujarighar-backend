@@ -179,8 +179,11 @@ class OrderService:
         already PAID (changing an already-collected amount would desync the
         books — same reasoning waive_delivery_charge applies elsewhere), so
         this never blocks assignment itself, it just silently leaves the
-        charge as-is in that case."""
-        if not weight or order.payment_status == 'PAID':
+        charge as-is in that case. Also skipped when delivery_charge_waived
+        is set (deliberately waived at creation, e.g. a POS sale) — without
+        this, sending the order to a courier would silently reinstate a
+        charge the staff explicitly decided the customer shouldn't pay."""
+        if not weight or order.payment_status == 'PAID' or order.delivery_charge_waived:
             return order
 
         zone = 'inside' if (order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
@@ -328,8 +331,9 @@ class OrderService:
 
         waived = order.delivery_charge
         order.delivery_charge = Decimal('0')
+        order.delivery_charge_waived = True
         order.grand_total = order.subtotal + order.tax_amount - order.cashback_used
-        order.save(update_fields=['delivery_charge', 'grand_total'])
+        order.save(update_fields=['delivery_charge', 'delivery_charge_waived', 'grand_total'])
         self._resync_order_item_journal(order)
 
         logger.info(f'Delivery charge waived on order {order.order_number} by {user.email} (৳{waived})')
@@ -372,8 +376,9 @@ class OrderService:
             })
 
         order.delivery_charge = new_charge
+        order.delivery_charge_waived = False
         order.grand_total = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
-        order.save(update_fields=['delivery_charge', 'grand_total'])
+        order.save(update_fields=['delivery_charge', 'delivery_charge_waived', 'grand_total'])
         self._resync_order_item_journal(order)
 
         logger.info(f'Delivery charge restored on order {order.order_number} by {user.email} (৳{new_charge})')
