@@ -13,8 +13,10 @@ from api.models import (
 from api.utils.dates import local_day_start, local_day_end_exclusive
 from api.utils.order_number import generate_order_number
 from api.utils.journal_number import next_entry_number
-from api.services.notification_ws import broadcast_notification
+from api.services.notification_ws import broadcast_notification, broadcast_notifications
+from api.services.notification_recipients import get_notified_users
 from api.services.push_service import send_push_to_user
+from api.services.telegram_service import send_telegram_message
 
 # Same district-set checkout_service.py/guest_service.py use to pick a zone
 # when the customer didn't explicitly choose one — the order itself has no
@@ -22,6 +24,36 @@ from api.services.push_service import send_push_to_user
 _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
 logger = logging.getLogger(__name__)
+
+
+def _staff_display(user: User) -> str:
+    """Who-did-it display name for a staff action notification — prefers the
+    profile's real name over the login email, same fallback order used
+    elsewhere (e.g. DeliveryAssignmentSerializer)."""
+    profile = getattr(user, 'profile', None)
+    name = (profile.full_name_bn or profile.full_name_en) if profile else ''
+    return name or user.email
+
+
+def _notify_order_edit(order: SalesOrder, title_bn: str, title_en: str, body_bn: str, body_en: str, telegram_text: str) -> None:
+    """Shared admin notification + Telegram ping for a staff price-editing
+    action on an order (discount applied, delivery charge waived/restored)
+    — these silently changed the order total with no visibility before,
+    unlike every customer-facing status change which already notified
+    admins. Goes to the main Telegram group (send_telegram_message), not
+    the courier one — this isn't a courier event."""
+    admins = get_notified_users()
+    notifications = [
+        Notification(
+            user=admin, title_bn=title_bn, title_en=title_en,
+            body_bn=body_bn, body_en=body_en,
+            reference_type='ORDER_EDITED', reference_id=order.id,
+        )
+        for admin in admins
+    ]
+    Notification.objects.bulk_create(notifications)
+    broadcast_notifications(notifications)
+    send_telegram_message(telegram_text)
 
 
 class OrderService:
@@ -292,6 +324,7 @@ class OrderService:
             extra_discount = discount_value
         extra_discount = min(extra_discount, order.subtotal)
 
+        previous_total = order.grand_total
         order.staff_discount_amount = (order.staff_discount_amount or Decimal('0')) + extra_discount
         order.save(update_fields=['staff_discount_amount'])
         self._recalc_order_totals(order)
@@ -305,6 +338,22 @@ class OrderService:
         self._resync_order_item_journal(order)
 
         logger.info(f'Discount applied to order {order.order_number} by {user.email}: {discount_type} {discount_value} (৳{extra_discount})')
+        staff = _staff_display(user)
+        _notify_order_edit(
+            order,
+            title_bn=f'ছাড় প্রয়োগ হয়েছে — {order.order_number}',
+            title_en=f'Discount Applied — {order.order_number}',
+            body_bn=f'{staff} অর্ডার #{order.order_number}-এ ৳{extra_discount} ছাড় প্রয়োগ করেছেন। (৳{previous_total} → ৳{order.grand_total})',
+            body_en=f'{staff} applied a ৳{extra_discount} discount on order #{order.order_number}. (৳{previous_total} → ৳{order.grand_total})',
+            telegram_text=(
+                f'🏷️🏷️ছাড় প্রয়োগ করা হয়েছে🏷️🏷️\n'
+                f'Order No: {order.order_number}\n'
+                f'Staff: {staff}\n'
+                f'ছাড়: {discount_type} {discount_value} (৳{extra_discount})\n'
+                f'আগের মোট: ৳{previous_total}\n'
+                f'নতুন মোট: ৳{order.grand_total}'
+            ),
+        )
         return order
 
     @transaction.atomic
@@ -330,6 +379,7 @@ class OrderService:
             })
 
         waived = order.delivery_charge
+        previous_total = order.grand_total
         order.delivery_charge = Decimal('0')
         order.delivery_charge_waived = True
         order.grand_total = order.subtotal + order.tax_amount - order.cashback_used
@@ -337,6 +387,22 @@ class OrderService:
         self._resync_order_item_journal(order)
 
         logger.info(f'Delivery charge waived on order {order.order_number} by {user.email} (৳{waived})')
+        staff = _staff_display(user)
+        _notify_order_edit(
+            order,
+            title_bn=f'ডেলিভারি চার্জ মওকুফ — {order.order_number}',
+            title_en=f'Delivery Charge Waived — {order.order_number}',
+            body_bn=f'{staff} অর্ডার #{order.order_number}-এর ৳{waived} ডেলিভারি চার্জ মওকুফ করেছেন। (৳{previous_total} → ৳{order.grand_total})',
+            body_en=f'{staff} waived the ৳{waived} delivery charge on order #{order.order_number}. (৳{previous_total} → ৳{order.grand_total})',
+            telegram_text=(
+                f'🚿🚿ডেলিভারি চার্জ মওকুফ করা হয়েছে🚿🚿\n'
+                f'Order No: {order.order_number}\n'
+                f'Staff: {staff}\n'
+                f'মওকুফকৃত চার্জ: ৳{waived}\n'
+                f'আগের মোট: ৳{previous_total}\n'
+                f'নতুন মোট: ৳{order.grand_total}'
+            ),
+        )
         return order
 
     @transaction.atomic
@@ -375,6 +441,7 @@ class OrderService:
                 'message_en': 'The delivery rate for this weight and zone is zero',
             })
 
+        previous_total = order.grand_total
         order.delivery_charge = new_charge
         order.delivery_charge_waived = False
         order.grand_total = order.subtotal + order.delivery_charge + order.tax_amount - order.cashback_used
@@ -382,6 +449,22 @@ class OrderService:
         self._resync_order_item_journal(order)
 
         logger.info(f'Delivery charge restored on order {order.order_number} by {user.email} (৳{new_charge})')
+        staff = _staff_display(user)
+        _notify_order_edit(
+            order,
+            title_bn=f'ডেলিভারি চার্জ যোগ হয়েছে — {order.order_number}',
+            title_en=f'Delivery Charge Restored — {order.order_number}',
+            body_bn=f'{staff} অর্ডার #{order.order_number}-এ ৳{new_charge} ডেলিভারি চার্জ যোগ করেছেন। (৳{previous_total} → ৳{order.grand_total})',
+            body_en=f'{staff} added back a ৳{new_charge} delivery charge on order #{order.order_number}. (৳{previous_total} → ৳{order.grand_total})',
+            telegram_text=(
+                f'🚚🚚ডেলিভারি চার্জ যোগ করা হয়েছে🚚🚚\n'
+                f'Order No: {order.order_number}\n'
+                f'Staff: {staff}\n'
+                f'যোগকৃত চার্জ: ৳{new_charge}\n'
+                f'আগের মোট: ৳{previous_total}\n'
+                f'নতুন মোট: ৳{order.grand_total}'
+            ),
+        )
         return order
 
     @transaction.atomic
