@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 
 from api.models import (
     Account, CourierConsignment, CourierProvider, CourierReturnRequest, CourierTrackingEvent,
-    JournalEntry, JournalLine, Notification, SalesOrder, User,
+    JournalEntry, JournalLine, Notification, OrderStatusLog, SalesOrder, User,
 )
 from api.services import mail_service
 from api.services.courier.registry import get_courier_service
@@ -470,6 +470,25 @@ class CourierService:
 
         action = self._PATHAO_EVENT_ACTIONS.get(event)
         self._apply_courier_status_to_order(consignment, action)
+        # order.assigned-for-delivery means a rider has actually been handed
+        # the parcel for the last-mile drop — a meaningfully different
+        # moment from the generic "In Transit" (order.in-transit) that
+        # usually already got the order to ON_THE_WAY, but one our own
+        # state machine has no separate status for (it's still just
+        # ON_THE_WAY). Logged as its own informational timeline entry
+        # instead of a real SalesOrder.status transition, so the customer
+        # sees "Rider Assigned" without inventing a new order status this
+        # app-wide state machine would otherwise need to know about.
+        # Steadfast has no equivalent granular signal (see
+        # _STEADFAST_STATUS_ACTIONS' notes on its single 'pending' status
+        # covering this whole span), so this is Pathao-only by construction.
+        if event == 'order.assigned-for-delivery' and not consignment.order.status_logs.filter(to_status='RIDER_ASSIGNED').exists():
+            OrderStatusLog.objects.create(
+                order=consignment.order,
+                from_status=consignment.order.status,
+                to_status='RIDER_ASSIGNED',
+                changed_by=self._get_system_user(),
+            )
         # Pathao includes a delivery_fee on intermediate events too (e.g.
         # order.assigned-for-delivery, fired when a rider is assigned —
         # well before the parcel is actually delivered), not just on

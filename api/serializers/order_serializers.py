@@ -89,6 +89,9 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
             'PICKED': 'পিকড', 'ON_THE_WAY': 'পথে আছে', 'DELIVERED': 'ডেলিভারড',
             'PARTIALLY_DELIVERED': 'আংশিক ডেলিভারি হয়েছে',
             'RETURNED': 'ফেরত', 'CANCELLED': 'বাতিল',
+            # Informational-only marker (see courier_service.handle_pathao_webhook) —
+            # not a real SalesOrder.status value, just a timeline entry.
+            'RIDER_ASSIGNED': 'ডেলিভারির জন্য রাইডার নির্ধারিত হয়েছে',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=True)
@@ -103,6 +106,7 @@ class OrderStatusLogSerializer(serializers.ModelSerializer):
             'PICKED': 'Picked', 'ON_THE_WAY': 'Transit', 'DELIVERED': 'Delivered',
             'PARTIALLY_DELIVERED': 'Partially Delivered',
             'RETURNED': 'Returned', 'CANCELLED': 'Cancelled',
+            'RIDER_ASSIGNED': 'Rider Assigned for Delivery',
         }
         if obj.to_status == 'ASSIGNED':
             courier_label = _courier_status_label(obj.order, is_bn=False)
