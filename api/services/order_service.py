@@ -255,7 +255,13 @@ class OrderService:
         if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
             order.payment_status = 'PAID'
             order.save(update_fields=['payment_status'])
-        if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+        # Also check for an existing SALE entry (POS non-COD posts one
+        # immediately at checkout, see guest_service._create_sale_journal) —
+        # without this, a POS card/bKash order reaching DELIVERED would post
+        # a second journal crediting Revenue/Delivery Income again and
+        # debiting Cash on top of the AR already booked, double-counting
+        # both revenue and cash on hand for the same sale.
+        if not JournalEntry.objects.filter(reference_type__in=('SALE', 'PAYMENT'), reference_id=order.id).exists():
             self._create_payment_journal(order, user)
         # Self-delivery (no courier involved) pays the rider the full
         # delivery charge collected from the customer — a pass-through, not
@@ -743,7 +749,10 @@ class OrderService:
             if order.payment_method == 'COD' and order.payment_status == 'UNPAID':
                 order.payment_status = 'PAID'
                 order.save(update_fields=['payment_status'])
-            if not JournalEntry.objects.filter(reference_type='PAYMENT', reference_id=order.id).exists():
+            # Same SALE-aware guard as deliver() — a POS non-COD order could
+            # already have a SALE entry posted at checkout, even though it
+            # never reached full DELIVERED.
+            if not JournalEntry.objects.filter(reference_type__in=('SALE', 'PAYMENT'), reference_id=order.id).exists():
                 self._create_partial_payment_journal(order, user, returned_value, returned_cogs)
             if not hasattr(order, 'courier_consignment'):
                 self._create_self_delivery_expense_journal(order, user)
