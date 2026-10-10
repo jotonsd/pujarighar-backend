@@ -1958,6 +1958,12 @@ class CourierProvider(models.Model):
     access_token_encrypted   = models.TextField(blank=True, default='')
     refresh_token_encrypted  = models.TextField(blank=True, default='')
     token_expires_at         = models.DateTimeField(null=True, blank=True)
+    # Some couriers (e.g. Pathao) deduct a cash-handling/collection fee —
+    # a percentage of the COD amount actually collected — before remitting
+    # the rest, on top of the delivery_charge already accounted for
+    # separately. 0 by default (no behavior change for a provider that
+    # doesn't charge one, or until an admin configures the real rate here).
+    cod_fee_percent          = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     created_at               = models.DateTimeField(auto_now_add=True)
     updated_at               = models.DateTimeField(auto_now=True)
 

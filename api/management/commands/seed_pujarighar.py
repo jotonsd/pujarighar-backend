@@ -68,6 +68,7 @@ class Command(BaseCommand):
             ('6300', 'বিজ্ঞাপন খরচ',            'Marketing & Advertising',   'EXPENSE'),
             ('6400', 'অফিস সরবরাহ',             'Office Supplies',           'EXPENSE'),
             ('6500', 'ডেলিভারি খরচ',            'Delivery Expense',          'EXPENSE'),
+            ('6550', 'কুরিয়ার কোড ফি',           'Courier COD Fee',           'EXPENSE'),
             ('6600', 'ব্যাংক চার্জ',             'Bank Charges',              'EXPENSE'),
             ('6700', 'অবচয় খরচ',               'Depreciation Expense',      'EXPENSE'),
             ('6800', 'বিবিধ খরচ',               'Miscellaneous Expense',     'EXPENSE'),

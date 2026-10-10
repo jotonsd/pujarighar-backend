@@ -289,14 +289,22 @@ class CourierService:
         consignment — internal/self delivery has no CourierConsignment at
         all, so its full delivery charge stays 100% income, untouched.
         Guarded against the same webhook firing more than once for the same
-        consignment."""
-        if consignment.delivery_charge <= 0:
+        consignment.
+
+        Also books a COD collection fee (CourierProvider.cod_fee_percent of
+        consignment.cod_amount) when the provider charges one — e.g. Pathao
+        deducts a cash-handling cut on top of the delivery fee itself before
+        remitting a COD order's proceeds. 0% by default, so a provider with
+        no such fee configured sees no change here at all."""
+        cod_fee = (consignment.cod_amount * consignment.provider.cod_fee_percent / 100).quantize(Decimal('0.01')) \
+            if consignment.provider.cod_fee_percent > 0 and consignment.cod_amount > 0 else Decimal('0')
+        if consignment.delivery_charge <= 0 and cod_fee <= 0:
             return
         if JournalEntry.objects.filter(reference_type='EXPENSE', reference_id=consignment.order_id).exists():
             return
         if not user:
             logger.error(
-                f'Courier delivery expense (৳{consignment.delivery_charge}) known for order '
+                f'Courier delivery expense (৳{consignment.delivery_charge} + COD fee ৳{cod_fee}) known for order '
                 f'{consignment.order.order_number} but no ADMIN-role user exists — no journal posted. '
                 f'Needs manual reconciliation.'
             )
@@ -308,14 +316,21 @@ class CourierService:
             description_en=f'Courier Delivery Expense — {consignment.order.order_number}',
             created_by=user, is_posted=True,
         )
-        for code, debit, credit in [
-            ('6500', consignment.delivery_charge, Decimal('0')),  # Dr Delivery Expense
-            ('1000', Decimal('0'), consignment.delivery_charge),  # Cr Cash (courier's cut of the COD)
-        ]:
+        lines = []
+        if consignment.delivery_charge > 0:
+            lines.append(('6500', consignment.delivery_charge, Decimal('0')))  # Dr Delivery Expense
+        if cod_fee > 0:
+            lines.append(('6550', cod_fee, Decimal('0')))  # Dr Courier COD Fee
+        total_cost = consignment.delivery_charge + cod_fee
+        lines.append(('1000', Decimal('0'), total_cost))  # Cr Cash (courier's total cut of the COD)
+        for code, debit, credit in lines:
             acct = self._acct(code)
             if acct:
                 JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
-        logger.info(f'Delivery expense ৳{consignment.delivery_charge} posted for order {consignment.order.order_number}')
+        logger.info(
+            f'Delivery expense ৳{consignment.delivery_charge} (+ COD fee ৳{cod_fee}) posted for order '
+            f'{consignment.order.order_number}'
+        )
 
     def _apply_courier_status_to_order(self, consignment: CourierConsignment, action: str | None) -> None:
         """Shared by both the Steadfast and Pathao webhook handlers, so a

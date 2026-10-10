@@ -1,5 +1,6 @@
 import logging
 import secrets
+from decimal import Decimal
 
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -44,6 +45,7 @@ def providers(request):
         is_active=bool(data.get('is_active', False)),
         store_id=data.get('store_id', ''),
         webhook_verification_secret=data.get('webhook_verification_secret', ''),
+        cod_fee_percent=Decimal(str(data.get('cod_fee_percent') or 0)),
     )
     if data.get('api_key'):
         provider.api_key_encrypted = encrypt_token(data['api_key'])
@@ -76,6 +78,11 @@ def update_provider(request, pk):
             setattr(provider, field, data[field])
     if 'is_active' in data:
         provider.is_active = bool(data['is_active'])
+    if 'cod_fee_percent' in data:
+        try:
+            provider.cod_fee_percent = Decimal(str(data['cod_fee_percent']))
+        except Exception:
+            pass
     if data.get('api_key'):
         provider.api_key_encrypted = encrypt_token(data['api_key'])
     if data.get('secret_key'):

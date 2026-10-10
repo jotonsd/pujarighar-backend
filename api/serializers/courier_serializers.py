@@ -12,6 +12,7 @@ class CourierProviderSerializer(serializers.Serializer):
     base_url = serializers.CharField()
     is_active = serializers.BooleanField()
     store_id = serializers.CharField(required=False, allow_blank=True)
+    cod_fee_percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
     # Not sensitive (see the model field's comment) — shown/editable in full,
     # unlike the encrypted secrets below which only ever expose a boolean.
     webhook_verification_secret = serializers.CharField(required=False, allow_blank=True)
