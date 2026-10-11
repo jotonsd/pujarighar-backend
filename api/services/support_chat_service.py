@@ -544,6 +544,7 @@ def _build_order_preview(
 def _propose_order(
     items: list, district: str,
     customer_name: str | None = None, phone: str | None = None, address: str | None = None,
+    current_order: dict | None = None,
 ) -> dict:
     """Resolves items and computes delivery charge/total WITHOUT placing the
     order — no DB writes, no stock deduction. Lets the frontend show a real
@@ -554,10 +555,42 @@ def _propose_order(
     customer_name/phone/address are optional since an early preview (before
     those are collected) is still useful for showing prices — but once known,
     echoing them back here is what lets the preview show a full delivery
-    summary, not just the product list."""
+    summary, not just the product list.
+
+    current_order: merged in defensively, not trusted to the model's own
+    discipline — the system prompt already tells it to use add_order_item
+    instead of re-calling propose_order once an order exists (re-typing the
+    full item list from memory is exactly what's been observed dropping
+    earlier items), but LLMs don't follow instructions with 100% reliability.
+    Merging here means even a model that calls this tool at the wrong moment
+    can't silently wipe out items the customer already added — same
+    protection add_order_items_by_id already gives the checkbox UI path."""
     resolved, error, candidates = _resolve_order_items(items)
     if error:
         return {'error': error, 'candidates': candidates} if candidates else {'error': error}
+
+    existing_items = (current_order or {}).get('items') or []
+    if existing_items:
+        id_items = [{'product_id': it['product_id'], 'quantity': it['quantity']} for it in existing_items]
+        for product, qty in resolved:
+            new_id = str(product.id)
+            for it in id_items:
+                if it['product_id'] == new_id:
+                    it['quantity'] += qty
+                    break
+            else:
+                id_items.append({'product_id': new_id, 'quantity': qty})
+        resolved, error, _ = _resolve_items_by_id(id_items)
+        if error:
+            return {'error': error}
+
+    # New, explicit values win; otherwise carry forward whatever the order
+    # already had rather than letting a partial re-call blank it out.
+    current_order = current_order or {}
+    district = district or current_order.get('district')
+    customer_name = customer_name or current_order.get('customer_name')
+    phone = phone or current_order.get('phone')
+    address = address or current_order.get('address')
     return _build_order_preview(resolved, district, customer_name, phone, address)
 
 
@@ -1080,11 +1113,13 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
         for fc in calls:
             handler = _TOOL_DISPATCH.get(fc.name)
             call_args = dict(fc.args or {})
-            if fc.name in ('add_order_item', 'remove_order_item', 'show_order_summary'):
+            if fc.name in ('propose_order', 'add_order_item', 'remove_order_item', 'show_order_summary'):
                 # Use the LIVE pending_order (not the frozen snapshot from the
                 # start of this request) so these still work correctly if the
                 # model chains propose_order then add/remove_order_item
                 # within the same turn, not just across separate messages.
+                # propose_order included so it can defensively merge instead
+                # of replacing — see _propose_order's own docstring.
                 call_args['current_order'] = pending_order
             if fc.name == 'create_order' and incoming_pending_order:
                 if incoming_pending_order.get('items'):
