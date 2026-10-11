@@ -36,6 +36,19 @@ def _encode(img: Image.Image, output_format: str, quality: int) -> bytes:
     return buffer.getvalue()
 
 
+def _has_transparency(img: Image.Image) -> bool:
+    """True only if the image actually USES its alpha channel (some
+    transparent pixel exists) — an RGBA/P-mode PNG that's fully opaque
+    (common from some export tools) shouldn't be routed to WEBP just for
+    carrying an unused alpha channel."""
+    if img.mode in ('RGBA', 'LA'):
+        alpha = img.convert('RGBA').split()[-1]
+        return alpha.getextrema()[0] < 255
+    if img.mode == 'P' and 'transparency' in img.info:
+        return True
+    return False
+
+
 def resize_image_field(
     image_field,
     max_dimension: int = 1600,
@@ -76,10 +89,13 @@ def resize_image_field(
     # 25-35% smaller than JPEG at equivalent visual quality, so forcing
     # every upload through JPEG (as this used to) could make an
     # already-efficient WEBP *larger* after "shrinking" it. JPEG stays the
-    # output for everything else (including PNG, which JPEG beats for
-    # photos) since there's no transparency to preserve on product photos.
+    # output for everything else (including an opaque PNG, which JPEG beats
+    # for photos) — except a PNG that actually USES transparency (e.g. a
+    # promo popup graphic meant to blend into a dark overlay), which also
+    # goes to WEBP so that transparency survives instead of being flattened.
     is_webp_source = (getattr(img, 'format', None) or '').upper() == 'WEBP'
-    output_format = 'WEBP' if is_webp_source else 'JPEG'
+    has_alpha = _has_transparency(img)
+    output_format = 'WEBP' if (is_webp_source or has_alpha) else 'JPEG'
 
     if output_format == 'JPEG':
         # Flatten transparency onto white — re-encoding a PNG/WEBP with
@@ -91,6 +107,10 @@ def resize_image_field(
             img = background
         elif img.mode != 'RGB':
             img = img.convert('RGB')
+    elif has_alpha and img.mode not in ('RGBA', 'LA'):
+        # 'P' mode (palette) with a transparency index — convert so the
+        # WEBP encoder actually sees a real alpha channel.
+        img = img.convert('RGBA')
 
     dimension = max_dimension
     base = img

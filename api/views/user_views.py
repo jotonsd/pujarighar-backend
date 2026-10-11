@@ -97,6 +97,7 @@ def _nav_registry() -> list:
         group('megaphone', 'মার্কেটিং', 'Marketing', [
             item('/admin/slides',                 'gallery-horizontal', 'হিরো স্লাইডার', 'Hero Slider', 'hero_slider'),
             item('/admin/banners',                'target',             'ব্যানার',         'Banners', 'banners'),
+            item('/admin/marketing/promo-popups', 'layout-template',    'প্রোমো পপআপ',     'Promo Popups', 'promo_popups'),
             item('/admin/blog',                    'file-text',          'ব্লগ পোস্ট',       'Blog Posts', 'blog'),
             item('/admin/marketing/promo-emails', 'mail',               'প্রোমো ইমেইল',   'Promo Emails', 'promo_emails'),
             item('/admin/marketing/promo-push',   'bell-ring',          'প্রমোশনাল পুশ',   'Promo Push', 'promo_notifications'),

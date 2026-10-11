@@ -1309,6 +1309,32 @@ class HeroSlide(BaseModel):
         return self.title_en or self.title_bn or f'Slide {self.order}'
 
 
+class PromoPopup(BaseModel):
+    """A one-time announcement modal shown on the homepage — "one-time" is
+    tracked entirely client-side (the frontend remembers a popup id has been
+    seen in localStorage), nothing server-side. Supports several queued/
+    scheduled campaigns at once (same list+order pattern as Banner/
+    HeroSlide); which ONE actually shows is resolved by the public endpoint:
+    is_active, within [valid_from, valid_until] if set, highest `order` first."""
+    image       = models.ImageField(upload_to='promo_popups/')
+    link        = models.CharField(max_length=300, blank=True)
+    valid_from  = models.DateTimeField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+    order       = models.PositiveIntegerField(default=0)
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', '-created_at']
+
+    def save(self, *args, **kwargs):
+        if self.image and not getattr(self.image, '_committed', True):
+            resize_image_field(self.image, target_bytes=150 * 1024)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return str(self.id)
+
+
 # ─── Discounts ───────────────────────────────────────────────────────────────
 
 class Discount(models.Model):

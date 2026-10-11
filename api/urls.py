@@ -195,6 +195,12 @@ urlpatterns = [
     path('banners/<uuid:pk>/update/', views.update_banner,   name='banner-update'),
     path('banners/<uuid:pk>/delete/', views.delete_banner,   name='banner-delete'),
 
+    path('promo-popups/active/',          views.get_active_promo_popup,  name='promo-popup-active'),
+    path('promo-popups/all/',             views.list_all_promo_popups,   name='promo-popup-list-all'),
+    path('promo-popups/create/',          views.create_promo_popup,      name='promo-popup-create'),
+    path('promo-popups/<uuid:pk>/update/', views.update_promo_popup,     name='promo-popup-update'),
+    path('promo-popups/<uuid:pk>/delete/', views.delete_promo_popup,     name='promo-popup-delete'),
+
     # ─── Hero Slides ──────────────────────────────────────────────────────────
     path('hero-slides/',                  views.list_hero_slides,     name='hero-slide-list'),
     path('hero-slides/all/',              views.list_all_hero_slides, name='hero-slide-list-all'),

@@ -46,6 +46,9 @@ from .order_views import (
     waive_delivery_charge, restore_delivery_charge, change_delivery_zone, lookup_recent_order_by_phone, get_sales_report, create_exchange,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
+from .promo_popup_views import (
+    get_active_promo_popup, list_all_promo_popups, create_promo_popup, update_promo_popup, delete_promo_popup,
+)
 from .hero_slide_views import list_hero_slides, list_all_hero_slides, create_hero_slide, update_hero_slide, delete_hero_slide
 from .accounting_views import (
     list_accounts, get_account, create_account, update_account,
