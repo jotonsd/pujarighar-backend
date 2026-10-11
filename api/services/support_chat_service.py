@@ -341,6 +341,7 @@ def _search_products(query: str) -> dict:
         product_images = list(p.images.all())
         first_image = product_images[0] if product_images else None
         results.append({
+            'product_id': str(p.id),
             'name_bn': p.name_bn,
             'name_en': p.name_en,
             'price': str(effective),
@@ -598,6 +599,34 @@ def _add_order_item(product_query: str, quantity, current_order: dict | None = N
     resolved, error, _ = _resolve_items_by_id(id_items)
     if error:
         return {'error': error}
+    return _build_order_preview(
+        resolved, current_order.get('district'),
+        current_order.get('customer_name'), current_order.get('phone'), current_order.get('address'),
+    )
+
+
+def add_order_items_by_id(product_ids: list, current_order: dict | None = None) -> dict:
+    """The checkbox-multi-select "Order selected" path — unlike _add_order_item
+    above (which resolves ONE product from the model's own text guess, with
+    all the name-collision/ambiguity risk that implies), every id here came
+    straight from a real search_products result the customer already saw and
+    explicitly ticked. No text matching, no LLM call, no ambiguity possible
+    — purely deterministic, so it's called directly from the view, never
+    routed through the Gemini tool-calling loop at all."""
+    existing_items = (current_order or {}).get('items') or []
+    id_items = [{'product_id': it['product_id'], 'quantity': it['quantity']} for it in existing_items]
+    for new_id in dict.fromkeys(str(pid) for pid in product_ids):  # de-dup, preserve order
+        for it in id_items:
+            if it['product_id'] == new_id:
+                it['quantity'] += 1
+                break
+        else:
+            id_items.append({'product_id': new_id, 'quantity': 1})
+
+    resolved, error, _ = _resolve_items_by_id(id_items)
+    if error:
+        return {'error': error}
+    current_order = current_order or {}
     return _build_order_preview(
         resolved, current_order.get('district'),
         current_order.get('customer_name'), current_order.get('phone'), current_order.get('address'),
@@ -1078,6 +1107,15 @@ def answer(message: str, history: list[dict] | None = None, incoming_pending_ord
                 result = {'error': str(e)}
             logger.info('Support chat tool call | name=%s | args=%r | result=%r', fc.name, fc.args, result)
             if fc.name == 'search_products' and isinstance(result, dict):
+                # Replace, not accumulate — when the model searches once
+                # broadly, isn't satisfied, and searches again with a more
+                # precise query (observed: "গোপালের" matching dozens of
+                # generic products, then refined to "গোপালের বেড"), the
+                # earlier, now-irrelevant search's noise was otherwise left
+                # sitting in the carousel right alongside the real answer,
+                # showing products the final reply text isn't even about.
+                seen_urls = set()
+                shown_products = []
                 for prod in result.get('products', []):
                     image_url = prod.get('image_url')
                     if image_url and image_url not in seen_urls:

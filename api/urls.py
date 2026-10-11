@@ -316,6 +316,7 @@ urlpatterns = [
 
     # ─── AI Support Chat ────────────────────────────────────────────────────────
     path('support/chat/', views.support_chat, name='support-chat'),
+    path('support/chat/add-items/', views.support_chat_add_items, name='support-chat-add-items'),
 
     # ─── Blog ───────────────────────────────────────────────────────────────────
     path('blog/',                  views.list_blog_posts,      name='blog-list'),

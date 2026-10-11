@@ -17,6 +17,13 @@ class SupportChatThrottle(AnonRateThrottle):
     rate = '20/min'
 
 
+class SupportChatAddItemsThrottle(AnonRateThrottle):
+    # No Gemini call on this path (see add_order_items_by_id) — just DB
+    # reads, so a more generous cap than the LLM-backed endpoint is fine.
+    scope = 'support_chat_add_items'
+    rate = '60/min'
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([SupportChatThrottle])
@@ -44,3 +51,28 @@ def support_chat(request):
     except Exception as e:
         logger.error(f'Support chat error: {e}', exc_info=True)
         return ApiResponse(message='Failed to generate a reply', errors=str(e), status_code=502)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([SupportChatAddItemsThrottle])
+def support_chat_add_items(request):
+    """Checkbox multi-select 'Order selected' — adds known product_ids
+    straight to the order preview, no Gemini call (see
+    support_chat_service.add_order_items_by_id for why this is safe to
+    resolve deterministically instead of through the AI chat loop)."""
+    product_ids = request.data.get('product_ids')
+    if not isinstance(product_ids, list) or not product_ids:
+        return ApiResponse(message='product_ids is required', errors='product_ids is required', status_code=400)
+    pending_order = request.data.get('pending_order')
+    if not isinstance(pending_order, dict):
+        pending_order = None
+
+    try:
+        result = support_chat_service.add_order_items_by_id(product_ids, pending_order)
+        if 'error' in result:
+            return ApiResponse(message=result['error'], errors=result['error'], status_code=422)
+        return ApiResponse(message='Items added', data=result)
+    except Exception as e:
+        logger.error(f'Support chat add-items error: {e}', exc_info=True)
+        return ApiResponse(message='Failed to add items', errors=str(e), status_code=502)
