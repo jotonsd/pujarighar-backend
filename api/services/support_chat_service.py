@@ -99,7 +99,13 @@ even though propose_order's parameters would technically allow it. Re-typing the
 requires you to correctly remember and re-list every item already in the order from earlier in \
 the conversation, and you have been observed getting this wrong (dropping an item that was \
 already added). add_order_item/remove_order_item only need the ONE item that's changing — \
-everything else in the order carries forward automatically and correctly.
+everything else in the order carries forward automatically and correctly. If a message in the \
+conversation says something was "Confirmed" and names specific products (this happens when the \
+customer picks products via checkboxes in the app, not by typing), treat every one of those \
+named products as ALREADY fully resolved — do not re-ask what color/size/variant they meant, and \
+do not re-raise a color/variant question you asked earlier if the very next thing in the \
+conversation is one of these "Confirmed: ..." messages naming that same product. Only ask about a \
+genuinely NEW product the customer just mentioned in their latest message.
 6. If propose_order, add_order_item, remove_order_item, or create_order returns an error (e.g. \
 out of stock, product not found, or a \
 name matching several products), explain it plainly using ONLY the information already in that \
