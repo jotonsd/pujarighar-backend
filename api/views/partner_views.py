@@ -98,6 +98,33 @@ def _create_capital_journal(partner: Partner, user, amount: Decimal | None = Non
             JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
 
+def _create_capital_withdrawal_journal(partner: Partner, user, amount: Decimal) -> None:
+    """
+    Dr Owner's Capital (3000) = amount — equity reduced
+    Cr Cash (1000) = amount           — cash actually leaves the business
+
+    Mirror image of _create_capital_journal — posted when update_partner
+    lowers a partner's invested_amount, since that's the same kind of real
+    event as raising it (just reversed): the partner took cash back out.
+    """
+    if amount <= 0:
+        return
+    entry = JournalEntry.objects.create(
+        entry_number=_next_entry_number(), reference_type='CAPITAL',
+        reference_id=partner.id,
+        description_bn=f'মূলধন প্রত্যাহার — {partner.name_bn}',
+        description_en=f'Capital Withdrawal — {partner.name_en or partner.name_bn}',
+        created_by=user, is_posted=True,
+    )
+    for code, debit, credit in [
+        ('3000', amount,         Decimal('0')),  # Dr Owner's Capital
+        ('1000', Decimal('0'),   amount),        # Cr Cash
+    ]:
+        acct = _acct(code)
+        if acct:
+            JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
+
+
 # ─── Partners CRUD ────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
@@ -133,12 +160,14 @@ def update_partner(request, pk):
     updated = serializer.save()
     # Raising invested_amount means new cash actually came in from the
     # partner — post that increase as a real capital contribution, same as
-    # creating a brand-new partner does. A decrease is left alone (could be
-    # a data-entry correction, not necessarily cash leaving the business),
-    # same "one-way" reasoning as waive_delivery_charge elsewhere in this app.
+    # creating a brand-new partner does. Lowering it is the mirror case —
+    # the partner took cash back out — posted as a withdrawal so Cash and
+    # Owner's Capital both move in sync with whatever the admin sets here.
     new_invested = Decimal(str(updated.invested_amount))
     if new_invested > previous_invested:
         _create_capital_journal(updated, request.user, amount=new_invested - previous_invested)
+    elif new_invested < previous_invested:
+        _create_capital_withdrawal_journal(updated, request.user, amount=previous_invested - new_invested)
     return ApiResponse(message="Partner updated", data=serializer.data)
 
 
