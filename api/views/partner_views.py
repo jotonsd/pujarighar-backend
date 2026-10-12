@@ -68,12 +68,18 @@ def _create_profit_payment_journal(payment: PartnerProfitPayment, paid_delta: De
             JournalLine.objects.create(journal_entry=entry, account=acct, debit=debit, credit=credit)
 
 
-def _create_capital_journal(partner: Partner, user) -> None:
+def _create_capital_journal(partner: Partner, user, amount: Decimal | None = None) -> None:
     """
-    Dr Cash (1000) = invested_amount   — cash received from partner
-    Cr Owner's Capital (3000) = invested_amount — equity recorded
+    Dr Cash (1000) = amount   — cash received from partner
+    Cr Owner's Capital (3000) = amount — equity recorded
+
+    amount defaults to the partner's full invested_amount (used at creation
+    time) — pass an explicit amount to post just an incremental top-up
+    (used when update_partner raises an existing partner's invested_amount,
+    so the journal reflects only the NEW cash received, not the whole
+    balance being double-posted on top of what creation already recorded).
     """
-    amount = Decimal(str(partner.invested_amount))
+    amount = Decimal(str(amount if amount is not None else partner.invested_amount))
     if amount <= 0:
         return
     entry = JournalEntry.objects.create(
@@ -114,15 +120,25 @@ def create_partner(request):
 
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, has_permission('partners', 'edit')])
+@transaction.atomic
 def update_partner(request, pk):
     try:
         partner = Partner.objects.get(pk=pk)
     except Partner.DoesNotExist:
         return ApiResponse(message="Not found", errors="Not found", status_code=404)
+    previous_invested = Decimal(str(partner.invested_amount))
     serializer = PartnerSerializer(partner, data=request.data, partial=True)
     if not serializer.is_valid():
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
-    serializer.save()
+    updated = serializer.save()
+    # Raising invested_amount means new cash actually came in from the
+    # partner — post that increase as a real capital contribution, same as
+    # creating a brand-new partner does. A decrease is left alone (could be
+    # a data-entry correction, not necessarily cash leaving the business),
+    # same "one-way" reasoning as waive_delivery_charge elsewhere in this app.
+    new_invested = Decimal(str(updated.invested_amount))
+    if new_invested > previous_invested:
+        _create_capital_journal(updated, request.user, amount=new_invested - previous_invested)
     return ApiResponse(message="Partner updated", data=serializer.data)
 
 
