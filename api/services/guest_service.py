@@ -61,6 +61,7 @@ class GuestCheckoutService:
 
         # Validate stock for all items
         for item in items:
+            item['product']._channel = source
             self._validate_stock(item['product'], item['quantity'], variant=item.get('variant'))
 
         order_number = generate_order_number()
@@ -199,6 +200,7 @@ class GuestCheckoutService:
         source = 'MOBILE_APP' if is_mobile_app else 'WEBSITE'
 
         for item in items:
+            item['product']._channel = source
             self._validate_stock(item['product'], item['quantity'], variant=item.get('variant'))
 
         original_subtotal = sum(i['product'].original_price * i['quantity'] for i in items)

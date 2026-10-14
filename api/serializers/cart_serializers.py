@@ -3,6 +3,14 @@ from rest_framework import serializers
 from api.models import Cart, CartItem, Product
 
 
+def _channel_from(request) -> str:
+    # Same X-Client-Platform convention used for PromoCode/first-order-
+    # discount gating — reused here so a Discount.scope='WEBSITE'/
+    # 'MOBILE_APP' row only applies on the matching channel's cart pricing.
+    header = request.headers.get('X-Client-Platform') if request else None
+    return 'MOBILE_APP' if header == 'mobile_app' else 'WEBSITE'
+
+
 class CartItemSerializer(serializers.ModelSerializer):
     product_name_bn     = serializers.CharField(source='product.name_bn', read_only=True)
     product_name_en     = serializers.CharField(source='product.name_en', read_only=True)
@@ -55,12 +63,14 @@ class CartItemSerializer(serializers.ModelSerializer):
         return str(obj.variant.stock_on_hand if obj.variant_id else obj.product.stock_on_hand)
 
     def get_unit_price(self, obj):
+        obj.product._channel = _channel_from(self.context.get('request'))
         return str(obj.variant.effective_price if obj.variant_id else obj.product.effective_price)
 
     def get_original_unit_price(self, obj):
         return str(obj.product.original_price)
 
     def get_line_total(self, obj):
+        obj.product._channel = _channel_from(self.context.get('request'))
         unit_price = obj.variant.effective_price if obj.variant_id else obj.product.effective_price
         return str(unit_price * obj.quantity)
 
@@ -100,7 +110,11 @@ class CartSerializer(serializers.ModelSerializer):
         return str(total)
 
     def get_subtotal(self, obj):
-        subtotal = sum(item.product.effective_price * item.quantity for item in obj.items.all())
+        channel = _channel_from(self.context.get('request'))
+        subtotal = Decimal('0')
+        for item in obj.items.all():
+            item.product._channel = channel
+            subtotal += item.product.effective_price * item.quantity
         return str(subtotal)
 
     def get_discount_amount(self, obj):
@@ -108,10 +122,11 @@ class CartSerializer(serializers.ModelSerializer):
         # until the customer actually enters one at checkout (see
         # api.services.promo_service), so it can't be previewed here the
         # way the old always-on mobile_app_order_discount_percent was.
-        total = sum(
-            (item.product.original_price - item.product.effective_price) * item.quantity
-            for item in obj.items.all()
-        )
+        channel = _channel_from(self.context.get('request'))
+        total = Decimal('0')
+        for item in obj.items.all():
+            item.product._channel = channel
+            total += (item.product.original_price - item.product.effective_price) * item.quantity
         return str(max(total, Decimal('0')))
 
     def get_item_count(self, obj):

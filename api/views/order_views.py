@@ -45,6 +45,8 @@ def pos_create_order(request):
             discount_value=d.get('discount_value', 0),
             is_pos=True,
         )
+        order.created_by = request.user
+        order.save(update_fields=['created_by'])
         order = _svc.confirm(order, request.user)
         mail_service.send_order_created(order)
         mail_service.send_order_confirmed(order)

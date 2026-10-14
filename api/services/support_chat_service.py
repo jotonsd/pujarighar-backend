@@ -337,6 +337,10 @@ def _search_products(query: str) -> dict:
     products = _find_products(query)
     results = []
     for p in products:
+        # AI_CHATBOT is its own order source, distinct from MOBILE_APP/
+        # WEBSITE — same exact-match-or-BOTH gating PromoCode.scope already
+        # applies, so a channel-scoped Discount doesn't surface here either.
+        p._channel = 'AI_CHATBOT'
         original = p.original_price
         effective = p.effective_price
         discount_percent = None
@@ -426,6 +430,7 @@ _DHAKA_DISTRICTS = {'dhaka', 'ঢাকা'}
 
 
 def _serialize_candidate(p) -> dict:
+    p._channel = 'AI_CHATBOT'
     product_images = list(p.images.all())
     first_image = product_images[0] if product_images else None
     return {
@@ -514,6 +519,7 @@ def _build_order_preview(
     preview_items = []
     subtotal = Decimal('0')
     for product, qty in resolved:
+        product._channel = 'AI_CHATBOT'
         effective = product.effective_price
         line_total = effective * qty
         subtotal += line_total

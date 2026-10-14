@@ -19,7 +19,7 @@ class DiscountSerializer(drf_serializers.ModelSerializer):
     class Meta:
         model  = Discount
         fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'product_sku', 'product_image',
-                  'discount_type', 'discount_value', 'note', 'is_active',
+                  'discount_type', 'discount_value', 'scope', 'note', 'is_active',
                   'start_date', 'end_date', 'created_at']
         read_only_fields = ['id', 'created_at']
 
@@ -69,7 +69,7 @@ def bulk_create_discount(request):
     if not Product.objects.filter(id__in=product_ids).count() == len(set(product_ids)):
         return ApiResponse(message="Validation failed", errors={'product_ids': 'One or more products not found'}, status_code=422)
 
-    shared = {k: request.data.get(k) for k in ('discount_type', 'discount_value', 'note', 'start_date', 'end_date') if k in request.data}
+    shared = {k: request.data.get(k) for k in ('discount_type', 'discount_value', 'scope', 'note', 'start_date', 'end_date') if k in request.data}
 
     created, errors = [], {}
     for pid in product_ids:

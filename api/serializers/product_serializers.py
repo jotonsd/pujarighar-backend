@@ -35,6 +35,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
                   'stock_on_hand', 'is_active', 'label_bn', 'label_en', 'attribute_values']
 
     def get_effective_price(self, obj):
+        request = self.context.get('request')
+        header = request.headers.get('X-Client-Platform') if request else None
+        obj.product._channel = 'MOBILE_APP' if header == 'mobile_app' else 'WEBSITE'
         return str(obj.effective_price)
 
     def get_stock_on_hand(self, obj):
@@ -179,6 +182,15 @@ class ProductSerializer(serializers.ModelSerializer):
         user = getattr(request, 'user', None) if request else None
         return bool(user and user.is_authenticated and getattr(user, 'role', None) and user.role.code != 'CUSTOMER')
 
+    def _channel(self):
+        # Same X-Client-Platform convention used to derive `source` for
+        # PromoCode/first-order-discount gating — reused here so a
+        # Discount.scope='WEBSITE'/'MOBILE_APP' row only ever shows (and
+        # later charges) on the matching channel.
+        request = self.context.get('request')
+        header = request.headers.get('X-Client-Platform') if request else None
+        return 'MOBILE_APP' if header == 'mobile_app' else 'WEBSITE'
+
     def _visible_variants(self, obj):
         """Deactivated variants (e.g. a permanently out-of-stock color the
         admin hid) must never reach a customer — selectable, auto-picked as
@@ -242,11 +254,18 @@ class ProductSerializer(serializers.ModelSerializer):
             .filter(is_active=True)
             .filter(Q(start_date__isnull=True) | Q(start_date__lte=today))
             .filter(Q(end_date__isnull=True)   | Q(end_date__gte=today))
+            .filter(Q(scope='BOTH') | Q(scope=self._channel()))
             .order_by('-created_at')
             .first()
         )
 
     def get_effective_price(self, obj):
+        # The SQL-annotated `_effective_price` (list pages, via
+        # ProductService._with_effective_price) already applied the scope
+        # filter at query time — only the per-instance property fallback
+        # (detail/recommended/similar fetches) needs `_channel` set here.
+        if getattr(obj, '_effective_price', None) is None:
+            obj._channel = self._channel()
         return str(obj.effective_price)
 
     def get_original_price(self, obj):

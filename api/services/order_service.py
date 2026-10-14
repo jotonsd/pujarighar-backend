@@ -597,6 +597,7 @@ class OrderService:
 
         self._adjust_order_item_stock(product, quantity, order.id, user, variant=variant)
 
+        product._channel = order.source
         unit_price = variant.effective_price if variant else product.effective_price
         SalesOrderItem.objects.create(
             order=order, product=product,
@@ -1258,6 +1259,8 @@ class OrderService:
             # before the cashback_used clamp below reads it as a real number.
             profile.refresh_from_db(fields=['cashback_balance'])
 
+        for p, v, q in resolved_replacements:
+            p._channel = original_order.source
         original_subtotal = sum((p.original_price * q for p, v, q in resolved_replacements), Decimal('0'))
         subtotal          = sum(((v.effective_price if v else p.effective_price) * q for p, v, q in resolved_replacements), Decimal('0'))
         total_weight      = sum(((p.weight_kg or Decimal('0')) * q for p, v, q in resolved_replacements), Decimal('0'))

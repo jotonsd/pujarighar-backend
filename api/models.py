@@ -394,14 +394,24 @@ class Product(BaseModel):
 
     def _active_discount(self):
         today = timezone.now().date()
-        return (
+        qs = (
             self.discounts
             .filter(is_active=True)
             .filter(models.Q(start_date__isnull=True) | models.Q(start_date__lte=today))
             .filter(models.Q(end_date__isnull=True) | models.Q(end_date__gte=today))
-            .order_by('-created_at')
-            .first()
         )
+        # `_channel` isn't a model field — it's set as a plain instance
+        # attribute by request-aware callers (serializers/services that
+        # already know MOBILE_APP vs WEBSITE from X-Client-Platform) right
+        # before reading effective_price/original_price, mirroring how
+        # PromoCode.scope is gated by an explicit `source` param. Left unset,
+        # every Discount matches regardless of scope — the pre-scope
+        # behavior, for call sites with no channel context (admin previews,
+        # invoices, reports).
+        channel = getattr(self, '_channel', None)
+        if channel:
+            qs = qs.filter(models.Q(scope='BOTH') | models.Q(scope=channel))
+        return qs.order_by('-created_at').first()
 
     def _fallback_base_price(self) -> Decimal:
         """A product's own unit_price is meaningless once pricing has moved
@@ -846,6 +856,13 @@ ALLOWED_TRANSITIONS = {
 class SalesOrder(BaseModel):
     order_number        = models.CharField(max_length=30, unique=True)
     customer            = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name='orders')
+    # The staff member who rang up a POS sale — distinct from `customer`
+    # (who the sale is FOR, if an existing customer was picked at the
+    # register) and from `shipping_name` (who it ships TO). Null for every
+    # self-checkout order (website/app/guest) — those aren't "created by"
+    # staff at all, the customer's own shipping name already answers "who
+    # placed this" for that case.
+    created_by          = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='orders_created')
     is_guest            = models.BooleanField(default=False)
     guest_email         = models.EmailField(blank=True)
     status              = models.CharField(max_length=20, choices=ORDER_STATUS, default='PENDING')
@@ -1339,11 +1356,19 @@ class PromoPopup(BaseModel):
 
 class Discount(models.Model):
     TYPES = [('PERCENTAGE', 'শতাংশ (%)'), ('FLAT', 'নির্দিষ্ট পরিমাণ (৳)')]
+    # Mirrors PromoCode.SCOPE_CHOICES — same exact-match-or-BOTH gating,
+    # applied to an automatic product discount instead of a typed-in code.
+    SCOPE_CHOICES = [
+        ('MOBILE_APP', 'শুধু অ্যাপ'),
+        ('WEBSITE',    'শুধু ওয়েবসাইট'),
+        ('BOTH',       'অ্যাপ ও ওয়েবসাইট উভয়ই'),
+    ]
 
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     product        = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='discounts')
     discount_type  = models.CharField(max_length=12, choices=TYPES)
     discount_value = models.DecimalField(max_digits=10, decimal_places=2)
+    scope          = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='BOTH')
     note           = models.CharField(max_length=200, blank=True)
     is_active      = models.BooleanField(default=True)
     start_date     = models.DateField(null=True, blank=True)

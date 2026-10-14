@@ -52,6 +52,7 @@ class CheckoutService:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
         for item in items:
+            item.product._channel = source
             self._validate_stock(item.product, item.quantity, variant=item.variant)
 
         shipping = self._resolve_shipping(user, shipping_address_id)
@@ -125,6 +126,7 @@ class CheckoutService:
             raise ValidationError({'message_bn': 'কার্ট খালি', 'message_en': 'Cart is empty'})
 
         for item in items:
+            item.product._channel = source
             self._validate_stock(item.product, item.quantity, variant=item.variant)
 
         shipping = self._resolve_shipping(user, shipping_address_id)

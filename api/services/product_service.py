@@ -124,25 +124,26 @@ class ProductService:
             | Exists(ProductPackageItem.objects.filter(component=OuterRef('pk')))
         ))
 
-    def _with_discount_annotations(self, qs):
+    def _with_discount_annotations(self, qs, channel=None):
         """The single active Discount per product (if any) — shared base for
         both _with_effective_price and the discount_asc/desc ordering below,
-        so the same per-product Discount lookup isn't built twice."""
-        disc_type = Subquery(
-            Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-            .values('discount_type')[:1]
-        )
-        disc_val = Subquery(
-            Discount.objects.filter(product=OuterRef('pk'), is_active=True)
-            .values('discount_value')[:1]
-        )
+        so the same per-product Discount lookup isn't built twice.
+        `channel` ('MOBILE_APP'/'WEBSITE'), when given, matches
+        Discount.scope exactly-or-'BOTH' — same gating PromoCode.scope
+        already uses — so a channel-scoped discount doesn't leak into the
+        other channel's list/search pricing."""
+        disc_qs = Discount.objects.filter(product=OuterRef('pk'), is_active=True)
+        if channel:
+            disc_qs = disc_qs.filter(Q(scope='BOTH') | Q(scope=channel))
+        disc_type = Subquery(disc_qs.values('discount_type')[:1])
+        disc_val = Subquery(disc_qs.values('discount_value')[:1])
         return qs.annotate(_disc_type=disc_type, _disc_val=disc_val)
 
-    def _with_effective_price(self, qs):
+    def _with_effective_price(self, qs, channel=None):
         """Leading underscore avoids colliding with the `effective_price`
         property name — Product.effective_price reads this annotation back
         when present instead of re-querying per instance."""
-        qs = self._with_discount_annotations(qs)
+        qs = self._with_discount_annotations(qs, channel=channel)
         # A product's own unit_price is meaningless once pricing has moved
         # onto its variants (price_override per variant, unit_price often
         # left at 0) — same fallback as Product._fallback_base_price(): the
@@ -169,11 +170,11 @@ class ProductService:
             )
         )
 
-    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, payment_method=None, personalize_user=None, personalize_guest_id=''):
+    def list_products(self, category=None, brand=None, search='', is_package=None, min_price=None, max_price=None, include_inactive=False, ordering=None, has_discount=False, is_active=None, badges=None, payment_method=None, personalize_user=None, personalize_guest_id='', channel=None):
         qs = Product.objects.select_related('category', 'brand', 'visual_attribute_type').prefetch_related('images__visual_value', 'package_items', 'variants__attribute_values__attribute_value__attribute_type')
         qs = self._with_ratings(qs)
         qs = self._with_stock(qs)
-        qs = self._with_effective_price(qs)
+        qs = self._with_effective_price(qs, channel=channel)
         if include_inactive:
             # Only the admin Product List passes include_inactive=True —
             # the storefront never needs per-row deletability, so this

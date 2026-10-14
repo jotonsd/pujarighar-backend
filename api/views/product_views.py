@@ -50,6 +50,7 @@ def list_products(request):
         # listing, not one reshuffled by their own recent admin activity.
         user, guest_id = get_visitor(request)
         is_staff = user is not None and user.role.code != 'CUSTOMER'
+        channel = 'MOBILE_APP' if request.headers.get('X-Client-Platform') == 'mobile_app' else 'WEBSITE'
         qs = _svc.list_products(
             category=request.query_params.get('category'),
             brand=request.query_params.get('brand'),
@@ -65,6 +66,7 @@ def list_products(request):
             payment_method=request.query_params.get('payment_method'),
             personalize_user=None if is_staff else user,
             personalize_guest_id='' if is_staff else guest_id,
+            channel=channel,
         )
         page_data, pagination = paginate_queryset(qs, request)
 
