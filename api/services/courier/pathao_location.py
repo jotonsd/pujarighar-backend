@@ -1,9 +1,14 @@
 import logging
+import time
 
 from api.models import CourierProvider, DeliveryArea, DeliveryCity, DeliveryZone
 from api.services.courier.pathao import PathaoCourierService
 
 logger = logging.getLogger(__name__)
+# A small gap between requests on top of pathao.py's own 429 backoff —
+# keeps the hundreds of zone-list/area-list calls this import makes from
+# tripping Pathao's rate limit in the first place.
+REQUEST_PACING_SECONDS = 0.4
 
 
 def _provider() -> CourierProvider:
@@ -36,13 +41,28 @@ class DeliveryLocationService:
         (python manage.py seed_delivery_locations), not on any request path.
         Pathao's own numeric ids are only used transiently here (to fetch
         each level's children) and never persisted — rows are matched and
-        de-duped by name instead."""
+        de-duped by name instead.
+
+        Resumable: a city whose zones are already stored, or a zone whose
+        areas are already stored, is skipped rather than re-fetched — if a
+        run gets rate-limited partway through (pathao.py retries 429s a
+        few times itself, but can still give up), re-running this picks up
+        where it left off instead of re-pulling everything from scratch."""
         svc = PathaoCourierService(_provider())
 
         for city_row in svc.list_cities():
             city, _ = DeliveryCity.objects.get_or_create(name=city_row['city_name'].strip())
+            if DeliveryZone.objects.filter(city=city).exists():
+                logger.info(f'Delivery city already has zones, skipping: {city.name}')
+                continue
             logger.info(f'Delivery city imported: {city.name}')
-            for zone_row in svc.list_zones(city_row['city_id']):
+            zone_rows = svc.list_zones(city_row['city_id'])
+            time.sleep(REQUEST_PACING_SECONDS)
+
+            for zone_row in zone_rows:
                 zone, _ = DeliveryZone.objects.get_or_create(city=city, name=zone_row['zone_name'].strip())
+                if DeliveryArea.objects.filter(zone=zone).exists():
+                    continue
                 for area_row in svc.list_areas(zone_row['zone_id']):
                     DeliveryArea.objects.get_or_create(zone=zone, name=area_row['area_name'].strip())
+                time.sleep(REQUEST_PACING_SECONDS)

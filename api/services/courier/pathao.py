@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -16,6 +17,11 @@ TIMEOUT = 30
 # Refresh a bit before the token's real expiry so an in-flight request never
 # races a token that just went stale.
 EXPIRY_SAFETY_MARGIN = timedelta(minutes=5)
+# A normal single-order request essentially never hits this — it only
+# matters for the bulk location import (one zone-list/area-list call per
+# city/zone, hundreds of requests back to back), which Pathao's rate limit
+# does reject with 429 if nothing backs off.
+RATE_LIMIT_RETRIES = 5
 
 
 class PathaoCourierService(BaseCourierService):
@@ -39,7 +45,14 @@ class PathaoCourierService(BaseCourierService):
         if auth:
             headers['Authorization'] = f'Bearer {self._ensure_token()}'
         try:
-            resp = requests.request(method, url, headers=headers, timeout=TIMEOUT, **kwargs)
+            for attempt in range(RATE_LIMIT_RETRIES + 1):
+                resp = requests.request(method, url, headers=headers, timeout=TIMEOUT, **kwargs)
+                if resp.status_code == 429 and attempt < RATE_LIMIT_RETRIES:
+                    wait = float(resp.headers.get('Retry-After', 0)) or (2 ** attempt)
+                    logger.warning(f'Pathao rate-limited {method} {url} — retrying in {wait}s (attempt {attempt + 1}/{RATE_LIMIT_RETRIES})')
+                    time.sleep(wait)
+                    continue
+                break
             resp.raise_for_status()
             return resp.json()
         except requests.HTTPError:
