@@ -5,10 +5,12 @@ from api.models import CourierProvider, DeliveryArea, DeliveryCity, DeliveryZone
 from api.services.courier.pathao import PathaoCourierService
 
 logger = logging.getLogger(__name__)
-# A small gap between requests on top of pathao.py's own 429 backoff —
-# keeps the hundreds of zone-list/area-list calls this import makes from
-# tripping Pathao's rate limit in the first place.
-REQUEST_PACING_SECONDS = 0.4
+# A gap between requests on top of pathao.py's own 429 backoff — keeps the
+# hundreds of zone-list/area-list calls this import makes from tripping
+# Pathao's rate limit in the first place. 0.4s still hit 429s fairly often
+# in practice; 1.2s is the safer value found by testing against the
+# production API.
+REQUEST_PACING_SECONDS = 1.2
 
 
 def _provider() -> CourierProvider:
