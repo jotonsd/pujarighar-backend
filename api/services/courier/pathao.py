@@ -176,3 +176,23 @@ class PathaoCourierService(BaseCourierService):
         """Not part of BaseCourierService — used by admin settings to help
         pick/verify a store_id rather than during normal order flow."""
         return self._request('GET', '/aladdin/api/v1/stores')
+
+    # ── Location lookups ─────────────────────────────────────────────────
+    # Also not part of BaseCourierService (Pathao-specific, like
+    # list_stores above) — lets the admin order-shipping form resolve a
+    # recipient_city/recipient_zone/recipient_area trio from Pathao's own
+    # hierarchy instead of a free-typed district that create_order() has
+    # no reliable way to turn into the IDs Pathao's order API actually
+    # wants. Each list is nested under data.data in Pathao's response.
+
+    def list_cities(self) -> list:
+        result = self._request('GET', '/aladdin/api/v1/city-list')
+        return result.get('data', {}).get('data', [])
+
+    def list_zones(self, city_id) -> list:
+        result = self._request('GET', f'/aladdin/api/v1/cities/{city_id}/zone-list')
+        return result.get('data', {}).get('data', [])
+
+    def list_areas(self, zone_id) -> list:
+        result = self._request('GET', f'/aladdin/api/v1/zones/{zone_id}/area-list')
+        return result.get('data', {}).get('data', [])

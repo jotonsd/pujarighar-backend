@@ -91,6 +91,7 @@ from .analytics_views import (
 )
 from .courier_views import (
     providers, update_provider, regenerate_webhook_secret, provider_balance, provider_police_stations,
+    delivery_cities, delivery_zones, delivery_areas,
     send_to_courier, courier_status, list_consignments, get_consignment,
     create_return_request, get_return_request, list_return_requests,
     list_payments, get_payment, steadfast_webhook, pathao_webhook,
