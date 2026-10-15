@@ -10,13 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 def detect_district_thana(address: str) -> dict:
-    """Asks Gemini to pull the Bangladesh district (zilla) and thana/upazila
-    out of a free-typed shipping address — backs the admin shipping form's
-    refresh button next to District/Thana, since a customer's written
-    address (especially from the app/website, never structured) often
-    buries these in the middle of a sentence rather than as clean fields.
-    Reuses the same genai.Client(api_key=...) call shape as
-    support_chat_service.describe_image_for_search."""
+    """Asks Gemini to pull the Bangladesh district (zilla), thana/upazila,
+    and postal code out of a free-typed shipping address — backs the admin
+    shipping form's refresh button next to District/Thana/Post Code, since
+    a customer's written address (especially from the app/website, never
+    structured) often buries these in the middle of a sentence rather than
+    as clean fields. Reuses the same genai.Client(api_key=...) call shape
+    as support_chat_service.describe_image_for_search."""
     s = SiteSetting.get()
     if not s.gemini_api_key:
         raise RuntimeError('Gemini API key is not configured')
@@ -26,11 +26,15 @@ def detect_district_thana(address: str) -> dict:
     response = client.models.generate_content(
         model=model,
         contents=[types.Content(role='user', parts=[types.Part(text=(
-            'Extract the Bangladesh district (zilla) and thana/upazila from this '
-            'shipping address, written in Bengali or English. Reply with ONLY '
-            'compact JSON: {"district": "...", "thana": "..."} — use the standard '
-            'English spelling for each (e.g. "Dhaka", "Mirpur"). If either cannot '
-            'be determined from the address, use an empty string for it.\n\n'
+            'Extract the Bangladesh district (zilla), thana/upazila, and postal '
+            '(zip) code from this shipping address, written in Bengali or '
+            'English. Reply with ONLY compact JSON: '
+            '{"district": "...", "thana": "...", "post_code": "..."} — use the '
+            'standard English spelling for district/thana (e.g. "Dhaka", '
+            '"Mirpur"), and the standard 4-digit Bangladesh postal code for '
+            'that thana if the address itself does not state one explicitly. '
+            'If any of the three truly cannot be determined, use an empty '
+            'string for it.\n\n'
             f'Address: {address[:500]}'
         ))])],
         config=types.GenerateContentConfig(response_mime_type='application/json'),
@@ -39,8 +43,9 @@ def detect_district_thana(address: str) -> dict:
         data = json.loads(response.text or '{}')
     except ValueError:
         logger.error(f'detect_district_thana: non-JSON Gemini response: {response.text!r}')
-        return {'district': '', 'thana': ''}
+        return {'district': '', 'thana': '', 'post_code': ''}
     return {
-        'district': (data.get('district') or '').strip(),
-        'thana': (data.get('thana') or '').strip(),
+        'district':  (data.get('district') or '').strip(),
+        'thana':     (data.get('thana') or '').strip(),
+        'post_code': (data.get('post_code') or '').strip(),
     }

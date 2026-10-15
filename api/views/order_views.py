@@ -499,6 +499,14 @@ def pay_order(request, pk):
         return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
+# Shipping address stays editable right up through being handed off for
+# delivery (ASSIGNED — a delivery person or courier is picked, but hasn't
+# physically picked the package up yet) — locked once PICKED, since that's
+# the moment it's actually in transit and changing the destination no
+# longer reflects where the package is actually headed.
+_SHIPPING_EDITABLE_STATUSES = ('PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED')
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
 def update_shipping(request, pk):
@@ -506,6 +514,13 @@ def update_shipping(request, pk):
         order = SalesOrder.objects.get(pk=pk)
     except SalesOrder.DoesNotExist:
         return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    if order.status not in _SHIPPING_EDITABLE_STATUSES:
+        return ApiResponse(
+            message='Shipping address can no longer be changed',
+            errors='Order is already in transit or beyond',
+            status_code=409,
+        )
 
     allowed = [
         'shipping_name_bn', 'shipping_name_en', 'shipping_phone',
