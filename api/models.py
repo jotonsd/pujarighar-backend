@@ -2022,48 +2022,6 @@ class CourierProvider(models.Model):
         return self.name
 
 
-# Our own City/Zone/Area reference tables — one-time seeded (see the
-# `seed_delivery_locations` management command) from Pathao's city-list/
-# zone-list/area-list, since that's the only source with this breakdown
-# in bulk, but these rows are ours from then on: nothing here calls
-# Pathao again to read them, and no Pathao-specific id is kept on them.
-class DeliveryCity(models.Model):
-    name       = models.CharField(max_length=100, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
-
-
-class DeliveryZone(models.Model):
-    city       = models.ForeignKey(DeliveryCity, on_delete=models.CASCADE, related_name='zones')
-    name       = models.CharField(max_length=150)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['name']
-        unique_together = [('city', 'name')]
-
-    def __str__(self):
-        return self.name
-
-
-class DeliveryArea(models.Model):
-    zone       = models.ForeignKey(DeliveryZone, on_delete=models.CASCADE, related_name='areas')
-    name       = models.CharField(max_length=150)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['name']
-        unique_together = [('zone', 'name')]
-
-    def __str__(self):
-        return self.name
-
-
 class CourierConsignment(BaseModel):
     order            = models.OneToOneField(SalesOrder, on_delete=models.CASCADE, related_name='courier_consignment')
     provider         = models.ForeignKey(CourierProvider, on_delete=models.PROTECT, related_name='consignments')

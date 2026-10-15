@@ -42,7 +42,7 @@ from .order_views import (
     track_by_order_number,
     confirm_order, pack_order, assign_delivery, pick_up_order, dispatch_order,
     deliver_order, partial_deliver_order, return_order, cancel_order, pay_order, pos_create_order,
-    mark_cod_paid, update_shipping, apply_discount, add_order_item, update_order_item, delete_order_item,
+    mark_cod_paid, update_shipping, detect_shipping_location, apply_discount, add_order_item, update_order_item, delete_order_item,
     waive_delivery_charge, restore_delivery_charge, change_delivery_zone, lookup_recent_order_by_phone, get_sales_report, create_exchange,
 )
 from .banner_views import list_banners, list_all_banners, create_banner, update_banner, delete_banner
@@ -91,7 +91,6 @@ from .analytics_views import (
 )
 from .courier_views import (
     providers, update_provider, regenerate_webhook_secret, provider_balance, provider_police_stations,
-    delivery_cities, delivery_zones, delivery_areas,
     send_to_courier, courier_status, list_consignments, get_consignment,
     create_return_request, get_return_request, list_return_requests,
     list_payments, get_payment, steadfast_webhook, pathao_webhook,

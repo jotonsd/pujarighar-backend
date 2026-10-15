@@ -11,14 +11,12 @@ from api.serializers.courier_serializers import (
     CourierConsignmentSerializer, CourierProviderSerializer, CourierReturnRequestSerializer,
 )
 from api.services.courier_service import CourierService
-from api.services.courier.pathao_location import DeliveryLocationService
 from api.utils.crypto import decrypt_token, encrypt_token
 from api.utils.pagination import paginate_queryset
 from api.utils.response import ApiResponse, api_error
 
 logger = logging.getLogger(__name__)
 _svc = CourierService()
-_location_svc = DeliveryLocationService()
 
 
 # ─── Providers ─────────────────────────────────────────────────────────────────
@@ -144,42 +142,6 @@ def provider_police_stations(request, pk):
     except Exception as e:
         logger.error(f'Courier police stations error: {e}', exc_info=True)
         return api_error(e)
-
-
-# ─── Delivery location lookups (our own city/zone/area tables) ────────────────
-
-def _can_edit_shipping(request) -> bool:
-    # Same reasoning as the `providers` GET above — the order-shipping edit
-    # form needs these to populate its City/Zone/Area dropdowns without
-    # requiring the full 'courier' module permission.
-    return has_any_permission(('courier', 'view'), ('orders', 'edit'))().has_permission(request, None)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def delivery_cities(request):
-    if not _can_edit_shipping(request):
-        return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
-    cities = _location_svc.cities()
-    return ApiResponse(message='Cities retrieved', data=[{'id': c.id, 'name': c.name} for c in cities])
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def delivery_zones(request, city_id):
-    if not _can_edit_shipping(request):
-        return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
-    zones = _location_svc.zones(city_id)
-    return ApiResponse(message='Zones retrieved', data=[{'id': z.id, 'name': z.name} for z in zones])
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def delivery_areas(request, zone_id):
-    if not _can_edit_shipping(request):
-        return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
-    areas = _location_svc.areas(zone_id)
-    return ApiResponse(message='Areas retrieved', data=[{'id': a.id, 'name': a.name} for a in areas])
 
 
 # ─── Send order / consignments ─────────────────────────────────────────────────

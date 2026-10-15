@@ -15,6 +15,7 @@ from api.serializers.order_serializers import (
 )
 from api.services.order_service import OrderService
 from api.services import mail_service
+from api.services.address_location_service import detect_district_thana
 from api.utils.response import ApiResponse, api_error
 from api.utils.pagination import paginate_queryset
 from api.permissions import IsAdminOrDelivery, has_permission
@@ -519,6 +520,31 @@ def update_shipping(request, pk):
         setattr(order, k, v)
     order.save(update_fields=list(fields.keys()))
     return ApiResponse(message='Shipping updated', data=SalesOrderSerializer(order, context={'request': request}).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('orders', 'edit')])
+def detect_shipping_location(request, pk):
+    """Backs the shipping-address edit form's refresh button next to
+    District/Thana — runs the order's own shipping address text through
+    Gemini (see address_location_service.detect_district_thana) instead
+    of asking the admin to type these in free-hand or pick from some
+    separate location list."""
+    try:
+        order = SalesOrder.objects.get(pk=pk)
+    except SalesOrder.DoesNotExist:
+        return ApiResponse(message='Order not found', errors='Not found', status_code=404)
+
+    address = order.shipping_address_bn or order.shipping_address_en
+    if not address:
+        return ApiResponse(message='No address to detect from', errors='Shipping address is empty', status_code=422)
+
+    try:
+        result = detect_district_thana(address)
+        return ApiResponse(message='Location detected', data=result)
+    except Exception as e:
+        logger.error(f'Detect shipping location error: {e}', exc_info=True)
+        return ApiResponse(message=str(e), errors=str(e), status_code=400)
 
 
 @api_view(['POST'])
