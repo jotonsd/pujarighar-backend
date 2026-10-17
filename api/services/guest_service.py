@@ -27,9 +27,35 @@ def _delivery_charge(district: str, zone: str | None = None, weight: Decimal | N
 def _cart_weight(items) -> Decimal:
     """Sum of product.weight_kg * quantity across cart items — see the
     identical helper in checkout_service.py (this one takes dict items,
-    that one CartItem model instances, otherwise the same logic)."""
+    that one CartItem model instances, otherwise the same logic). This is
+    the REAL physical weight (estimated_weight_kg / what a courier is
+    told) — see _chargeable_weight for what delivery is actually priced
+    against."""
     return sum(
         ((i['product'].weight_kg or Decimal('0')) * i['quantity'] for i in items),
+        Decimal('0'),
+    )
+
+
+def _all_free_delivery(items) -> bool:
+    """True when every item in the cart currently has an active
+    free_delivery Discount — see the identical helper in
+    checkout_service.py for why this needs to be an explicit ৳0 override
+    rather than relying on a 0kg _chargeable_weight lookup."""
+    return bool(items) and all(i['product'].has_free_delivery() for i in items)
+
+
+def _chargeable_weight(items) -> Decimal:
+    """Same as _cart_weight, but an item whose product currently has an
+    active free_delivery Discount has its weight excluded — see the
+    identical helper in checkout_service.py for why. Relies on the caller
+    having already set item['product']._channel (see checkout()/
+    initiate_online_checkout() below), same as effective_price does."""
+    return sum(
+        (
+            (i['product'].weight_kg or Decimal('0')) * i['quantity']
+            for i in items if not i['product'].has_free_delivery()
+        ),
         Decimal('0'),
     )
 
@@ -91,7 +117,9 @@ class GuestCheckoutService:
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')
         total_weight      = _cart_weight(items)
-        delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
+        delivery          = Decimal('0') if (apply_deliv and _all_free_delivery(items)) else (
+            _delivery_charge(shipping.get('district', ''), zone, _chargeable_weight(items)) if apply_deliv else Decimal('0')
+        )
         free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
         if apply_deliv and free_delivery_min > 0 and subtotal >= free_delivery_min:
             delivery = Decimal('0')
@@ -214,7 +242,9 @@ class GuestCheckoutService:
         apply_deliv       = validated_data.get('apply_delivery', True)
         zone              = validated_data.get('delivery_zone')
         total_weight      = _cart_weight(items)
-        delivery          = _delivery_charge(shipping.get('district', ''), zone, total_weight) if apply_deliv else Decimal('0')
+        delivery          = Decimal('0') if (apply_deliv and _all_free_delivery(items)) else (
+            _delivery_charge(shipping.get('district', ''), zone, _chargeable_weight(items)) if apply_deliv else Decimal('0')
+        )
         free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
         if apply_deliv and free_delivery_min > 0 and subtotal >= free_delivery_min:
             delivery = Decimal('0')

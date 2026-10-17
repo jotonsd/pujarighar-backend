@@ -28,8 +28,45 @@ def _cart_weight(items) -> Decimal:
     """Sum of product.weight_kg * quantity across cart items — items without
     a weight set contribute 0, so this only affects pricing once weight
     brackets are actually configured (DeliveryCharge.charge_for falls back
-    to the flat zone rate when none are)."""
+    to the flat zone rate when none are). This is the REAL physical weight
+    — used for estimated_weight_kg and whatever we tell a courier — not
+    what the customer is actually charged delivery for; see
+    _chargeable_weight for that."""
     return sum(((i.product.weight_kg or Decimal('0')) * i.quantity for i in items), Decimal('0'))
+
+
+def _all_free_delivery(items) -> bool:
+    """True when every item in the cart currently has an active
+    free_delivery Discount — the weight-exclusion _chargeable_weight does
+    isn't enough on its own to make this genuinely free: DeliveryCharge's
+    configured tiers can have a nonzero base bracket (e.g. ৳70 for
+    0–0.2kg), so a 0kg lookup doesn't necessarily return ৳0. This is the
+    explicit override for "nothing in this cart costs anything to ship" —
+    _delivery_charge is skipped entirely rather than looked up at 0kg.
+    Relies on the caller having already set item.product._channel."""
+    return bool(items) and all(i.product.has_free_delivery() for i in items)
+
+
+def _chargeable_weight(items) -> Decimal:
+    """Same as _cart_weight, but an item whose product currently has an
+    active free_delivery Discount (see Product.has_free_delivery — scope/
+    channel and date-range aware, same discount effective_price reads)
+    has its weight excluded — its own weight shouldn't inflate the
+    bracket that DeliveryCharge.charge_for() looks up, since the whole
+    point of that flag is that it doesn't cost the customer anything to
+    ship. Other, non-free items in the same cart are unaffected and still
+    charged normally for their own weight. See _all_free_delivery for the
+    case where EVERY item is free — that needs an explicit ৳0 override,
+    not just a 0kg lookup here. Relies on the caller having already set
+    item.product._channel (see checkout()/initiate_online_checkout()
+    above), same as effective_price does."""
+    return sum(
+        (
+            (i.product.weight_kg or Decimal('0')) * i.quantity
+            for i in items if not i.product.has_free_delivery()
+        ),
+        Decimal('0'),
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +282,7 @@ class CheckoutService:
 
         discount_amount = product_discount + first_order_discount_amount + mobile_app_discount_amount
         total_weight     = _cart_weight(items)
-        delivery         = _delivery_charge(district or '', delivery_zone, total_weight)
+        delivery         = Decimal('0') if _all_free_delivery(items) else _delivery_charge(district or '', delivery_zone, _chargeable_weight(items))
         free_delivery_min = SiteSetting.get().free_delivery_min_subtotal
         if free_delivery_min > 0 and subtotal >= free_delivery_min:
             delivery = Decimal('0')

@@ -1264,9 +1264,27 @@ class OrderService:
         original_subtotal = sum((p.original_price * q for p, v, q in resolved_replacements), Decimal('0'))
         subtotal          = sum(((v.effective_price if v else p.effective_price) * q for p, v, q in resolved_replacements), Decimal('0'))
         total_weight      = sum(((p.weight_kg or Decimal('0')) * q for p, v, q in resolved_replacements), Decimal('0'))
+        # Real weight above (stored as estimated_weight_kg) vs. what
+        # delivery is actually priced against below — same split as
+        # CheckoutService._cart_weight/_chargeable_weight, so a
+        # free_delivery replacement item doesn't inflate the charge here
+        # either.
+        chargeable_weight = sum(
+            ((p.weight_kg or Decimal('0')) * q for p, v, q in resolved_replacements if not p.has_free_delivery()),
+            Decimal('0'),
+        )
+        # A 0kg lookup doesn't necessarily mean DeliveryCharge.charge_for()
+        # returns ৳0 — its configured tiers can have a nonzero base
+        # bracket — so "every replacement item is free_delivery" needs its
+        # own explicit override, same reasoning as
+        # CheckoutService._all_free_delivery.
+        all_free_delivery = bool(resolved_replacements) and all(p.has_free_delivery() for p, v, q in resolved_replacements)
 
         zone = 'inside' if (original_order.shipping_district or '').strip().lower() in _DHAKA_DISTRICTS else 'outside'
-        delivery = Decimal('0') if delivery_charge_waived else DeliveryCharge.get().charge_for(zone, total_weight)
+        if delivery_charge_waived or all_free_delivery:
+            delivery = Decimal('0')
+        else:
+            delivery = DeliveryCharge.get().charge_for(zone, chargeable_weight)
 
         # cashback_used starts at 0 here deliberately — it's only computed
         # AFTER any discretionary discount is applied below (apply_discount's

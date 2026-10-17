@@ -22,12 +22,13 @@ class CartItemSerializer(serializers.ModelSerializer):
     package_items       = serializers.SerializerMethodField()
     product_image       = serializers.SerializerMethodField()
     weight_kg           = serializers.SerializerMethodField()
+    has_free_delivery   = serializers.SerializerMethodField()
 
     class Meta:
         model  = CartItem
         fields = ['id', 'product', 'product_name_bn', 'product_name_en', 'variant', 'variant_label_bn', 'variant_label_en',
                   'unit_price', 'original_unit_price', 'quantity', 'line_total', 'stock_on_hand',
-                  'is_package', 'package_items', 'product_image', 'weight_kg']
+                  'is_package', 'package_items', 'product_image', 'weight_kg', 'has_free_delivery']
         read_only_fields = ['id']
 
     def get_weight_kg(self, obj):
@@ -35,6 +36,16 @@ class CartItemSerializer(serializers.ModelSerializer):
         # get the cart's total weight for a live delivery-charge quote (see
         # CheckoutService._cart_weight for the server-side equivalent).
         return str(obj.product.weight_kg or Decimal('0'))
+
+    def get_has_free_delivery(self, obj):
+        # Lets the app exclude this line's weight from its own client-side
+        # delivery-charge quote (cart_provider.dart's totalWeightKg), same
+        # reasoning as CartSerializer.get_weight_kg's own exclusion for the
+        # web cart preview — see CheckoutService._chargeable_weight for the
+        # server-side source of truth this mirrors.
+        channel = _channel_from(self.context.get('request'))
+        obj.product._channel = channel
+        return obj.product.has_free_delivery()
 
     def get_product_image(self, obj):
         img = None
@@ -93,21 +104,41 @@ class CartSerializer(serializers.ModelSerializer):
     discount_amount = serializers.SerializerMethodField()
     item_count      = serializers.SerializerMethodField()
     weight_kg       = serializers.SerializerMethodField()
+    all_free_delivery = serializers.SerializerMethodField()
 
     class Meta:
         model  = Cart
-        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count', 'weight_kg']
+        fields = ['id', 'items', 'subtotal', 'discount_amount', 'item_count', 'weight_kg', 'all_free_delivery']
 
     def get_weight_kg(self, obj):
-        # Approximate — sum of each product's declared weight * quantity,
-        # same calculation checkout uses to price delivery (see
-        # CheckoutService._cart_weight), so this is what the delivery charge
-        # will actually be based on, not a separate estimate.
-        total = sum(
-            ((item.product.weight_kg or Decimal('0')) * item.quantity for item in obj.items.all()),
-            Decimal('0'),
-        )
+        # Same calculation checkout uses to price delivery (see
+        # CheckoutService._chargeable_weight) — an item whose product
+        # currently has an active free_delivery Discount has its weight
+        # excluded, same reasoning as there, so this cart total feeds the
+        # delivery-charge preview (CartClient's useGetDeliveryChargesQuery)
+        # with the number that actually matches what checkout will charge,
+        # not the item's real physical weight.
+        channel = _channel_from(self.context.get('request'))
+        total = Decimal('0')
+        for item in obj.items.all():
+            item.product._channel = channel
+            if not item.product.has_free_delivery():
+                total += (item.product.weight_kg or Decimal('0')) * item.quantity
         return str(total)
+
+    def get_all_free_delivery(self, obj):
+        # A 0kg weight_kg above doesn't guarantee DeliveryCharge.charge_for()
+        # returns ৳0 — its configured tiers can have a nonzero base bracket
+        # (e.g. ৳70 for 0–0.2kg) — so CheckoutService._all_free_delivery's
+        # explicit ৳0 override needs a matching signal here, or the cart
+        # preview would show a charge checkout won't actually apply.
+        channel = _channel_from(self.context.get('request'))
+        items = list(obj.items.all())
+        if not items:
+            return False
+        for item in items:
+            item.product._channel = channel
+        return all(item.product.has_free_delivery() for item in items)
 
     def get_subtotal(self, obj):
         channel = _channel_from(self.context.get('request'))

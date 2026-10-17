@@ -237,6 +237,7 @@ class ProductSerializer(serializers.ModelSerializer):
     original_price       = serializers.SerializerMethodField()
     active_discount_type  = serializers.SerializerMethodField()
     active_discount_value = serializers.SerializerMethodField()
+    has_free_delivery     = serializers.SerializerMethodField()
     average_rating        = serializers.FloatField(read_only=True, default=None)
     review_count          = serializers.IntegerField(read_only=True, default=0)
     can_delete            = serializers.SerializerMethodField()
@@ -279,6 +280,10 @@ class ProductSerializer(serializers.ModelSerializer):
         d = self._active_discount(obj)
         return str(d.discount_value) if d else None
 
+    def get_has_free_delivery(self, obj):
+        d = self._active_discount(obj)
+        return bool(d and d.free_delivery)
+
     def get_variant_attribute_types(self, obj):
         # Distinct attribute types this product's variants actually use
         # (e.g. ['color', 'size']) — drives which generic pill-rows the
@@ -319,7 +324,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku', 'category', 'category_name_bn', 'category_name_en',
             'brand', 'brand_name_bn', 'brand_name_en',
             'unit_price', 'cost_price', 'effective_price', 'original_price',
-            'active_discount_type', 'active_discount_value',
+            'active_discount_type', 'active_discount_value', 'has_free_delivery',
             'unit_bn', 'unit_en', 'weight_kg',
             'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
             'stock_on_hand', 'images', 'package_items', 'variants', 'variant_attribute_types', 'visual_attribute_type_code',

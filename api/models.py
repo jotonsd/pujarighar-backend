@@ -413,6 +413,17 @@ class Product(BaseModel):
             qs = qs.filter(models.Q(scope='BOTH') | models.Q(scope=channel))
         return qs.order_by('-created_at').first()
 
+    def has_free_delivery(self) -> bool:
+        """True when this product's current active discount (same one
+        effective_price reads — see _active_discount, including its
+        channel/scope and date-range gating) also grants free delivery.
+        Not a separate standing product flag: a discount combining a price
+        cut with free delivery needs both discount_value and
+        free_delivery=True on the SAME Discount row, since only the single
+        most-recent active discount is ever considered."""
+        d = self._active_discount()
+        return bool(d and d.free_delivery)
+
     def _fallback_base_price(self) -> Decimal:
         """A product's own unit_price is meaningless once pricing has moved
         onto its variants (price_override per variant, unit_price often
@@ -1369,6 +1380,16 @@ class Discount(models.Model):
     discount_type  = models.CharField(max_length=12, choices=TYPES)
     discount_value = models.DecimalField(max_digits=10, decimal_places=2)
     scope          = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='BOTH')
+    # Not "whole order ships free" — this product's own weight is excluded
+    # from the weight used to look up DeliveryCharge.charge_for() while
+    # this discount is active, so other items in the same cart still get
+    # charged for their own weight normally. Buying only free_delivery
+    # items nets a 0kg chargeable weight, which is genuinely free. A
+    # discount combining a price cut with free delivery just sets both
+    # discount_value and this on the same row; a free-delivery-only
+    # promotion sets discount_value=0. See Product.has_free_delivery and
+    # CheckoutService/GuestCheckoutService's _chargeable_weight.
+    free_delivery  = models.BooleanField(default=False)
     note           = models.CharField(max_length=200, blank=True)
     is_active      = models.BooleanField(default=True)
     start_date     = models.DateField(null=True, blank=True)
