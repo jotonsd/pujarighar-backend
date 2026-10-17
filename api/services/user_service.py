@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class UserService:
 
     def list_users(self, role: str = '', search: str = '', is_active: str = '', registered_via: str = ''):
-        qs = User.objects.select_related('profile').all()
+        qs = User.objects.select_related('profile').all().order_by('-date_joined')
         if role:
             qs = qs.filter(role_id=role)
         if search:
