@@ -30,14 +30,36 @@ class DiscountSerializer(drf_serializers.ModelSerializer):
         request = self.context.get('request')
         return request.build_absolute_uri(image.image.url) if request else image.image.url
 
+    def validate(self, attrs):
+        # discount_value defaults to 0 at the model level specifically so a
+        # free_delivery-only promotion (no price cut) can be created — but
+        # a discount that's neither a real price cut NOR free delivery
+        # does nothing at all, which is almost certainly a mistake (an
+        # empty discount-value field left blank), not an intentional
+        # no-op discount. self.instance covers a partial update (PATCH)
+        # that doesn't resend every field.
+        discount_value = attrs.get('discount_value', getattr(self.instance, 'discount_value', None))
+        free_delivery  = attrs.get('free_delivery', getattr(self.instance, 'free_delivery', False))
+        if not free_delivery and (discount_value is None or discount_value <= 0):
+            raise drf_serializers.ValidationError({
+                'discount_value': 'শূন্যের বেশি একটি ছাড়ের পরিমাণ দিন, অথবা ফ্রি ডেলিভারি চালু করুন।',
+            })
+        return attrs
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, has_permission('discounts', 'view')])
 def list_discounts(request):
     product_id = request.query_params.get('product')
+    category_id = request.query_params.get('category')
+    brand_id = request.query_params.get('brand')
     qs = Discount.objects.select_related('product').prefetch_related('product__images').order_by('-created_at')
     if product_id:
         qs = qs.filter(product_id=product_id)
+    if category_id:
+        qs = qs.filter(product__category_id=category_id)
+    if brand_id:
+        qs = qs.filter(product__brand_id=brand_id)
     page_data, pagination = paginate_queryset(qs, request)
     return ApiResponse(
         message="Discounts retrieved",

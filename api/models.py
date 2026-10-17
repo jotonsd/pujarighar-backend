@@ -1378,7 +1378,10 @@ class Discount(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     product        = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='discounts')
     discount_type  = models.CharField(max_length=12, choices=TYPES)
-    discount_value = models.DecimalField(max_digits=10, decimal_places=2)
+    # Not required — a free_delivery-only promotion (no price cut at all)
+    # leaves this at its default 0, which apply_discount treats as a no-op
+    # on price.
+    discount_value = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
     scope          = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='BOTH')
     # Not "whole order ships free" — this product's own weight is excluded
     # from the weight used to look up DeliveryCharge.charge_for() while
