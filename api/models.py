@@ -2039,6 +2039,9 @@ class CourierProvider(models.Model):
     # separately. 0 by default (no behavior change for a provider that
     # doesn't charge one, or until an admin configures the real rate here).
     cod_fee_percent          = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    # Shown publicly at checkout as a "delivery partner" — active providers
+    # only, see courier_views.delivery_partners.
+    logo                     = models.ImageField(upload_to='couriers/', null=True, blank=True)
     created_at               = models.DateTimeField(auto_now_add=True)
     updated_at               = models.DateTimeField(auto_now=True)
 

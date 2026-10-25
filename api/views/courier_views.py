@@ -31,7 +31,7 @@ def providers(request):
         if not has_any_permission(('courier', 'view'), ('orders', 'view'))().has_permission(request, None):
             return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
         qs = _svc.list_providers()
-        return ApiResponse(message='Providers retrieved', data=CourierProviderSerializer(qs, many=True).data)
+        return ApiResponse(message='Providers retrieved', data=CourierProviderSerializer(qs, many=True, context={'request': request}).data)
 
     if not has_permission('courier', 'view')().has_permission(request, None):
         return ApiResponse(message='Permission denied', errors='Forbidden', status_code=403)
@@ -57,7 +57,7 @@ def providers(request):
         provider.password_encrypted = encrypt_token(data['password'])
     provider.webhook_secret_encrypted = encrypt_token(secrets.token_urlsafe(32))
     provider.save()
-    payload = CourierProviderSerializer(provider).data
+    payload = CourierProviderSerializer(provider, context={'request': request}).data
     # Webhook secret shown once, in plaintext, right after creation only —
     # never returned again from the GET/list endpoint.
     payload['webhook_secret'] = decrypt_token(provider.webhook_secret_encrypted)
@@ -92,7 +92,7 @@ def update_provider(request, pk):
     if data.get('password'):
         provider.password_encrypted = encrypt_token(data['password'])
     provider.save()
-    return ApiResponse(message='Provider updated', data=CourierProviderSerializer(provider).data)
+    return ApiResponse(message='Provider updated', data=CourierProviderSerializer(provider, context={'request': request}).data)
 
 
 @api_view(['POST'])
@@ -111,9 +111,52 @@ def regenerate_webhook_secret(request, pk):
 
     provider.webhook_secret_encrypted = encrypt_token(secrets.token_urlsafe(32))
     provider.save(update_fields=['webhook_secret_encrypted', 'updated_at'])
-    payload = CourierProviderSerializer(provider).data
+    payload = CourierProviderSerializer(provider, context={'request': request}).data
     payload['webhook_secret'] = decrypt_token(provider.webhook_secret_encrypted)
     return ApiResponse(message='Webhook secret regenerated', data=payload)
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([IsAuthenticated, has_permission('courier', 'edit')])
+def provider_logo(request, pk):
+    """Multipart upload (POST, field 'logo') or removal (DELETE) of the logo
+    shown at checkout — its own endpoint so update_provider can stay JSON
+    (multipart there would turn is_active='false' into True)."""
+    try:
+        provider = CourierProvider.objects.get(pk=pk)
+    except CourierProvider.DoesNotExist:
+        return ApiResponse(message='Provider not found', errors='Not found', status_code=404)
+
+    if request.method == 'DELETE':
+        if provider.logo:
+            provider.logo.delete(save=False)
+        provider.logo = None
+        provider.save(update_fields=['logo', 'updated_at'])
+        return ApiResponse(message='Logo removed', data=CourierProviderSerializer(provider, context={'request': request}).data)
+
+    if 'logo' not in request.FILES:
+        return ApiResponse(message='Logo file is required', errors='Validation error', status_code=422)
+    provider.logo = request.FILES['logo']
+    provider.save(update_fields=['logo', 'updated_at'])
+    return ApiResponse(message='Logo uploaded', data=CourierProviderSerializer(provider, context={'request': request}).data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def delivery_partners(request):
+    """Public — the cart/checkout page (including anonymous guest checkout)
+    shows the active couriers as "our delivery partners". Name and logo
+    only, never any of the provider's credentials or config."""
+    partners = CourierProvider.objects.filter(is_active=True).order_by('id')
+    return ApiResponse(message='Delivery partners retrieved', data=[
+        {
+            'id':   p.id,
+            'code': p.code,
+            'name': p.name,
+            'logo': request.build_absolute_uri(p.logo.url) if p.logo else None,
+        }
+        for p in partners
+    ])
 
 
 @api_view(['GET'])

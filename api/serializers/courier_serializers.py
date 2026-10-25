@@ -21,6 +21,13 @@ class CourierProviderSerializer(serializers.Serializer):
     has_webhook_secret = serializers.SerializerMethodField()
     has_username = serializers.SerializerMethodField()
     has_password = serializers.SerializerMethodField()
+    logo = serializers.SerializerMethodField()
+
+    def get_logo(self, obj):
+        if not obj.logo:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(obj.logo.url) if request else obj.logo.url
 
     def get_has_api_key(self, obj):
         return bool(obj.api_key_encrypted)
