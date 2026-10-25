@@ -11,6 +11,7 @@ from api.utils.response import ApiResponse
 from api.utils.pagination import paginate_queryset
 from api.permissions import has_permission, has_any_permission
 from api.utils.journal_number import next_entry_number
+from api.utils.dates import parse_date
 
 logger = logging.getLogger(__name__)
 _svc = AccountingService()
@@ -176,9 +177,18 @@ def get_sales_summary(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, has_permission('dashboard_overview', 'view')])
-def get_dashboard_summary(_request):
+def get_dashboard_summary(request):
     try:
-        return ApiResponse(message="Dashboard summary retrieved", data=_svc.get_dashboard_summary())
+        # Dashboard date-range dropdown — the frontend resolves each preset
+        # (today/this week/fortnight/this month/custom) to explicit dates
+        # itself and sends them here; omitting both defaults to the current
+        # calendar month, same as before this param existed.
+        period_from = parse_date(request.query_params.get('from')) if request.query_params.get('from') else None
+        period_to = parse_date(request.query_params.get('to')) if request.query_params.get('to') else None
+        return ApiResponse(
+            message="Dashboard summary retrieved",
+            data=_svc.get_dashboard_summary(period_from=period_from, period_to=period_to),
+        )
     except Exception as e:
         logger.error(f"Dashboard error: {e}", exc_info=True)
         return ApiResponse(message=str(e), errors=str(e), status_code=500)

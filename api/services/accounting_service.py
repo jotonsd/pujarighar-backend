@@ -254,7 +254,7 @@ class AccountingService:
             'avg_order':     str(avg_order),
         }
 
-    def get_dashboard_summary(self) -> dict:
+    def get_dashboard_summary(self, period_from: date = None, period_to: date = None) -> dict:
         today = to_local(timezone.now()).date()
 
         # Build full 12-month spine for current (local) year
@@ -279,14 +279,21 @@ class AccountingService:
         ).values_list('journal_entry__created_at', 'debit', 'credit'):
             revenue_map[local_period_bucket(created_at, 'month')] += credit - debit
 
-        # Monthly expense from journal lines (current year)
+        # Monthly expense from journal lines (current year) — net of any
+        # reversal (e.g. a cashback-earned expense line reversed via
+        # _reverse_cashback when an order is partially returned, which
+        # CREDITS the expense account). This summed only `debit` before,
+        # so a reversed expense stayed counted in full in whatever month
+        # it was originally booked and never came back out — overstating
+        # that month's expense and disagreeing with this_month_expense
+        # above, which already nets debit-credit correctly via _exp().
         expense_map: dict = defaultdict(lambda: Decimal('0'))
-        for created_at, debit in JournalLine.objects.filter(
+        for created_at, debit, credit in JournalLine.objects.filter(
             account__account_type='EXPENSE',
             journal_entry__created_at__gte=year_start,
             journal_entry__created_at__lt=year_end,
-        ).values_list('journal_entry__created_at', 'debit'):
-            expense_map[local_period_bucket(created_at, 'month')] += debit
+        ).values_list('journal_entry__created_at', 'debit', 'credit'):
+            expense_map[local_period_bucket(created_at, 'month')] += debit - credit
 
         monthly_chart = [
             {
@@ -313,6 +320,21 @@ class AccountingService:
         else:
             last_month_start = date(today.year, today.month - 1, 1)
             last_month_end   = month_start - timedelta(days=1)
+
+        # ── Filterable period (dashboard date-range dropdown) ──────────────────
+        # Defaults to the current calendar month — same as before this param
+        # existed — when the dashboard is loaded with no explicit range. The
+        # stat cards below ("This Month Revenue/Expense/Profit", deductions)
+        # all use this instead of the hardcoded month_start/today so the
+        # dropdown can swap them to any preset (today, this week, a
+        # fortnight, a custom range) without touching order_comparison_chart
+        # or monthly_revenue_chart, which stay fixed calendar-month/year
+        # views regardless of the filter.
+        period_start = period_from or month_start
+        period_end   = period_to or today
+        period_days  = (period_end - period_start).days + 1
+        prev_period_end   = period_start - timedelta(days=1)
+        prev_period_start = prev_period_end - timedelta(days=period_days - 1)
 
         def _rev(date_from, date_to):
             # Every REVENUE-type account, not just Sales Revenue (4000) —
@@ -343,9 +365,9 @@ class AccountingService:
             ).aggregate(d=Sum('debit'), c=Sum('credit'))
             return (agg['d'] or Decimal('0')) - (agg['c'] or Decimal('0'))
 
-        this_month_rev  = _rev(month_start, today)
-        last_month_rev  = _rev(last_month_start, last_month_end)
-        this_month_exp  = _exp(month_start, today)
+        this_month_rev  = _rev(period_start, period_end)
+        last_month_rev  = _rev(prev_period_start, prev_period_end)
+        this_month_exp  = _exp(period_start, period_end)
         this_month_profit = this_month_rev - this_month_exp
 
         rev_change_pct = (
@@ -513,8 +535,8 @@ class AccountingService:
             created_at__gte=local_day_start(week_start), created_at__lt=local_day_end_exclusive(today),
         ).exclude(status__in=sales_status_exclude)
         this_month_orders_qs = SalesOrder.objects.filter(
-            created_at__gte=local_day_start(month_start),
-            created_at__lt=local_day_end_exclusive(today),
+            created_at__gte=local_day_start(period_start),
+            created_at__lt=local_day_end_exclusive(period_end),
         ).exclude(status__in=sales_status_exclude)
         this_month_orders = this_month_orders_qs.count()
         this_month_sales_amount = this_month_orders_qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
@@ -548,4 +570,6 @@ class AccountingService:
             'this_month_sales_amount': str(this_month_sales_amount),
             'recent_orders':         recent_orders,
             'top_products':          top_products,
+            'period_from':           period_start.isoformat(),
+            'period_to':             period_end.isoformat(),
         }
