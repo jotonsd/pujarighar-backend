@@ -305,7 +305,7 @@ class AccountingService:
         ]
 
         # Order status breakdown
-        statuses = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'PICKED', 'ON_THE_WAY', 'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'CANCELLED']
+        statuses = ['PENDING', 'CONFIRMED', 'PACKED', 'ASSIGNED', 'PICKED', 'ON_THE_WAY', 'DELIVERED', 'PARTIALLY_DELIVERED', 'EXCHANGED', 'RETURNED', 'CANCELLED']
         status_breakdown = [
             {'status': s, 'count': SalesOrder.objects.filter(status=s).count()}
             for s in statuses
