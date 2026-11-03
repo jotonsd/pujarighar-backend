@@ -262,10 +262,10 @@ def delete_user(request, pk):
 
 
 @api_view(['DELETE'])
-# 'delete' is deliberately not a grantable Permission row (see Permission's
-# ACTIONS comment) — this makes has_permission(..., 'delete') an ADMIN-only
-# gate by construction, same convention used for every other hard-delete in
-# this codebase, appropriate for an action this irreversible.
+# Permission-gated like every other module's 'delete' action (products,
+# discounts, banners, etc. — see migration 0133) rather than hardcoded to
+# ADMIN only: an admin can grant this to a custom role via Admin > Roles.
+# The ADMIN system role always bypasses has_permission's check regardless.
 @permission_classes([IsAuthenticated, has_permission('users_admin', 'delete')])
 def hard_delete_user(request, pk):
     """Permanently removes a user row — unlike delete_user above (which only
