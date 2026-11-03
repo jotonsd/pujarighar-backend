@@ -1,6 +1,6 @@
 from .auth_views import register, login, logout, token_refresh, google_login, facebook_login, forgot_password, reset_password
 from .user_views import (
-    list_users, create_user, get_user, update_user, delete_user,
+    list_users, create_user, get_user, update_user, delete_user, hard_delete_user,
     activate_user, deactivate_user, change_role,
     get_me, update_me, change_password,
     list_delivery_persons, lookup_user_by_phone,

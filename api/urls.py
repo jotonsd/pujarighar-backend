@@ -23,6 +23,7 @@ urlpatterns = [
     path('users/<uuid:pk>/',               views.get_user,             name='user-detail'),
     path('users/<uuid:pk>/update/',        views.update_user,          name='user-update'),
     path('users/<uuid:pk>/delete/',        views.delete_user,          name='user-delete'),
+    path('users/<uuid:pk>/hard-delete/',   views.hard_delete_user,     name='user-hard-delete'),
     path('users/<uuid:pk>/activate/',      views.activate_user,        name='user-activate'),
     path('users/<uuid:pk>/deactivate/',    views.deactivate_user,      name='user-deactivate'),
     path('users/<uuid:pk>/change-role/',   views.change_role,          name='user-change-role'),

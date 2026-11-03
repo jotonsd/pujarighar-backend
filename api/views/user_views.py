@@ -4,11 +4,12 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.storage import default_storage
 from django.core.validators import validate_email
+from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
-from api.models import User
+from api.models import SalesOrder, User
 from api.serializers.auth_serializers import ChangePasswordSerializer
 from api.serializers.user_serializers import (
     UserSerializer, ProfileSerializer,
@@ -258,6 +259,44 @@ def delete_user(request, pk):
         return ApiResponse(message="User deactivated")
     except User.DoesNotExist:
         return ApiResponse(message="User not found", errors="Not found", status_code=404)
+
+
+@api_view(['DELETE'])
+# 'delete' is deliberately not a grantable Permission row (see Permission's
+# ACTIONS comment) — this makes has_permission(..., 'delete') an ADMIN-only
+# gate by construction, same convention used for every other hard-delete in
+# this codebase, appropriate for an action this irreversible.
+@permission_classes([IsAuthenticated, has_permission('users_admin', 'delete')])
+def hard_delete_user(request, pk):
+    """Permanently removes a user row — unlike delete_user above (which only
+    deactivates), this actually deletes it. Blocked with a friendly reason
+    whenever the account has real activity worth keeping: an order (most
+    relations cascade harmlessly for a throwaway/spam account — profile,
+    cart, addresses, reviews, notifications — but SalesOrder.customer is
+    PROTECT, so losing that order history is never silently allowed)."""
+    try:
+        user = _svc.get_user(pk)
+    except User.DoesNotExist:
+        return ApiResponse(message="User not found", errors="Not found", status_code=404)
+
+    if SalesOrder.objects.filter(customer=user).exists():
+        return ApiResponse(
+            message="User has orders and cannot be deleted",
+            errors="এই গ্রাহকের অর্ডার আছে, তাই মুছে ফেলা যাবে না। এর বদলে অ্যাকাউন্ট নিষ্ক্রিয় করুন।",
+            status_code=409,
+        )
+    try:
+        user.delete()
+    except ProtectedError:
+        # Any other PROTECT relation this user ended up owning (e.g. was
+        # once staff and has created_by records elsewhere) — same friendly
+        # refusal instead of a raw 500.
+        return ApiResponse(
+            message="User cannot be deleted — other records reference it",
+            errors="এই ব্যবহারকারীর সাথে যুক্ত অন্যান্য রেকর্ড আছে, তাই মুছে ফেলা যাবে না।",
+            status_code=409,
+        )
+    return ApiResponse(message="User permanently deleted")
 
 
 @api_view(['POST'])
