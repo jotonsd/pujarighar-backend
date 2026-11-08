@@ -1,7 +1,8 @@
 import logging
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import DecimalField, Exists, F, OuterRef, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from api.models import (
@@ -109,6 +110,27 @@ class OrderService:
             qs = qs.filter(created_at__gte=local_day_start(params['from']))
         if params.get('to'):
             qs = qs.filter(created_at__lt=local_day_end_exclusive(params['to']))
+        if params.get('out_of_stock'):
+            # Orders holding at least one item whose product currently has
+            # zero or negative stock — flags unfulfillable pending/confirmed
+            # orders before staff try to pack them and discover the shortfall
+            # at the shelf. Scoped to simple (non-package) products — a
+            # package's stock is derived from its components' own stock
+            # (see Product.stock_on_hand), not worth the extra recursive
+            # subquery for what's a smaller slice of orders.
+            stock_sq = (
+                StockMovement.objects.filter(product=OuterRef('product'))
+                .values('product').annotate(v=Sum('quantity')).values('v')
+            )
+            out_of_stock_items = SalesOrderItem.objects.filter(
+                order=OuterRef('pk'), product__is_package=False,
+            ).annotate(
+                _stock=Coalesce(
+                    Subquery(stock_sq, output_field=DecimalField(max_digits=12, decimal_places=3)),
+                    Value(Decimal('0'), output_field=DecimalField(max_digits=12, decimal_places=3)),
+                )
+            ).filter(_stock__lte=0)
+            qs = qs.filter(Exists(out_of_stock_items))
         return qs
 
     def get_sales_report(self, params: dict) -> dict:
