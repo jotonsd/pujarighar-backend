@@ -218,6 +218,17 @@ class ProductSerializer(serializers.ModelSerializer):
         images = list(obj.images.all())
         if self._is_staff():
             return ProductImageSerializer(images, many=True, context=self.context).data
+        all_variants = list(obj.variants.all())
+        if not all_variants:
+            # No variant system on this product at all — a color-tagged
+            # photo here is just a display/rotation photo, not "this
+            # variant's photo", so there's nothing to hide. Without this,
+            # EVERY tagged image vanished for customers (active_value_ids
+            # below is empty whenever there are no variants), even though
+            # staff/POS saw them fine — the detail/edit page's own images
+            # came from the staff branch above, making it look like the
+            # photos were there while customers saw none at all.
+            return ProductImageSerializer(images, many=True, context=self.context).data
         active_value_ids = {
             av.attribute_value_id
             for v in self._visible_variants(obj)
