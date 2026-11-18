@@ -284,7 +284,7 @@ def bulk_delete_products(request):
     return ApiResponse(message="Bulk delete complete", data={'deleted': deleted, 'skipped': skipped})
 
 
-MAX_IMAGES = 6
+MAX_IMAGES = 10
 
 def _maybe_set_visual_attribute_type(product, images):
     """First time any photo on this product is tagged with a value, that
