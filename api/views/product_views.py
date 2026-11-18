@@ -25,6 +25,21 @@ def _ctx(request):
     return {'request': request}
 
 
+# list_products' 180s cache has no per-product invalidation of its own —
+# the full-path cache key includes no concept of "this data changed". A
+# create/update/image-upload landing inside that 180s window kept serving
+# the pre-change response (e.g. a brand-new product's images missing from
+# the admin list, even though the product's own detail page — a separate,
+# uncached endpoint — showed them correctly) for up to 3 minutes. Bumping
+# this version key on every product/image mutation and folding it into the
+# cache key below orphans every previously-cached entry instantly, without
+# needing pattern-based deletion (which the DatabaseCache fallback can't do
+# — only django-redis's delete_pattern can, and this works identically on
+# both backends).
+def _bump_products_cache_version():
+    cache.set('products_list_cache_version', cache.get('products_list_cache_version', 0) + 1, None)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def list_products(request):
@@ -39,7 +54,8 @@ def list_products(request):
         # personalized per user/guest, or the admin's include_inactive view.
         cache_key = None
         if ordering_param and not include_inactive:
-            cache_key = 'list_products:' + request.get_full_path()
+            version = cache.get('products_list_cache_version', 0)
+            cache_key = f'list_products:v{version}:' + request.get_full_path()
             cached = cache.get(cache_key)
             if cached is not None:
                 return ApiResponse(**cached)
@@ -95,6 +111,7 @@ def create_product(request):
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
         product = _svc.create_product(serializer.validated_data)
+        _bump_products_cache_version()
         return ApiResponse(
             message="Product created",
             data=ProductSerializer(product, context=_ctx(request)).data,
@@ -182,6 +199,7 @@ def update_product(request, pk):
         return ApiResponse(message="Validation failed", errors=serializer.errors, status_code=422)
     try:
         updated = _svc.update_product(product, serializer.validated_data)
+        _bump_products_cache_version()
         return ApiResponse(
             message="Product updated",
             data=ProductSerializer(updated, context=_ctx(request)).data,
@@ -237,6 +255,7 @@ def delete_product(_request, pk):
 
     try:
         _delete_product_or_raise(product)
+        _bump_products_cache_version()
         return ApiResponse(message="Product deleted")
     except ProtectedError as e:
         reason_bn, reason_en = _delete_reason(e)
@@ -255,6 +274,7 @@ def bulk_update_product_status(request):
     if not ids or is_active is None:
         return ApiResponse(message="ids and is_active are required", status_code=422)
     updated = Product.objects.filter(id__in=ids).update(is_active=bool(is_active))
+    _bump_products_cache_version()
     return ApiResponse(message="Products updated", data={'updated': updated})
 
 
@@ -281,6 +301,8 @@ def bulk_delete_products(request):
                 'reason_en': reason_en,
             })
 
+    if deleted:
+        _bump_products_cache_version()
     return ApiResponse(message="Bulk delete complete", data={'deleted': deleted, 'skipped': skipped})
 
 
@@ -344,6 +366,7 @@ def add_product_image(request, pk):
         created.append(img)
 
     _maybe_set_visual_attribute_type(product, created)
+    _bump_products_cache_version()
 
     return ApiResponse(
         message=f"{len(created)} image(s) uploaded",
@@ -367,10 +390,12 @@ def delete_product_image(request, pk, image_id):
             img.visual_value_id = request.data.get('visual_value_id') or None
             img.save(update_fields=['visual_value_id'])
             _maybe_set_visual_attribute_type(img.product, [img])
+            _bump_products_cache_version()
         return ApiResponse(message="Image updated", data=ProductImageSerializer(img, context=_ctx(request)).data)
 
     img.image.delete(save=False)
     img.delete()
+    _bump_products_cache_version()
     return ApiResponse(message="Image deleted")
 
 
