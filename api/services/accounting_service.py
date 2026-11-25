@@ -9,7 +9,7 @@ from django.db.models import F, Q
 from api.models import (
     Account, JournalEntry, JournalLine, JournalLine as JL,
     SalesOrder, SalesOrderItem, User, Product, Partner, PartnerProfitPayment,
-    StockMovement, SupplierPayment, LoanInvestor, LoanPayment,
+    StockMovement, SupplierPayment, LoanInvestor, LoanPayment, PendingCheckout,
 )
 from api.utils.dates import local_day_start, local_day_end_exclusive, local_period_bucket, to_local
 
@@ -252,6 +252,78 @@ class AccountingService:
             'total_revenue': str(total_revenue),
             'total_orders':  total_orders,
             'avg_order':     str(avg_order),
+        }
+
+    def get_native_sales_metrics(self, from_date: str, to_date: str) -> dict:
+        """Revenue/AOV/funnel/top-products computed straight from our own
+        order data, for the admin Analytics > Sales tab — a from-our-own-
+        database alternative to the GA4-event-based equivalents (which read
+        as zero whenever the storefront's gtag ecommerce events aren't
+        actually firing/configured). add_to_cart_count and conversion_rate
+        stay GA4-sourced on the caller's side (no native event log for
+        add-to-cart, and no visitor/session concept to define conversion
+        against) — this only covers the pieces our own tables can answer
+        for real: revenue, AOV, the checkout-started/purchased funnel
+        steps, and top selling products.
+        """
+        date_from = local_day_start(from_date) if from_date else None
+        date_to   = local_day_end_exclusive(to_date) if to_date else None
+
+        # "Purchases" = a real, kept sale — same exclusion convention as
+        # get_sales_summary above (excludes PENDING/CANCELLED/RETURNED).
+        sales_qs = SalesOrder.objects.exclude(status__in=('PENDING', 'CANCELLED', 'RETURNED'))
+        if date_from:
+            sales_qs = sales_qs.filter(created_at__gte=date_from)
+        if date_to:
+            sales_qs = sales_qs.filter(created_at__lt=date_to)
+
+        total_revenue = sales_qs.aggregate(t=Sum('grand_total'))['t'] or Decimal('0')
+        purchases     = sales_qs.count()
+        avg_order     = (total_revenue / purchases).quantize(Decimal('0.01')) if purchases else Decimal('0')
+
+        # "Checkout started" — a COD order posts straight to a real
+        # SalesOrder at checkout time regardless of what happens to it
+        # after (see CheckoutService.checkout), so every COD order ever
+        # created in range counts, whatever its current status. An online
+        # gateway (SSLCommerz/bKash/etc.) never creates a SalesOrder until
+        # payment actually succeeds (see PendingCheckout's own docstring) —
+        # so for that path, every PendingCheckout row started in range is
+        # the "checkout started" event instead, successful or not.
+        cod_checkouts_qs = SalesOrder.objects.filter(payment_method='COD')
+        pending_checkouts_qs = PendingCheckout.objects.all()
+        if date_from:
+            cod_checkouts_qs = cod_checkouts_qs.filter(created_at__gte=date_from)
+            pending_checkouts_qs = pending_checkouts_qs.filter(created_at__gte=date_from)
+        if date_to:
+            cod_checkouts_qs = cod_checkouts_qs.filter(created_at__lt=date_to)
+            pending_checkouts_qs = pending_checkouts_qs.filter(created_at__lt=date_to)
+        checkout_starts = cod_checkouts_qs.count() + pending_checkouts_qs.count()
+
+        top_products_qs = (
+            SalesOrderItem.objects
+            .filter(order__in=sales_qs)
+            .values('product__name_bn', 'product__name_en')
+            .annotate(
+                units_sold=Sum('quantity'),
+                revenue=Sum(ExpressionWrapper(F('unit_price') * F('quantity'), output_field=DecimalField(max_digits=14, decimal_places=2))),
+            )
+            .order_by('-revenue')[:10]
+        )
+        top_selling_products = [
+            {
+                'name':       r['product__name_en'] or r['product__name_bn'],
+                'units_sold': int(r['units_sold'] or 0),
+                'revenue':    float(r['revenue'] or 0),
+            }
+            for r in top_products_qs
+        ]
+
+        return {
+            'revenue':               float(total_revenue),
+            'average_order_value':   float(avg_order),
+            'checkout_starts':       checkout_starts,
+            'purchases':             purchases,
+            'top_selling_products':  top_selling_products,
         }
 
     def get_dashboard_summary(self, period_from: date = None, period_to: date = None) -> dict:
