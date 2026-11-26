@@ -7,6 +7,7 @@ from .user_views import (
 )
 from .product_views import (
     list_products, create_product, get_product, get_product_by_slug, update_product, delete_product,
+    scan_product,
     add_product_image, delete_product_image, popular_by_category, get_recommended_products,
     get_similar_products, bulk_update_product_status, bulk_delete_products,
 )

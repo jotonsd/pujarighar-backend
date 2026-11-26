@@ -50,6 +50,7 @@ urlpatterns = [
     path('products/<uuid:pk>/similar/',        views.get_similar_products,  name='product-similar'),
     path('products/<uuid:pk>/',                views.get_product,           name='product-detail'),
     path('products/slug/<slug:slug>/',         views.get_product_by_slug,   name='product-detail-by-slug'),
+    path('products/scan/',                     views.scan_product,          name='product-scan'),
     path('products/<uuid:pk>/update/', views.update_product, name='product-update'),
     path('products/<uuid:pk>/delete/', views.delete_product, name='product-delete'),
     path('products/bulk-status/', views.bulk_update_product_status, name='product-bulk-status'),

@@ -9,7 +9,7 @@ from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 
-from api.models import Product, ProductImage, Category, SalesOrderItem, ProductView, SearchLog
+from api.models import Product, ProductImage, Category, SalesOrderItem, ProductView, SearchLog, ProductVariant
 from api.serializers.product_serializers import ProductSerializer, ProductImageSerializer, CategorySerializer
 from api.services.product_service import ProductService
 from api.utils.response import ApiResponse
@@ -185,6 +185,49 @@ def get_product_by_slug(request, slug):
         )
     except Product.DoesNotExist:
         return ApiResponse(message="Product not found", errors="Not found", status_code=404)
+
+
+# Prefix for a product/variant QR code's payload — generated once on the
+# website admin's Product Edit page (client-side, via the `qrcode` npm
+# package already used for the Play-Store-promo QR) and scanned here from
+# the app's POS screen. A variant gets its own QR keyed by the variant's own
+# UUID (already unique/stable) rather than inventing a new "base SKU +
+# suffix" concatenation convention that doesn't exist anywhere else in this
+# codebase.
+_QR_SKU_PREFIX = 'PG-SKU:'
+_QR_VARIANT_PREFIX = 'PG-VARIANT:'
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('pos', 'create')])
+def scan_product(request):
+    code = request.query_params.get('code', '').strip()
+    try:
+        if code.startswith(_QR_VARIANT_PREFIX):
+            variant = ProductVariant.objects.select_related('product').get(
+                id=code[len(_QR_VARIANT_PREFIX):],
+            )
+            product = variant.product
+            variant_id = str(variant.id)
+        elif code.startswith(_QR_SKU_PREFIX):
+            product = Product.objects.get(sku=code[len(_QR_SKU_PREFIX):])
+            variant_id = None
+        else:
+            return ApiResponse(
+                message="Unrecognized QR code",
+                errors={'message_bn': 'অপরিচিত QR কোড', 'message_en': 'Unrecognized QR code'},
+                status_code=400,
+            )
+    except (Product.DoesNotExist, ProductVariant.DoesNotExist, ValueError):
+        return ApiResponse(
+            message="Product not found for this QR code",
+            errors={'message_bn': 'এই QR কোডের জন্য কোনো পণ্য পাওয়া যায়নি', 'message_en': 'Product not found for this QR code'},
+            status_code=404,
+        )
+    return ApiResponse(
+        message="Product resolved",
+        data={'product': ProductSerializer(product, context=_ctx(request)).data, 'variant_id': variant_id},
+    )
 
 
 @api_view(['PATCH'])
