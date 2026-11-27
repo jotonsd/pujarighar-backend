@@ -1,5 +1,6 @@
 import logging
 from decimal import Decimal
+from urllib.parse import urlparse, parse_qs
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -198,35 +199,93 @@ _QR_SKU_PREFIX = 'PG-SKU:'
 _QR_VARIANT_PREFIX = 'PG-VARIANT:'
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated, has_permission('pos', 'create')])
-def scan_product(request):
-    code = request.query_params.get('code', '').strip()
+def _extract_qr_code(raw: str) -> str:
+    """The sticker now encodes a real, openable website URL (so a plain
+    camera-app scan lands on the product page instead of showing bare
+    text) — see ProductQrCode.tsx. That URL carries the original
+    `PG-SKU:`/`PG-VARIANT:` payload as its own `code` query param, so both
+    our in-app scanner (which sends the raw decoded text straight here) and
+    anything that ever looked at an *old*, pre-URL sticker (bare payload,
+    no query string) resolve the same way. Falls back to returning the
+    input unchanged when there's no `?code=` to find."""
+    if '?code=' not in raw and '&code=' not in raw:
+        return raw
+    query = urlparse(raw).query
+    parsed = parse_qs(query).get('code')
+    return parsed[0] if parsed else raw
+
+
+class _QrResolveError(Exception):
+    def __init__(self, status_code: int, message: str, message_bn: str, message_en: str):
+        self.status_code = status_code
+        self.message = message
+        self.message_bn = message_bn
+        self.message_en = message_en
+
+
+def _resolve_qr_code(raw: str) -> tuple[Product, str | None]:
+    """Shared by the staff-only `scan_product` (full product payload, for
+    POS) and the public `resolve_qr_code` (bare IDs only, for the website's
+    external-scan redirect page) — same parsing, same lookup, different
+    amount of data handed back afterward."""
+    code = _extract_qr_code(raw.strip())
     try:
         if code.startswith(_QR_VARIANT_PREFIX):
             variant = ProductVariant.objects.select_related('product').get(
                 id=code[len(_QR_VARIANT_PREFIX):],
             )
-            product = variant.product
-            variant_id = str(variant.id)
+            return variant.product, str(variant.id)
         elif code.startswith(_QR_SKU_PREFIX):
-            product = Product.objects.get(sku=code[len(_QR_SKU_PREFIX):])
-            variant_id = None
+            return Product.objects.get(sku=code[len(_QR_SKU_PREFIX):]), None
         else:
-            return ApiResponse(
-                message="Unrecognized QR code",
-                errors={'message_bn': 'অপরিচিত QR কোড', 'message_en': 'Unrecognized QR code'},
-                status_code=400,
+            raise _QrResolveError(
+                400, "Unrecognized QR code",
+                'অপরিচিত QR কোড', 'Unrecognized QR code',
             )
     except (Product.DoesNotExist, ProductVariant.DoesNotExist, ValueError):
+        raise _QrResolveError(
+            404, "Product not found for this QR code",
+            'এই QR কোডের জন্য কোনো পণ্য পাওয়া যায়নি', 'Product not found for this QR code',
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, has_permission('pos', 'create')])
+def scan_product(request):
+    try:
+        product, variant_id = _resolve_qr_code(request.query_params.get('code', ''))
+    except _QrResolveError as e:
         return ApiResponse(
-            message="Product not found for this QR code",
-            errors={'message_bn': 'এই QR কোডের জন্য কোনো পণ্য পাওয়া যায়নি', 'message_en': 'Product not found for this QR code'},
-            status_code=404,
+            message=e.message,
+            errors={'message_bn': e.message_bn, 'message_en': e.message_en},
+            status_code=e.status_code,
         )
     return ApiResponse(
         message="Product resolved",
         data={'product': ProductSerializer(product, context=_ctx(request)).data, 'variant_id': variant_id},
+    )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def resolve_qr_code(request):
+    """Backs the website's public `/[locale]/qr` redirect page — a plain
+    camera-app scan of a product/variant sticker opens that page (see
+    ProductQrCode.tsx), which calls this to turn the code into a product id
+    to redirect to, then lands on the normal product detail page. No
+    product data is returned here, just the id — anything more belongs on
+    the actual product page, not duplicated in this redirect hop."""
+    try:
+        product, variant_id = _resolve_qr_code(request.query_params.get('code', ''))
+    except _QrResolveError as e:
+        return ApiResponse(
+            message=e.message,
+            errors={'message_bn': e.message_bn, 'message_en': e.message_en},
+            status_code=e.status_code,
+        )
+    return ApiResponse(
+        message="Product resolved",
+        data={'product_id': str(product.id), 'variant_id': variant_id},
     )
 
 
