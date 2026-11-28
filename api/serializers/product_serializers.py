@@ -32,7 +32,8 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ProductVariant
         fields = ['id', 'product', 'sku_suffix', 'price_override', 'effective_price',
-                  'stock_on_hand', 'is_active', 'label_bn', 'label_en', 'attribute_values']
+                  'stock_on_hand', 'is_active', 'label_bn', 'label_en', 'attribute_values',
+                  'qr_printed_count']
 
     def get_effective_price(self, obj):
         request = self.context.get('request')
@@ -338,13 +339,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'active_discount_type', 'active_discount_value', 'has_free_delivery',
             'unit_bn', 'unit_en', 'weight_kg',
             'is_package', 'discount_type', 'discount_value', 'is_active', 'badges',
-            'stock_on_hand', 'images', 'package_items', 'variants', 'variant_attribute_types', 'visual_attribute_type_code',
+            'stock_on_hand', 'qr_printed_count', 'images', 'package_items', 'variants', 'variant_attribute_types', 'visual_attribute_type_code',
             'average_rating', 'review_count', 'can_delete',
             'seo_title_bn', 'seo_title_en', 'meta_description_bn', 'meta_description_en',
             'focus_keyword', 'canonical_url',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'slug', 'cost_price', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'slug', 'cost_price', 'created_at', 'updated_at', 'qr_printed_count']
 
 
 class SupplierSerializer(serializers.ModelSerializer):

@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value
+from django.db.models import Sum, Subquery, OuterRef, DecimalField, Value, F
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 
@@ -406,6 +406,46 @@ def bulk_delete_products(request):
     if deleted:
         _bump_products_cache_version()
     return ApiResponse(message="Bulk delete complete", data={'deleted': deleted, 'skipped': skipped})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, has_permission('products', 'edit')])
+def mark_qr_printed(request):
+    """Bumps qr_printed_count on whichever products/variants a bulk sticker
+    print run just covered — called by the "Mark as printed" button on the
+    bulk QR listing page (AllProductQrCodes.tsx), separately from the
+    browser's own Print action, since opening the print dialog isn't proof
+    anything actually came out of the printer. Cumulative, not a snapshot:
+    repeated partial print runs (e.g. ran out of label paper halfway) each
+    add their own quantity rather than overwriting the running total, so
+    "stock not yet covered by a printed sticker" stays accurate."""
+    items = request.data.get('items') or []
+    if not items:
+        return ApiResponse(message="items is required", status_code=422)
+
+    product_qty = {}
+    variant_qty = {}
+    for item in items:
+        kind = item.get('type')
+        obj_id = item.get('id')
+        try:
+            qty = max(0, int(item.get('quantity', 0)))
+        except (TypeError, ValueError):
+            continue
+        if not obj_id or qty == 0:
+            continue
+        bucket = product_qty if kind == 'product' else variant_qty if kind == 'variant' else None
+        if bucket is None:
+            continue
+        bucket[obj_id] = bucket.get(obj_id, 0) + qty
+
+    updated = 0
+    for pid, qty in product_qty.items():
+        updated += Product.objects.filter(id=pid).update(qr_printed_count=F('qr_printed_count') + qty)
+    for vid, qty in variant_qty.items():
+        updated += ProductVariant.objects.filter(id=vid).update(qr_printed_count=F('qr_printed_count') + qty)
+
+    return ApiResponse(message="QR print counts updated", data={'updated': updated})
 
 
 MAX_IMAGES = 10

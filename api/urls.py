@@ -56,6 +56,7 @@ urlpatterns = [
     path('products/<uuid:pk>/delete/', views.delete_product, name='product-delete'),
     path('products/bulk-status/', views.bulk_update_product_status, name='product-bulk-status'),
     path('products/bulk-delete/', views.bulk_delete_products, name='product-bulk-delete'),
+    path('products/qr/mark-printed/', views.mark_qr_printed, name='product-qr-mark-printed'),
     path('products/<uuid:pk>/images/', views.add_product_image, name='product-image-add'),
     path('products/<uuid:pk>/images/<uuid:image_id>/', views.delete_product_image, name='product-image-delete'),
 

@@ -10,6 +10,7 @@ from .product_views import (
     scan_product, resolve_qr_code,
     add_product_image, delete_product_image, popular_by_category, get_recommended_products,
     get_similar_products, bulk_update_product_status, bulk_delete_products,
+    mark_qr_printed,
 )
 from .category_views import (
     list_categories, create_category, get_category, update_category, delete_category,

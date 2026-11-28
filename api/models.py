@@ -279,6 +279,13 @@ class Product(BaseModel):
     )
     discount_value   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     is_active        = models.BooleanField(default=True)
+    # Stock level the last QR sticker print run covered — the bulk QR
+    # listing page (frontend AllProductQrCodes.tsx) suggests printing only
+    # stock_on_hand - qr_printed_count more stickers next time, instead of
+    # the full current stock, so a restock or a newly-added product doesn't
+    # mean reprinting labels for units already stickered. Updated via
+    # mark_qr_printed, never by ordinary product saves.
+    qr_printed_count = models.PositiveIntegerField(default=0)
 
     # SEO
     seo_title_bn         = models.CharField(max_length=70, blank=True, default='')
@@ -570,6 +577,9 @@ class ProductVariant(BaseModel):
     sku_suffix     = models.CharField(max_length=20, blank=True, default='')
     price_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     is_active      = models.BooleanField(default=True)
+    # See Product.qr_printed_count — same purpose, tracked per variant since
+    # each variant gets its own QR sticker and its own stock count.
+    qr_printed_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['created_at']
